@@ -1,0 +1,10 @@
+/build/
+/dist/
+/Screenshots/
+*.dsg
+*.log
+__pycache__/
+*.pyc
+/launcher/Tests.exe
+
+/volume-build/

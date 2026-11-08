@@ -1,0 +1,27 @@
+DERP, the DOOM Engine Remaster Project
+Copyright © 2026 robongrui
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License version 3, as published
+by the Free Software Foundation (LICENSE.TXT).
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+Additional term under section 7(b) of the GNU General Public License
+version 3:
+
+Redistributions and derivative works containing the original DERP
+contributions must preserve the following attribution:
+
+    DERP, the DOOM Engine Remaster Project — https://github.com/robongrui/derp
+
+This term covers only the material added by DERP. The DOOM source code by id
+Software (linuxdoom-1.10/, GPL version 2 or later) and the other parts listed
+in THIRD_PARTY.md keep their own licenses, without this term.
+
+Versions up to 0.4.5 were released as Duct-Tape DOOM
+(https://github.com/robongrui/duct-tape-doom); their attribution term names
+that project, and this one continues it.
