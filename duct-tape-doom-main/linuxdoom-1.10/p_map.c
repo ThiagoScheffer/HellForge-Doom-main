@@ -135,6 +135,7 @@ P_TeleportMove
     
     subsector_t*	newsubsec;
     
+    if(P_WeakpointImmobilized(thing)){floatok=false;numspechit=0;return false;}
     if(P_ArenaBlocks(thing,x,y)){
         /* P_Move consumes these even on failure. Its special-line loop can
            leave numspechit at -1, so never reuse a previous collision result. */
@@ -421,7 +422,7 @@ boolean PIT_CheckThing (mobj_t* thing)
         SV_MonsterContact(tmthing,thing);
 	// damage / explode
 	damage = ((P_Random()%8)+1)*tmthing->info->damage;
-	P_DamageMobj (thing, tmthing, tmthing->target, damage);
+	P_WeakpointProjectileHit(tmthing,thing,damage);
 
 	// don't traverse any more
 	return false;				
@@ -1167,6 +1168,7 @@ boolean PTR_ShootTraverse (intercept_t* in)
     fixed_t		thingbottomslope;
     critical_hit_t critical={-1,1};
     int spriteHit=0,hitDamage=la_damage;
+    wp_damage_event_t event={0};
 		
     if(SV_Active()&&in->frac>=solidFraction&&solidFraction<FRACUNIT){
         if(SV_MapMode()&&in->isaline&&R_WallImpact&&
@@ -1307,7 +1309,12 @@ boolean PTR_ShootTraverse (intercept_t* in)
     // hit thing
     // position a bit closer
     frac = in->frac - FixedDiv (10*FRACUNIT,attackrange);
-    if(spriteHit) { frac=in->frac;hitDamage*=critical.multiplier; }
+    if(spriteHit) {
+        frac=in->frac;
+        event.target=th;event.source=event.inflictor=shootthing;event.kind=P_WeakpointBulletKind();
+        event.impact=critical.impact;event.baseDamage=la_damage;event.regionPercent=critical.percent;
+        P_WeakpointResolve(&event);hitDamage=event.finalDamage;
+    }
     la_hit = th;
 
     x = trace.x + FixedMul (trace.dx, frac);
@@ -1331,6 +1338,7 @@ boolean PTR_ShootTraverse (intercept_t* in)
     la_hit=th;
     if (la_damage)
 	P_DamageMobj (th, shootthing, shootthing, hitDamage);
+    if(spriteHit)P_WeakpointAfterDamage(&event);
 
     // don't go any farther
     return false;
@@ -1566,7 +1574,9 @@ boolean PIT_RadiusAttack (mobj_t* thing)
     if ( P_CheckSight (thing, bombspot) )
     {
 	// must be in direct path
-	P_DamageMobj (thing, bombspot, bombsource, bombdamage - dist);
+	{wp_damage_event_t event={0};event.target=thing;event.inflictor=bombspot;event.source=bombsource;
+        event.kind=bombspot->type==MT_ROCKET?WP_ROCKET_SPLASH:WP_OTHER;event.baseDamage=bombdamage-dist;
+        P_WeakpointApply(&event);}
     }
     
     return true;

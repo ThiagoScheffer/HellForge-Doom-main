@@ -23,6 +23,7 @@
 #include <thread>
 extern "C" {
 #include "doomdef.h"
+#include "../../linuxdoom-1.10/p_weakpoints.h"
 #include "doomstat.h"
 #include "r_state.h"
 #include "r_sky.h"
@@ -577,6 +578,8 @@ bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (
 
 // wounds.cpp
 int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
+int weakpointLocate(mobj_t*,mobj_t*,wp_impact_t*);
+const std::vector<unsigned char> &weakpointRegionMask(int,const Image&);
 extern void (*prepareCriticalSurface)(mobj_t*,mobj_t*);
 extern bool (*criticalVoxelModel)(const mobj_t&);
 void criticalSurface(mobj_t*,mobj_t*);
@@ -587,7 +590,7 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
 // Remember the main view so impacts can intersect the artwork after flinch,
 // lifting, interpolation and liquid clipping, before damage changes its frame.
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
-               float top,float bottom,float rx,float ry,const BodyPose *pose=nullptr);
+               float top,float bottom,float rx,float ry,const BodyPose *pose=nullptr,int rotation=-1);
 void forgetWounds(const mobj_t *thing);
 void woundsShutdown();
 // A monster's wounds as spray.cpp drips from them: height above the feet,

@@ -5,7 +5,7 @@ Enable **F4 > Combat > Critical parts** for sprite-based human headshots. The op
 | Profile | Monsters | Critical part | Multiplier |
 | --- | --- | --- | --- |
 | Human | Zombieman, shotgun guy, chaingunner, Wolfenstein SS | Head | 2x |
-| Other | All other monster types | None in this version | Normal |
+| Other | Other monster types | Controlled by the separate enhanced-combat switches | See extended matrix |
 
 Player pistol, chaingun, shotgun and super-shotgun bullets use opaque sprite pixels for these four types. Each pellet is classified separately. Shots through transparent artwork continue toward targets or surfaces behind it; walls, ceilings and floors still block shots. Visible artwork outside the original movement radius or collision height can be hit.
 
@@ -13,7 +13,9 @@ Heads are estimated from the current sprite's silhouette and width, not just the
 
 Wound holes reuse the classified impact and follow the existing animation attachment. The **Wound holes** option controls their visibility independently. Existing holes remain cosmetic and never make subsequent bullets pass through the monster.
 
-Voxel-rendered monsters, other monster types, enemy attacks, melee, projectiles, BFG rays and splash damage retain their existing behavior. Multiplayer and demo recording/playback bypass critical parts. Autoaim is unchanged; use mouse look for precise targeting. No new savegame fields or network messages are introduced. Cacodemon eye hits and other anatomy profiles are future work.
+This original switch leaves other monster types, enemy attacks, melee, projectiles, BFG rays and splash damage unchanged. Multiplayer and demo recording/playback bypass critical parts. Autoaim is unchanged; use mouse look for precise targeting. The original human-headshot feature adds no savegame fields or network messages.
+
+Additional demon heads, faces, eyes, brains, weapon vulnerabilities and temporary injuries are now available through three independent, default-off switches. See the [enhanced monster combat matrix and configuration](ENHANCED-MONSTER-COMBAT.md); its optional injury/provenance save trailer is separate from the original human feature.
 
 ## Verification
 

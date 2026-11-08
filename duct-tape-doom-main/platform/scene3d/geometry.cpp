@@ -363,7 +363,7 @@ void criticalSurface(mobj_t *thing,mobj_t *viewer) {
     float sink=sinkInLiquid(thing,i,image,x,y,camera,false);
     float yaw=(float)(viewer->angle*(2*doomPi/4294967296.0));
     woundView(thing,viewer,image,sf.flip[rotation],x,y,top-image.top-sink,top-sink,bottom-sink,
-        std::sin(yaw),-std::cos(yaw),posed?&pose:nullptr);
+        std::sin(yaw),-std::cos(yaw),posed?&pose:nullptr,(int)rotation);
 }
 // The glass mirror's view (glassMirrorActive) for the sprites drawn into it:
 // the mirrored eye, and the right of an ordinary camera there. The mirror
@@ -480,7 +480,7 @@ static void addThing(mobj_t *thing,int i,const Uniforms &camera,float fraction,c
         float u0=flipped(seen)?image.width:0,u1=flipped(seen)?0:image.width;
         unsigned m=mode|((mode&MODE_RELIT)&&flipped(seen)?MODE_FLIPPED:0);
         auto &vertices=out[spriteKey];size_t first=vertices.size();
-        if(collar&&!self)woundView(thing,players[displayplayer].mo,image,flipped(seen),x,y,fittedFeet-sink,top,bottom,rx,ry,posed?&pose:nullptr);
+        if(collar&&!self)woundView(thing,players[displayplayer].mo,image,flipped(seen),x,y,fittedFeet-sink,top,bottom,rx,ry,posed?&pose:nullptr,(int)seen);
         // Wound holes (wounds.cpp): texels shot through, and their rims.
         std::vector<byte> holes;bool wounded=!self&&woundMask(*thing,image,flipped(seen),rx,ry,holes);
         const std::vector<byte> *cut=wounded?&holes:nullptr;

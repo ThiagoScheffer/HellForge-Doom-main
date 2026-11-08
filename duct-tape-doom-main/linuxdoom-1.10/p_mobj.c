@@ -148,6 +148,7 @@ void P_RomeroDrunk(mobj_t *source) {
         c->momx=FixedMul(FixedMul(c->info->speed,horizontal),finecosine[a>>ANGLETOFINESHIFT]);
         c->momy=FixedMul(FixedMul(c->info->speed,horizontal),finesine[a>>ANGLETOFINESHIFT]);
         c->momz=FixedMul(c->info->speed,vertical);
+        P_WeakpointProjectileSpawn(c,source,WP_ROCKET_DIRECT);
         P_CheckMissileSpawn(c);
     }
 }
@@ -182,6 +183,7 @@ static int P_RomeroTick(mobj_t *mo) {
         child->momx=(fixed_t)(child->info->speed*cos(el)*cos(az));
         child->momy=(fixed_t)(child->info->speed*cos(el)*sin(az));
         child->momz=(fixed_t)(child->info->speed*sin(el));
+        P_WeakpointProjectileSpawn(child,owner,WP_ROCKET_DIRECT);
         P_CheckMissileSpawn(child);
     }
     return 1;
@@ -202,6 +204,7 @@ void P_XYMovement (mobj_t* mo)
     fixed_t	ymove;
     fixed_t friction = FRICTION;
 			
+    if(P_WeakpointImmobilized(mo)){mo->momx=mo->momy=0;return;}
     if (!mo->momx && !mo->momy)
     {
 	if (mo->flags & MF_SKULLFLY)
@@ -229,6 +232,8 @@ void P_XYMovement (mobj_t* mo)
 		
     xmove = mo->momx;
     ymove = mo->momy;
+    fixed_t wpOriginX=mo->x,wpOriginY=mo->y,wpStartZ=mo->z;
+    double wpTravel=p_wp_vulnerabilities&&(mo->flags&MF_MISSILE)?hypot((double)xmove,(double)ymove):0;
 	
     do
     {
@@ -246,6 +251,11 @@ void P_XYMovement (mobj_t* mo)
 	    xmove = ymove = 0;
 	}
 		
+    if((mo->flags&MF_MISSILE)&&wpTravel>0) {
+        double a=hypot((double)(mo->x-wpOriginX),(double)(mo->y-wpOriginY))/wpTravel;
+        double b=hypot((double)(ptryx-wpOriginX),(double)(ptryy-wpOriginY))/wpTravel;
+        P_WeakpointProjectileStep(mo,mo->x,mo->y,wpStartZ+(fixed_t)(mo->momz*a),ptryx,ptryy,wpStartZ+(fixed_t)(mo->momz*b));
+    }
 	if (!P_TryMove (mo, ptryx, ptryy))
 	{
 	    if(mo->flags&MF_SKULLFLY)P_TacticsChargeBlocked(mo);
@@ -647,6 +657,7 @@ int		iquetail;
 
 void P_RemoveMobj (mobj_t* mobj)
 {
+    P_WeakpointForget(mobj);
     P_ArenaForgetMonster(mobj);
     Arcade_RemoveProjectile(mobj);
     P_TacticsRemove(mobj);
@@ -986,6 +997,7 @@ void P_CheckMissileSpawn (mobj_t* th)
     
     // move a little forward so an angle can
     // be computed if it immediately explodes
+    P_WeakpointProjectileStep(th,th->x,th->y,th->z,th->x+(th->momx>>1),th->y+(th->momy>>1),th->z+(th->momz>>1));
     th->x += (th->momx>>1);
     th->y += (th->momy>>1);
     th->z += (th->momz>>1);
@@ -1027,6 +1039,7 @@ P_SpawnMissile
     if (dest->flags & MF_SHADOW)
 	an += (P_Random()-P_Random())<<20;	
 
+    an+=P_WeakpointAttackOffset(source);
     th->angle = an;
     an >>= ANGLETOFINESHIFT;
     th->momx = FixedMul (th->info->speed, finecosine[an]);
@@ -1090,6 +1103,7 @@ P_SpawnPlayerMissile
     th = P_SpawnMobj (x,y,z, type);
 
     th->target = source; // Sound routing needs the projectile's owner.
+    P_WeakpointProjectileSpawn(th,source,type==MT_ROCKET?WP_ROCKET_DIRECT:type==MT_PLASMA?WP_PLASMA_DIRECT:type==MT_BFG?WP_BFG_DIRECT:WP_OTHER);
     Arcade_TrackProjectile(th);
     if (th->info->seesound)
 	S_StartSound (th, th->info->seesound);

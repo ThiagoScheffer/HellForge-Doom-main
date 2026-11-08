@@ -722,6 +722,7 @@ P_KillMobj
     mobjtype_t	item;
     mobj_t*	mo;
 	
+    P_WeakpointForget(target);
     Arcade_Kill(source,target);
     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);
 

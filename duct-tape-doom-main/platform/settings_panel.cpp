@@ -1,6 +1,7 @@
 /* The F4 graphics options; see settings_panel.h. */
 extern "C" {
 #include "doomtype.h"
+#include "../linuxdoom-1.10/p_weakpoints.h"
 #include "m_argv.h"
 }
 #include <SDL3/SDL.h>
@@ -165,6 +166,12 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Single-player sprites only; voxel models, multiplayer and demos keep normal hits. "
                     "Use mouse look for precise aiming. Wound holes are controlled separately.",
                     [](const Settings &d){return d.accelerated!=0;}),
+                check("enhanced_weak_points","Enhanced Monster Weak Points",&s.enhancedWeakPoints,
+                    "Anatomical bullet weak points on other Doom monsters. Single-player sprites only; human headshots keep their separate switch.",[](const Settings &d){return d.accelerated!=0;}),
+                check("monster_weapon_vulnerabilities","Monster Weapon Vulnerabilities",&s.weaponVulnerabilities,
+                    "Monster-specific plasma, rocket and BFG weaknesses. Single-player sprites only; direct hits and splash remain separate.",[](const Settings &d){return d.accelerated!=0;}),
+                check("localized_injury_effects","Localized Injury Effects",&s.localizedInjuries,
+                    "Temporary heavy head-hit aim disruption and mechanical rocket-leg immobilization. Requires the corresponding weak-point or weapon rule.",[](const Settings &d){return d.accelerated!=0;}),
                 check("material_rubble","Match rubble to surface",&s.materialRubble,"Crater interiors, chips and dust inherit the nearby wall or floor color. Off restores grey stone."),
                 check("gun_impacts","Gun impacts",&s.gunImpacts,"Uzi animated sparks, voxel dust and impact puff from Stewie-Brian Arsenal. Disable to restore original bullet puffs. Blood and shootable lights have separate options."),
                 check("blood","Blood splats and pools",&s.blood,
@@ -559,6 +566,7 @@ template<class Visit> void eachOption(Settings &s,Visit visit) {
 static double oldDeath[4]={1,1,0,0},oldHit[2]={1,1},oldBlood[3]={1,1,1};   // varied, falls, ragdoll, blast; motion, flinch; blood, spray, shine
 static bool readOld[3],readNew[3];
 void readOption(Settings &s,const char *key,double value) {
+    if(P_WeakpointReadBalance(key,value))return;
     static const char *const olds[][4]={{"varied_deaths","death_falls","death_ragdoll","death_blast"},{"death_motion","hit_flinch"},{"blood","blood_spray","blood_shine"}};
     double *into[]={oldDeath,oldHit,oldBlood};
     static const char *const news[]={"deaths","hit_reactions","blood_level"};
@@ -581,6 +589,7 @@ void finishReading(Settings &s) {
     for(int g=0;g<3;++g)readOld[g]=readNew[g]=false;
 }
 void writeOptions(FILE *file,Settings &s) {
+    P_WeakpointWriteBalance(file);
     eachOption(s,[&](Option &option) {
         if(option.kind==OptionKind::Slider)fprintf(file,"%s %g\n",option.key,*option.number);
         else fprintf(file,"%s %d\n",option.key,*option.flag);

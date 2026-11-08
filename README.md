@@ -56,6 +56,7 @@ Compatible classic/Boom map WADs are supported; arbitrary GZDoom/UDMF maps and g
 ### Monsters and movement
 
 - Optional **F4 > Combat > Critical parts**: player bullets hit visible sprite pixels on zombiemen, shotgun guys, chaingunners and Wolfenstein SS. Head hits deal double damage; transparent gaps let bullets continue. Defaults off; single-player sprites only. [Behavior and verification](docs/changes/CRITICAL-PARTS.md).
+- Three independent, default-off **Combat** switches extend this to demon anatomy, player weapon vulnerabilities and temporary injuries. Includes visible eyes/brains, close shotgun face executions, Lost Soul energy weaknesses and bounded heavy/mechanical injuries. [Monster matrix, settings and tests](docs/changes/ENHANCED-MONSTER-COMBAT.md).
 
 - Native FluidMonsters walking for 15 ground-monster types, retaining the original AI action cadence.
 - Recovery from slightly overlapping spawn positions that could trap monsters when taking small movement steps.

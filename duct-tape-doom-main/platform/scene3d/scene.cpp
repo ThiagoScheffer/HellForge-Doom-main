@@ -185,9 +185,12 @@ void applySettings() {
     R_WallImpact=settings.accelerated?wallImpact:nullptr;
     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
     R_BloodHit=settings.accelerated?bloodHit:nullptr;
+    P_WeakpointConfigure(settings.accelerated&&settings.enhancedWeakPoints,settings.accelerated&&settings.weaponVulnerabilities,settings.accelerated&&settings.localizedInjuries);
     P_CriticalBegin=settings.accelerated?criticalBegin:nullptr;
     P_CriticalThing=settings.accelerated?criticalThing:nullptr;
     prepareCriticalSurface=criticalSurface;criticalVoxelModel=voxelMonster;
+    P_WeakpointLocate=settings.accelerated?weakpointLocate:nullptr;
+    P_WeakpointTargetAllowed=+[](const mobj_t *target)->int{return settings.accelerated&&!voxelMonster(*target);};
     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
     R_PlaneImpact=settings.accelerated?planeImpact:nullptr;
     R_ShotPassed=settings.accelerated?glassShot:nullptr;
@@ -228,6 +231,7 @@ void sceneInit(SDL_Window *window) {
     if(paletteOption&&paletteOption+1<myargc)settings.palette=atoi(myargv[paletteOption+1])!=0;
 }
 void sceneShutdown() {
+    P_WeakpointLocate=nullptr;P_WeakpointTargetAllowed=nullptr;P_WeakpointConfigure(0,0,0);
     P_CriticalBegin=nullptr;P_CriticalThing=nullptr;p_critical_trace=0;
     prepareCriticalSurface=nullptr;criticalVoxelModel=nullptr;
     arcadePodiumTexture.reset();arcade_podium_hires=0;

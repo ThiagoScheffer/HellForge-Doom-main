@@ -4,6 +4,7 @@
 #include "internal.h"
 #include "../wound_attachment.h"
 #include "../death_joints.h"
+#include "../monster_regions.h"
 extern "C" {
 #include "p_local.h"
 }
@@ -31,6 +32,7 @@ struct WoundSurface {
     BodyPose pose;
     int tic;
     bool flipped,posed;
+    int sprite,frame,rotation;
 };
 static std::unordered_map<const mobj_t*,WoundSurface> surfaces;
 struct SpriteImpact {
@@ -45,6 +47,12 @@ static std::unordered_map<const mobj_t*,SpriteImpact> bulletImpacts;
 static std::unordered_map<const mobj_t*,critical_hit_t> bulletResults;
 struct HeadProfile { bool found;doom_joints::Head head; };
 static std::unordered_map<const Image*,HeadProfile> heads;
+static std::unordered_map<const Image*,std::map<int,doom_regions::Mask>> regionMasks;
+const std::vector<unsigned char> &weakpointRegionMask(int type,const Image &image) {
+    auto &types=regionMasks[&image];auto found=types.find(type);
+    if(found==types.end())found=types.emplace(type,doom_regions::build(type,image.width,image.height,image.left,image.top,image.pixels.data())).first;
+    return found->second.pixels;
+}
 static mobj_t *bulletShooter=nullptr;
 static fixed_t bulletX,bulletY,bulletZ,bulletDx,bulletDy,bulletSlope,bulletRange;
 // Geometry supplies current placement when the target has not been drawn recently.
@@ -57,11 +65,11 @@ constexpr size_t maxWounds=10;
 constexpr float maxRadius=3.0f;
 
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
-               float top,float bottom,float rx,float ry,const BodyPose *pose) {
-    if((!settings.wounds&&!settings.criticalParts)||!thing||!thing->info||thing->health<=0)return;
+               float top,float bottom,float rx,float ry,const BodyPose *pose,int rotation) {
+    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities)||!thing||!thing->info||thing->health<=0)return;
     if(!(thing->info->flags&MF_COUNTKILL)&&thing->type!=MT_SKULL)return;
     surfaces[thing]={viewer,&image,x,y,feet,top,bottom,rx,ry,
-        (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr};
+        (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr,thing->sprite,thing->frame,rotation};
 }
 static bool opaqueAt(const Image &image,doom_wounds::Point point) {
     int c=(int)std::floor(point.u),r=(int)std::floor(point.v);
@@ -173,23 +181,67 @@ static bool captureSpriteHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fix
     return true;
 }
 
+int weakpointLocate(mobj_t *projectile,mobj_t *target,wp_impact_t *out) {
+    *out={};
+    if(!settings.accelerated||!settings.weaponVulnerabilities||!projectile||!projectile->target||!target||
+        (criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
+    float start[3],end[3];if(!P_WeakpointTrajectory(projectile,start,end))return 0;
+    float dx=end[0]-start[0],dy=end[1]-start[1],length=std::hypot(dx,dy);
+    if(length<1e-4f)return 0;
+    float slope=(end[2]-start[2])/length;dx/=length;dy/=length;
+    auto found=surfaces.find(target);
+    if((found==surfaces.end()||found->second.viewer!=projectile->target||leveltime-found->second.tic>2)&&prepareCriticalSurface)
+        prepareCriticalSurface(target,projectile->target);
+    found=surfaces.find(target);if(found==surfaces.end()||found->second.viewer!=projectile->target)return 0;
+    const auto &surface=found->second;const auto &image=*surface.image;
+    mobj_t origin=*projectile;origin.x=(fixed_t)std::lround(start[0]*FRACUNIT);origin.y=(fixed_t)std::lround(start[1]*FRACUNIT);
+    doom_wounds::Point point{};float distance=0;
+    float centerZ=start[2]+units(projectile->height)*0.5f;
+    if(!surfaceHit(surface,origin,start[0],start[1],centerZ,dx,dy,slope,point,&distance))return 0;
+    // Actor collision happens on the near side of its broad cylinder. Only
+    // reconstruct through that admitted contact volume; never cast an
+    // unrestricted ray to a body part beyond this actual actor collision.
+    if(distance<0||distance>length+units(target->radius)+units(projectile->radius)+1)return 0;
+    const auto &mask=weakpointRegionMask(target->type,image);
+    auto sample=[&](float u,float v) {
+        int x=(int)std::floor(u),y=(int)std::floor(v);
+        return x<0||y<0||x>=image.width||y>=image.height?WP_UNKNOWN:(wp_region_t)mask[(size_t)y*image.width+x];
+    };
+    wp_region_t region=sample(point.u,point.v);
+    if(region==WP_UNKNOWN)return 0;
+    int opaque=0;bool competing=false;float footprint=std::max(0.5f,units(projectile->radius)*0.5f);
+    for(auto offset:{doom_wounds::Point{0,0},{-footprint,0},{footprint,0},{0,-footprint},{0,footprint}}) {
+        auto part=sample(point.u+offset.u,point.v+offset.v);
+        if(part!=WP_UNKNOWN)++opaque;
+        if(region>=WP_HEAD&&region<=WP_LEGS&&part>=WP_HEAD&&part<=WP_LEGS&&part!=region)competing=true;
+    }
+    // Ambiguous face/chassis/leg overlaps cannot execute or immobilize.
+    // The center determines the contact location; a rocket can cover a
+    // small eye and surrounding ordinary face pixels. Reject sparse alpha
+    // support or overlap with a *different* critical part (brain vs legs),
+    // rather than requiring the entire projectile to fit inside an eye.
+    if(opaque<2||competing)return 0;
+    out->region=region;out->confidence=100;out->u=point.u;out->v=point.v;out->distance=distance;
+    out->x=start[0]+dx*distance;out->y=start[1]+dy*distance;out->z=centerZ+slope*distance;
+    out->sprite=surface.sprite;out->frame=surface.frame;out->rotation=surface.rotation;out->flipped=surface.flipped;
+    return 1;
+}
+
 int criticalBegin(mobj_t *shooter,fixed_t x,fixed_t y,fixed_t z,fixed_t dx,fixed_t dy,fixed_t slope,fixed_t range) {
     bulletImpacts.clear();bulletResults.clear();bulletShooter=nullptr;
-    if(!settings.accelerated||!settings.criticalParts||!shooter||range<=0)return 0;
+    if(!settings.accelerated||(!settings.criticalParts&&!settings.enhancedWeakPoints)||!shooter||range<=0)return 0;
     bulletShooter=shooter;bulletX=x;bulletY=y;bulletZ=z;
     bulletDx=dx;bulletDy=dy;bulletSlope=slope;bulletRange=range;
     return 1;
 }
 int criticalThing(mobj_t *target,critical_hit_t *result) {
-    // Explicit anatomy profiles; future eye/core profiles belong here.
-    static const struct { mobjtype_t type;int multiplier; } profiles[]={
-        {MT_POSSESSED,2},{MT_SHOTGUY,2},{MT_CHAINGUY,2},{MT_WOLFSS,2}};
     if(!bulletShooter||!target||target==bulletShooter||target->player||target->health<=0||!(target->flags&MF_SHOOTABLE))return 0;
-    auto profile=std::find_if(std::begin(profiles),std::end(profiles),[&](const auto &p){return p.type==target->type;});
-    if(profile==std::end(profiles)||(criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
+    bool human=P_WeakpointHuman(target->type)!=0;
+    if(!(human?settings.criticalParts:settings.enhancedWeakPoints&&P_WeakpointProfile(target->type)) ||
+       (criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
     auto cached=bulletResults.find(target);
     if(cached!=bulletResults.end()){*result=cached->second;return 1;}
-    *result={-1,1};
+    *result={};result->fraction=-1;result->multiplier=1;result->percent=100;
     auto drawn=surfaces.find(target);
     if((drawn==surfaces.end()||drawn->second.viewer!=bulletShooter||leveltime-drawn->second.tic>2)&&prepareCriticalSurface)
         prepareCriticalSurface(target,bulletShooter);
@@ -216,18 +268,35 @@ int criticalThing(mobj_t *target,critical_hit_t *result) {
     }
     if(hit&&impact.distance>=0&&impact.distance<=units(bulletRange)) {
         result->fraction=(fixed_t)std::lround(impact.distance/units(bulletRange)*FRACUNIT);
-        auto head=heads.find(impact.image);
-        if(head==heads.end()) {
-            HeadProfile h{};const auto &im=*impact.image;
-            h.found=doom_joints::findHead(im.pixels.data(),im.width,im.height,im.left,im.top,h.head);
-            head=heads.emplace(impact.image,h).first;
+        const auto &im=*impact.image;
+        if(human) {
+            auto head=heads.find(impact.image);
+            if(head==heads.end()) {
+                HeadProfile h{};
+                h.found=doom_joints::findHead(im.pixels.data(),im.width,im.height,im.left,im.top,h.head);
+                head=heads.emplace(impact.image,h).first;
+            }
+            const auto &h=head->second;
+            float across=impact.point.u-im.left,height=im.top-impact.point.v;
+            if(h.found&&height>=h.head.neck&&std::abs(across-h.head.middle)<=h.head.width/2) {
+                impact.part=SpriteImpact::Head;impact.multiplier=2;
+            }
         }
-        const auto &h=head->second;const auto &im=*impact.image;
-        float across=impact.point.u-im.left,height=im.top-impact.point.v;
-        if(h.found&&height>=h.head.neck&&std::abs(across-h.head.middle)<=h.head.width/2) {
-            impact.part=SpriteImpact::Head;impact.multiplier=profile->multiplier;
+        result->impact.region=impact.part==SpriteImpact::Head?WP_HEAD:WP_BODY;
+        if(!human) {
+            const auto &mask=weakpointRegionMask(target->type,im);
+            int x=(int)std::floor(impact.point.u),y=(int)std::floor(impact.point.v);
+            result->impact.region=(wp_region_t)mask[(size_t)y*im.width+x];
         }
-        result->multiplier=impact.multiplier;
+        result->impact.confidence=100;result->impact.u=impact.point.u;result->impact.v=impact.point.v;
+        result->impact.sprite=surface->second.sprite;result->impact.frame=surface->second.frame;result->impact.flipped=impact.flipped;
+        result->impact.rotation=surface->second.rotation;
+        result->impact.x=units(bulletX)+units(bulletDx)/std::hypot(units(bulletDx),units(bulletDy))*impact.distance;
+        result->impact.y=units(bulletY)+units(bulletDy)/std::hypot(units(bulletDx),units(bulletDy))*impact.distance;
+        result->impact.z=units(bulletZ)+units(bulletSlope)*impact.distance;
+        result->impact.distance=impact.distance;
+        result->percent=human?impact.multiplier*100:P_WeakpointRegionPercent(target->type,P_WeakpointBulletKind(),result->impact.region,100);
+        result->multiplier=human?impact.multiplier:result->percent/100;
         bulletImpacts[target]=impact;
     }
     bulletResults[target]=*result;return 1;
@@ -284,7 +353,7 @@ int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
     }
     return count;
 }
-void woundsShutdown() {wounds.clear();surfaces.clear();lyings.clear();standing.clear();bulletImpacts.clear();bulletResults.clear();heads.clear();bulletShooter=nullptr;}
+void woundsShutdown() {wounds.clear();surfaces.clear();lyings.clear();standing.clear();bulletImpacts.clear();bulletResults.clear();heads.clear();regionMasks.clear();bulletShooter=nullptr;}
 
 // How tall a monster stands, by its first drawing, to tell lying death drawings.
 static float standingTop(const mobj_t &thing) {

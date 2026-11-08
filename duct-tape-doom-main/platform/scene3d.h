@@ -162,6 +162,7 @@ struct Settings {
     int windowGlass=1; // Windows found in the map get glass that reflects and shatters when shot through.
     int gunImpacts=1;
     int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
+    int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
     int breakableWalls=1;
     int throughWalls=0;
     int breachDoors=0;

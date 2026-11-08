@@ -2,12 +2,15 @@
 // Usage: doom-critical-smoke <DOOM2.WAD> <ragdoll-arena.wad> <output-dir>
 #include "../platform/scene3d/internal.h"
 #include "../platform/death_joints.h"
+#include "../platform/monster_regions_stock.h"
+#include "../platform/monster_regions.h"
 #include "../platform/settings_panel.h"
 extern "C" {
 #include "p_local.h"
 #include "d_main.h"
 #include "i_system.h"
 #include "m_argv.h"
+extern int p_player_surface_damage,p_monster_surface_damage;
 }
 #include <SDL3/SDL_main.h>
 #include <cstdlib>
@@ -15,6 +18,8 @@ namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
 using namespace doom3d;
 static std::string output;
 static bool visual=false;
+static bool visualEnhanced=false;
+static bool solidMode=false;
 static std::string visualCapture;
 static int checks=0;
 static void check(bool ok,const char *message) {
@@ -54,6 +59,7 @@ static void shoot(mobj_t *shooter,float x,float y,float z,bool bullet=true) {
     else P_LineAttack(shooter,angle,2048*FRACUNIT,slope,5);
 }
 static void run() {
+    if(solidMode)p_player_surface_damage=p_monster_surface_damage=0;
     auto *shooter=players[consoleplayer].mo;
     check(P_TeleportMove(shooter,0,fx(-32))!=0,"fixture player placement");
     shooter->angle=ANG90;shooter->z=shooter->floorz;players[consoleplayer].viewz=shooter->z+41*FRACUNIT;
@@ -162,6 +168,7 @@ static void run() {
     P_RemoveMobj(near);P_RemoveMobj(far);
     std::printf("PASS %d critical hit integration checks\n",checks);std::fflush(stdout);
 }
+#include "weakpoints_integration.inc"
 static void visualFrame() {
     static std::vector<mobj_t*> victims;
     static int step=0,lastTic=-1,wait=0;
@@ -174,7 +181,7 @@ static void visualFrame() {
         shooter->angle=ANG90;shooter->z=shooter->floorz;players[consoleplayer].viewz=shooter->z+41*FRACUNIT;
         int index=0;
         for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_CHAINGUY,MT_WOLFSS}) {
-            auto *m=P_SpawnMobj(fx(-102+index++*68),fx(128),ONFLOORZ,type);
+            auto *m=P_SpawnMobj(fx((float)(-102+index++*68)),fx(128),ONFLOORZ,type);
             m->angle=ANG270;m->tics=-1;m->health=1000;victims.push_back(m);
         }
         wait=leveltime;step=1;return;
@@ -215,19 +222,23 @@ static void visualFrame() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(visualEnhanced){enhancedVisualFrame();return;}
     if(visual){visualFrame();return;}
-    run();I_Quit();
+    run();featureSwitchConfig();enhancedCoverage();cachedHitBenchmark();balanceHitCounts();realProjectiles();localizedRockets();realBFGAndMovement();realShotgunDischarges();realInjuriesAndSave();std::printf("PASS %d total engine integration checks\n",checks);I_Quit();
 }
 int main(int argc,char **argv) {
-    if(argc!=4&&argc!=5)return 2;output=argv[3];visual=argc==5&&!std::strcmp(argv[4],"--visual");
+    if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
+    visual=visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
     std::string config=output+"/doom.cfg",graphics=output+"/graphics.cfg";
     FILE *f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);std::fclose(f);
+    if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
     f=std::fopen(config.c_str(),"w");if(!f)return 2;std::fputs("show_messages 0\n",f);std::fclose(f);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
         "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visual?"1":"4"};
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
+    if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}
     myargc=(int)pointers.size();myargv=pointers.data();singletics=true;D_DoomMain();return 0;
 }

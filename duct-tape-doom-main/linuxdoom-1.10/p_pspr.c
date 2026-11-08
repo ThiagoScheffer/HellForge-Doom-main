@@ -737,8 +737,10 @@ A_FirePistol
 		  ps_flash,
 		  weaponinfo[player->readyweapon].flashstate);
 
+    P_WeakpointBeginShot(player->mo,wp_pistol);
     P_BulletSlope (player->mo);
     P_GunShot (player->mo, !player->refire);
+    P_WeakpointEndShot();
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }
@@ -767,10 +769,12 @@ A_FireShotgun
 		  ps_flash,
 		  weaponinfo[player->readyweapon].flashstate);
 
+    P_WeakpointBeginShot(player->mo,wp_shotgun);
     P_BulletSlope (player->mo);
 	
     for (i=0 ; i<7 ; i++)
 	P_GunShot (player->mo, false);
+    P_WeakpointEndShot();
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }
@@ -803,6 +807,7 @@ A_FireShotgun2
 		  ps_flash,
 		  weaponinfo[player->readyweapon].flashstate);
 
+    P_WeakpointBeginShot(player->mo,wp_supershotgun);
     P_BulletSlope (player->mo);
 	
     for (i=0 ; i<20 ; i++)
@@ -817,6 +822,7 @@ A_FireShotgun2
 		      MISSILERANGE,
 		      bulletslope + ((P_Random()-P_Random())<<5), damage);
     }
+    P_WeakpointEndShot();
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }
@@ -848,9 +854,11 @@ A_FireCGun
 		  + psp->state
 		  - &states[S_CHAIN1] );
 
+    P_WeakpointBeginShot(player->mo,wp_chaingun);
     P_BulletSlope (player->mo);
 	
     P_GunShot (player->mo, !player->refire);
+    P_WeakpointEndShot();
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }
@@ -920,7 +928,7 @@ void A_BFGSpray (mobj_t* mo)
 	    damage += (P_Random()&7) + 1;
 
 	Arcade_Impact(mo,mo->target,linetarget);
-	P_DamageMobj (linetarget, mo->target,mo->target, damage);
+	P_WeakpointBFGTracer(mo,linetarget,damage);
     }
 }
 

@@ -81,6 +81,7 @@ set(DOOM_SOURCES
     linuxdoom-1.10/p_digwall.c
     linuxdoom-1.10/p_plats.c
     linuxdoom-1.10/p_pspr.c
+    linuxdoom-1.10/p_weakpoints.cpp
     linuxdoom-1.10/p_saveg.c
     linuxdoom-1.10/p_setup.c
     linuxdoom-1.10/p_sight.c
@@ -422,7 +423,7 @@ if(DOOM_BUILD_SDL)
             add_executable(doom-wound-attachment-tests tests/wound_attachment.cpp)
             target_compile_features(doom-wound-attachment-tests PRIVATE cxx_std_17)
             add_test(NAME wound-animation-attachment COMMAND doom-wound-attachment-tests)
-            add_executable(doom-wounds-tests tests/wounds.cpp platform/scene3d/wounds.cpp)
+            add_executable(doom-wounds-tests tests/wounds.cpp tests/weakpoints_stubs.cpp linuxdoom-1.10/p_weakpoints.cpp platform/scene3d/wounds.cpp)
             target_compile_features(doom-wounds-tests PRIVATE cxx_std_17)
             target_include_directories(doom-wounds-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10")
             target_link_libraries(doom-wounds-tests PRIVATE doom_options SDL3::SDL3)
@@ -430,6 +431,11 @@ if(DOOM_BUILD_SDL)
                 target_compile_options(doom-wounds-tests PRIVATE -Wno-unknown-pragmas)
             endif()
             add_test(NAME wound-hit-placement COMMAND doom-wounds-tests)
+            add_executable(doom-weakpoints-tests tests/weakpoints_rules.cpp tests/weakpoints_stubs.cpp linuxdoom-1.10/p_weakpoints.cpp)
+            target_compile_features(doom-weakpoints-tests PRIVATE cxx_std_17)
+            target_include_directories(doom-weakpoints-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10")
+            target_link_libraries(doom-weakpoints-tests PRIVATE doom_options)
+            add_test(NAME monster-weakpoint-rules COMMAND doom-weakpoints-tests)
         endif()
     endif()
     if(BUILD_TESTING AND DOOM_GAME_DATA)

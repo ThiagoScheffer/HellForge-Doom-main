@@ -234,6 +234,14 @@ static void criticalParts() {
     // Move the actual ray origin independently from the viewer (corner peek).
     check(criticalBegin(&viewer,fixed(40),fixed(199.5f),fixed(57.5f),fixed(256),0,0,fixed(256))==1,"Peek ray begins");
     check(criticalThing(&monster,&head)&&head.fraction==fixed(60.f/256),"Peek origin must set the correct intersection distance");
+    settings.enhancedWeakPoints=1;P_WeakpointConfigure(1,0,0);
+    for(auto type:{MT_TROOP,MT_UNDEAD,MT_VILE,MT_KNIGHT,MT_BRUISER}) {
+        monster.type=type;
+        auto demonHead=shot(199.5f,57.5f);
+        check(demonHead.percent==200,"Additional humanoid heads must use the shared ballistic pipeline");
+        check(shot(199.5f,35.5f).percent==100,"Additional humanoid torsos must keep normal damage");
+    }
+    settings.enhancedWeakPoints=0;P_WeakpointConfigure(0,0,0);
     settings.criticalParts=0;
     check(!criticalBegin(&viewer,0,0,0,FRACUNIT,0,0,FRACUNIT),"Default off restores the ordinary path");
     woundsShutdown();

@@ -1293,6 +1293,7 @@ void G_DoLoadGame (void)
     P_UnArchiveWorld ();
     P_UnArchiveThinkers ();
     P_UnArchiveSpecials ();
+    length-=(int)P_WeakpointLoad(savebuffer,(size_t)length);
 
     if (*save_p != 0x1d)
 	I_Error ("Bad savegame");
@@ -1343,7 +1344,7 @@ void G_DoSaveGame (void)
 	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot);
     description = savedescription;
 
-    size_t capacity = P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
+    size_t capacity = P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
     save_p = savebuffer = calloc(1, capacity);
     if (!savebuffer) I_Error("Could not allocate savegame buffer");
 
@@ -1375,6 +1376,7 @@ void G_DoSaveGame (void)
     save_p += P_GlobalDigSave(save_p);
     save_p += SV_Save(save_p);
     save_p += P_ArenaSave(save_p);
+    save_p += P_WeakpointSave(save_p);
     length = save_p - savebuffer;
     if ((size_t)length > capacity)
 	I_Error ("Savegame buffer overrun");

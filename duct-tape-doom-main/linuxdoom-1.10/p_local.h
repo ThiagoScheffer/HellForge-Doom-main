@@ -109,7 +109,8 @@ extern void (*P_ShotTraced)(mobj_t *shooter,mobj_t *hit,fixed_t x1,fixed_t y1,fi
 extern boolean la_freeaim;
 // Opt-in player bullet path. The renderer supplies sprite intersections;
 // ordinary line attacks (melee, monster fire and BFG rays) never opt in.
-typedef struct { fixed_t fraction; int multiplier; } critical_hit_t;
+#include "p_weakpoints.h"
+typedef struct { fixed_t fraction; int multiplier; int percent; wp_impact_t impact; } critical_hit_t;
 extern int p_critical_trace;
 extern int (*P_CriticalBegin)(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
 extern int (*P_CriticalThing)(mobj_t*,critical_hit_t*);

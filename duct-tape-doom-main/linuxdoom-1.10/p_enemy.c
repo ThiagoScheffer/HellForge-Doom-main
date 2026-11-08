@@ -291,6 +291,7 @@ boolean P_Move (mobj_t*	actor)
     boolean	try_ok;
     boolean	good;
 		
+    if(P_WeakpointImmobilized(actor))return true;
     if (actor->movedir == DI_NODIR)
 	return false;
 		
@@ -1048,8 +1049,10 @@ void A_CyberAttack (mobj_t* actor)
     if (!actor->target)
 	return;
 		
+    P_WeakpointAttackBegin(actor);
     A_FaceTarget (actor);
     P_SpawnMissile (actor, actor->target, MT_ROCKET);
+    P_WeakpointAttackEnd(actor);
 }
 
 
@@ -1290,6 +1293,7 @@ void A_VileChase (mobj_t* actor)
 		    P_SetMobjState (corpsehit,info->raisestate);
 		    corpsehit->height <<= 2;
 		    corpsehit->flags = info->flags;
+		    P_WeakpointForget(corpsehit);
 		    corpsehit->health = info->spawnhealth;
 		    corpsehit->target = NULL;
 
@@ -1437,6 +1441,7 @@ void A_FatAttack1 (mobj_t* actor)
     mobj_t*	mo;
     int		an;
 	
+    P_WeakpointAttackBegin(actor);
     A_FaceTarget (actor);
     // Change direction  to ...
     actor->angle += FATSPREAD;
@@ -1447,6 +1452,7 @@ void A_FatAttack1 (mobj_t* actor)
     an = mo->angle >> ANGLETOFINESHIFT;
     mo->momx = FixedMul (mo->info->speed, finecosine[an]);
     mo->momy = FixedMul (mo->info->speed, finesine[an]);
+    P_WeakpointAttackEnd(actor);
 }
 
 void A_FatAttack2 (mobj_t* actor)
@@ -1454,6 +1460,7 @@ void A_FatAttack2 (mobj_t* actor)
     mobj_t*	mo;
     int		an;
 
+    P_WeakpointAttackBegin(actor);
     A_FaceTarget (actor);
     // Now here choose opposite deviation.
     actor->angle -= FATSPREAD;
@@ -1464,6 +1471,7 @@ void A_FatAttack2 (mobj_t* actor)
     an = mo->angle >> ANGLETOFINESHIFT;
     mo->momx = FixedMul (mo->info->speed, finecosine[an]);
     mo->momy = FixedMul (mo->info->speed, finesine[an]);
+    P_WeakpointAttackEnd(actor);
 }
 
 void A_FatAttack3 (mobj_t*	actor)
@@ -1471,6 +1479,7 @@ void A_FatAttack3 (mobj_t*	actor)
     mobj_t*	mo;
     int		an;
 
+    P_WeakpointAttackBegin(actor);
     A_FaceTarget (actor);
     
     mo = P_SpawnMissile (actor, actor->target, MT_FATSHOT);
@@ -1484,6 +1493,7 @@ void A_FatAttack3 (mobj_t*	actor)
     an = mo->angle >> ANGLETOFINESHIFT;
     mo->momx = FixedMul (mo->info->speed, finecosine[an]);
     mo->momy = FixedMul (mo->info->speed, finesine[an]);
+    P_WeakpointAttackEnd(actor);
 }
 
 
