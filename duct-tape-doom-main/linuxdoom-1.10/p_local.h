@@ -107,6 +107,13 @@ extern boolean classicaim;
 // on floors and ceilings. P_LineAttack clears it.
 extern void (*P_ShotTraced)(mobj_t *shooter,mobj_t *hit,fixed_t x1,fixed_t y1,fixed_t z1,fixed_t x2,fixed_t y2,fixed_t z2);
 extern boolean la_freeaim;
+// Opt-in player bullet path. The renderer supplies sprite intersections;
+// ordinary line attacks (melee, monster fire and BFG rays) never opt in.
+typedef struct { fixed_t fraction; int multiplier; } critical_hit_t;
+extern int p_critical_trace;
+extern int (*P_CriticalBegin)(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
+extern int (*P_CriticalThing)(mobj_t*,critical_hit_t*);
+void P_BulletAttack(mobj_t*,angle_t,fixed_t,fixed_t,int);
 // Where each hitscan shot went: from the shooter to where it stopped, and
 // what it hit (NULL for walls, floors, the sky or the end of its range).
 // For sounds that follow the bullet, such as a near miss whizzing past.
@@ -203,6 +210,7 @@ boolean P_BlockThingsIterator (int x, int y, boolean(*func)(mobj_t*) );
 #define PT_ADDLINES		1
 #define PT_ADDTHINGS	2
 #define PT_EARLYOUT		4
+#define PT_CRITICAL		8 // Explicit sprite-aware player bullet traversal only.
 
 extern divline_t	trace;
 

@@ -2,6 +2,10 @@
 // The synthetic animation moves a textured body part inside a fixed outline.
 #include "../platform/scene3d/internal.h"
 #include <cstdlib>
+extern "C" {
+#include "p_local.h"
+}
+namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
 
 static void check(bool ok,const char *message) {
     if(!ok) {std::fprintf(stderr,"%s\n",message);std::exit(1);}
@@ -12,6 +16,7 @@ state_t states[NUMSTATES]={};
 int firstspritelump=100;
 int numsprites=NUMSPRITES;
 int leveltime=0;
+int p_critical_trace=0;
 spritedef_t *sprites=nullptr;
 
 }
@@ -175,7 +180,68 @@ static void woundMaterials() {
     }
 }
 
+static void criticalParts() {
+    mobj_t monster=reset(),viewer={};viewer.y=fixed(199.5f);
+    monster.flags|=MF_SHOOTABLE;
+    settings.criticalParts=1;settings.accelerated=1;settings.wounds=0;
+    auto &im=spriteImages[0];
+    // A narrow head above broad shoulders; no hard-coded sprite height.
+    for(int y=0;y<10;++y)for(int x=0;x<36;++x)
+        im.pixels[((size_t)y*36+x)*2+1]=(x>=14&&x<22)?255:0;
+    for(int y=3;y<9;++y)for(int x=30;x<33;++x)im.pixels[((size_t)y*36+x)*2+1]=255;
+    auto surface=[&](bool flip=false,const BodyPose *pose=nullptr) {
+        woundView(&monster,&viewer,im,flip,100,200,16,62,16,0,-1,pose);
+    };
+    surface();
+    auto shot=[&](float y,float z) {
+        critical_hit_t hit;
+        check(criticalBegin(&viewer,0,fixed(y),fixed(z),fixed(256),0,0,fixed(256))==1,"Critical setting must opt in");
+        check(criticalThing(&monster,&hit)==1,"Human sprites must use pixel collision");
+        return hit;
+    };
+    for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_CHAINGUY,MT_WOLFSS}) {
+        monster.type=type;
+        auto head=shot(199.5f,57.5f);
+        check(head.multiplier==2&&head.fraction==fixed(100.f/256),"All four human profiles must classify head pixels at the exact distance");
+    }
+    check(shot(199.5f,35.5f).multiplier==1,"Body pixels must keep normal damage");
+    check(shot(190.5f,57.5f).fraction<0,"Transparent pixels beside the head must miss");
+    auto arm=shot(185.5f,56.5f);
+    check(arm.fraction>=0&&arm.multiplier==1,"A raised arm at head height must remain a body hit");
+    check(shot(182.5f,35.5f).fraction>=0,"Visible shoulder pixels outside movement radius must hit");
+    monster.height=fixed(32);
+    check(shot(199.5f,57.5f).multiplier==2,"Head pixels above actor collision height must remain hittable");
+    surface(true);
+    check(shot(199.5f,57.5f).multiplier==2,"Mirrored heads must classify in authored sprite coordinates");
+    surface();
+    criticalVoxelModel=[](const mobj_t&){return true;};
+    critical_hit_t excluded;
+    check(criticalThing(&monster,&excluded)==0,"Voxel models must use original collision");criticalVoxelModel=nullptr;
+    for(auto type:{MT_HEAD,MT_TROOP,MT_CYBORG,MT_SKULL,MT_BARREL}) {
+        monster.type=type;check(criticalThing(&monster,&excluded)==0,"Non-human types must retain ordinary collision");
+    }
+    monster.type=MT_POSSESSED;
+    settings.wounds=1;
+    auto head=shot(199.5f,57.5f);p_critical_trace=1;
+    // A different effect location cannot move the hole off the classified texel.
+    woundHit(&monster,0,0,0,fixed(1),0,0,1,&viewer);p_critical_trace=0;
+    at(mask(monster,im,false,0,-1),im,18.5f,4.5f,"Wounds must reuse the classified impact");
+    check(shot(199.5f,57.5f).multiplier==2,"Existing cosmetic holes must not allow penetration");
+    BodyPose pose{};pose.lean[0]=0.2f;surface(false,&pose);
+    check(shot(191.2f,57.5f).multiplier==2,"Bent head pixels must follow the posed surface");
+    check(shot(199.5f,57.5f).fraction<0,"The old location of a bent head must miss");
+    surface();
+    // Move the actual ray origin independently from the viewer (corner peek).
+    check(criticalBegin(&viewer,fixed(40),fixed(199.5f),fixed(57.5f),fixed(256),0,0,fixed(256))==1,"Peek ray begins");
+    check(criticalThing(&monster,&head)&&head.fraction==fixed(60.f/256),"Peek origin must set the correct intersection distance");
+    settings.criticalParts=0;
+    check(!criticalBegin(&viewer,0,0,0,FRACUNIT,0,0,FRACUNIT),"Default off restores the ordinary path");
+    woundsShutdown();
+    std::puts("Critical sprite classification checks passed");
+}
+
 int main() {
+    criticalParts();
     woundMaterials();
     mobj_t monster=reset();
     // The callback is the blood/puff point before the cylinder. Project it

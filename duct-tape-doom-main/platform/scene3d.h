@@ -161,6 +161,7 @@ struct Settings {
     int glowingEyes=1; // The eyes painted into monster artwork glow in the dark, with bloom (sprite_eyes.h).
     int windowGlass=1; // Windows found in the map get glass that reflects and shatters when shot through.
     int gunImpacts=1;
+    int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
     int breakableWalls=1;
     int throughWalls=0;
     int breachDoors=0;

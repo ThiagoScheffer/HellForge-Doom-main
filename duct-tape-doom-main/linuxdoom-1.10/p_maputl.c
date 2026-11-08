@@ -631,8 +631,13 @@ PIT_AddLineIntercepts (line_t* ld)
 //
 // PIT_AddThingIntercepts
 //
+static int collectingCritical=0;
 boolean PIT_AddThingIntercepts (mobj_t* thing)
 {
+    critical_hit_t critical;
+    // Sprite candidates are collected once below, including art extending
+    // into neighboring block cells beyond the actor's movement radius.
+    if(collectingCritical && P_CriticalThing && P_CriticalThing(thing,&critical))return true;
     fixed_t		x1;
     fixed_t		y1;
     fixed_t		x2;
@@ -803,6 +808,7 @@ P_PathTraverse
     trace.y = y1;
     trace.dx = x2 - x1;
     trace.dy = y2 - y1;
+    collectingCritical=p_critical_trace&&(flags&PT_CRITICAL);
 
     x1 -= bmaporgx;
     y1 -= bmaporgy;
@@ -894,7 +900,21 @@ P_PathTraverse
 	}
 		
     }
+    if(collectingCritical && (flags&PT_ADDTHINGS) && P_CriticalThing) {
+        thinker_t *thinker;
+        for(thinker=thinkercap.next;thinker!=&thinkercap;thinker=thinker->next) {
+            critical_hit_t critical;
+            if(thinker->function.acp1!=(actionf_p1)P_MobjThinker)continue;
+            if(!P_CriticalThing((mobj_t*)thinker,&critical) || critical.fraction<0 || critical.fraction>FRACUNIT)continue;
+            P_CheckIntercepts();
+            intercept_p->frac=critical.fraction;
+            intercept_p->isaline=false;
+            intercept_p->d.thing=(mobj_t*)thinker;
+            ++intercept_p;
+        }
+    }
     // go through the sorted list
+    collectingCritical=0;
     return P_TraverseIntercepts ( trav, FRACUNIT );
 }
 

@@ -81,6 +81,12 @@ void prepareVoxelModels() {
   for(auto &e:voxelEntries)if(families.count(e.first.substr(0,4))){loadModel(e.second);ensureTexture(e.second);}
  }catch(const std::exception &e){I_Error("VoxelDoom preload: %s",e.what());}
 }
+bool voxelMonster(const mobj_t &thing) {
+ if(!settings.voxelModels||!voxelDetected()||thing.sprite<0||thing.sprite>=NUMSPRITES)return false;
+ registerVoxels();
+ std::string key=sprnames[thing.sprite];key+=char('A'+(thing.frame&FF_FRAMEMASK));
+ return voxelEntries.find(key)!=voxelEntries.end();
+}
 bool drawVoxel(std::map<int,std::vector<Vertex>> &out,const mobj_t &thing,int sprite,int frame,angle_t facing,float x,float y,float z,float light,const std::array<float,3> &baked,unsigned statics,unsigned tint,const Uniforms &camera) {
  if(!settings.voxelModels||!voxelDetected()||sprite<0||sprite>=NUMSPRITES)return false;
  std::string key=sprnames[sprite];key+=char('A'+(frame&FF_FRAMEMASK));auto found=voxelEntries.find(key);if(found==voxelEntries.end())return false;

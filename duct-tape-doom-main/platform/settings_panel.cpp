@@ -159,6 +159,12 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("hanging_fragments","Delay before fragments fall",&s.hangingFragments,"Unsupported geometry briefly hangs before collapsing. Off makes it fall immediately. Requires Local chain collapses.",[](const Settings &d){return d.breakableWalls&&d.chainCollapses;}),
                 choice("collapse_size","Largest detached fragment",&s.collapseSize,{"Small","Medium","Large"},{4,12,24},"Maximum connected field nodes in a removable fragment. Larger pieces cost more to check. Anchored structures remain intact.",[](const Settings &d){return d.breakableWalls&&d.chainCollapses;})}},
             {"Combat",{
+                check("critical_parts","Critical parts",&s.criticalParts,
+                    "Player bullets hit visible human enemy sprite pixels; headshots deal 2x damage. "
+                    "Zombiemen, shotgun guys, chaingunners and Wolfenstein SS only. "
+                    "Single-player sprites only; voxel models, multiplayer and demos keep normal hits. "
+                    "Use mouse look for precise aiming. Wound holes are controlled separately.",
+                    [](const Settings &d){return d.accelerated!=0;}),
                 check("material_rubble","Match rubble to surface",&s.materialRubble,"Crater interiors, chips and dust inherit the nearby wall or floor color. Off restores grey stone."),
                 check("gun_impacts","Gun impacts",&s.gunImpacts,"Uzi animated sparks, voxel dust and impact puff from Stewie-Brian Arsenal. Disable to restore original bullet puffs. Blood and shootable lights have separate options."),
                 check("blood","Blood splats and pools",&s.blood,

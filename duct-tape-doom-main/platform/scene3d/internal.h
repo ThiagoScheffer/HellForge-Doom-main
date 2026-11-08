@@ -576,6 +576,11 @@ bool hasRagdoll(const mobj_t *thing);   // a ragdoll draws it: its own contacts 
 bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (ragdoll_test.cpp's -ragdollloop)
 
 // wounds.cpp
+int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
+extern void (*prepareCriticalSurface)(mobj_t*,mobj_t*);
+extern bool (*criticalVoxelModel)(const mobj_t&);
+void criticalSurface(mobj_t*,mobj_t*);
+bool voxelMonster(const mobj_t&);
 // Holes shot through monsters' sprites. woundMask: per texel of a drawn frame,
 // 0 body, 1 hole, 2 dark rim, 3 red rim, 4 bright lip, 5 stain (false when none show).
 void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage,const mobj_t *shooter=nullptr);

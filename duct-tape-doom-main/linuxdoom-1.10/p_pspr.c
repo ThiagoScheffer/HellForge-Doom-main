@@ -712,7 +712,7 @@ P_GunShot
 	angle += (P_Random()-P_Random())<<18;
 
     la_freeaim = bulletfree;
-    P_LineAttack (mo, angle, MISSILERANGE, bulletslope, damage);
+    P_BulletAttack (mo, angle, MISSILERANGE, bulletslope, damage);
 }
 
 
@@ -812,7 +812,7 @@ A_FireShotgun2
 	angle = player->mo->angle;
 	angle += (P_Random()-P_Random())<<19;
 	la_freeaim = bulletfree;
-	P_LineAttack (player->mo,
+	P_BulletAttack (player->mo,
 		      angle,
 		      MISSILERANGE,
 		      bulletslope + ((P_Random()-P_Random())<<5), damage);

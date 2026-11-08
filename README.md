@@ -55,6 +55,8 @@ Compatible classic/Boom map WADs are supported; arbitrary GZDoom/UDMF maps and g
 
 ### Monsters and movement
 
+- Optional **F4 > Combat > Critical parts**: player bullets hit visible sprite pixels on zombiemen, shotgun guys, chaingunners and Wolfenstein SS. Head hits deal double damage; transparent gaps let bullets continue. Defaults off; single-player sprites only. [Behavior and verification](docs/changes/CRITICAL-PARTS.md).
+
 - Native FluidMonsters walking for 15 ground-monster types, retaining the original AI action cadence.
 - Recovery from slightly overlapping spawn positions that could trap monsters when taking small movement steps.
 - Additional fixes for separating overlapping monsters and escaping existing wall overlap, plus a door/corner chase correction.

@@ -344,6 +344,27 @@ static float sinkInLiquid(const mobj_t *thing,int i,const Image &image,float x,f
     }
     return std::min(8.0f,image.height*0.35f);
 }
+void criticalSurface(mobj_t *thing,mobj_t *viewer) {
+    if(!thing||!viewer||!thing->subsector||thing->sprite<0||thing->sprite>=numsprites)return;
+    const auto &sprite=sprites[thing->sprite];int frame=thing->frame&FF_FRAMEMASK;
+    if(frame>=sprite.numframes)return;
+    const auto &sf=sprite.spriteframes[frame];
+    unsigned rotation=sf.rotate?spriteRotation(units(thing->x-viewer->x),units(thing->y-viewer->y),thing->angle):0u;
+    const Image &image=lumpImage(firstspritelump+sf.lump[rotation],false);
+    float x=units(thing->x),y=units(thing->y),z=units(thing->z);
+    BodyPose pose{};bool posed=bodyPose(*thing,1,pose);if(posed)z+=pose.lift;
+    int i=(int)(thing->subsector->sector-sectors);
+    float top=z+image.top,bottom=top-image.height;
+    float floor=floorZ(&sectors[i]),ceiling=ceilZ(&sectors[i]);
+    float shift=std::max(0.f,floor-bottom);
+    if(sectors[i].ceilingpic!=skyflatnum&&ceiling-floor>=image.height)shift=std::min(shift,ceiling-top);
+    top+=shift;bottom+=shift;
+    Uniforms camera{};camera.eye[0]=units(viewer->x);camera.eye[1]=units(viewer->y);
+    float sink=sinkInLiquid(thing,i,image,x,y,camera,false);
+    float yaw=(float)(viewer->angle*(2*doomPi/4294967296.0));
+    woundView(thing,viewer,image,sf.flip[rotation],x,y,top-image.top-sink,top-sink,bottom-sink,
+        std::sin(yaw),-std::cos(yaw),posed?&pose:nullptr);
+}
 // The glass mirror's view (glassMirrorActive) for the sprites drawn into it:
 // the mirrored eye, and the right of an ordinary camera there. The mirror
 // pass's own axes are reflected, which already flips its whole image left

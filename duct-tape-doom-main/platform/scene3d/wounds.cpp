@@ -1,7 +1,12 @@
-/* Wound holes: where hitscan shots strike a monster, its sprite is shot
-   through. Drawing only: the game's hitboxes are untouched. */
+/* Sprite shot intersections, optional human critical parts, and attached
+   wound holes. The holes themselves remain cosmetic; critical parts is an
+   explicit player-bullet rule, independent of wound drawing. */
 #include "internal.h"
 #include "../wound_attachment.h"
+#include "../death_joints.h"
+extern "C" {
+#include "p_local.h"
+}
 
 namespace doom3d {
 // Capture the texel struck before damage switches the monster to its pain
@@ -28,6 +33,23 @@ struct WoundSurface {
     bool flipped,posed;
 };
 static std::unordered_map<const mobj_t*,WoundSurface> surfaces;
+struct SpriteImpact {
+    enum Part { Body,Head } part=Body;
+    int multiplier=1;
+    const Image *image=nullptr;
+    doom_wounds::Point point{};
+    bool flipped=false;
+    float viewYaw=0,sourceYaw=0,distance=0;
+};
+static std::unordered_map<const mobj_t*,SpriteImpact> bulletImpacts;
+static std::unordered_map<const mobj_t*,critical_hit_t> bulletResults;
+struct HeadProfile { bool found;doom_joints::Head head; };
+static std::unordered_map<const Image*,HeadProfile> heads;
+static mobj_t *bulletShooter=nullptr;
+static fixed_t bulletX,bulletY,bulletZ,bulletDx,bulletDy,bulletSlope,bulletRange;
+// Geometry supplies current placement when the target has not been drawn recently.
+void (*prepareCriticalSurface)(mobj_t*,mobj_t*)=nullptr;
+bool (*criticalVoxelModel)(const mobj_t&)=nullptr;
 // A lying drawing's body: its opaque columns, the middle row of each, and which end the head is.
 struct Lying { int first=-1,last=-1;bool headRight=true;std::vector<float> middle; };
 static std::unordered_map<const Image*,Lying> lyings;
@@ -36,7 +58,7 @@ constexpr float maxRadius=3.0f;
 
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
                float top,float bottom,float rx,float ry,const BodyPose *pose) {
-    if(!settings.wounds||!thing||!thing->info||thing->health<=0)return;
+    if((!settings.wounds&&!settings.criticalParts)||!thing||!thing->info||thing->health<=0)return;
     if(!(thing->info->flags&MF_COUNTKILL)&&thing->type!=MT_SKULL)return;
     surfaces[thing]={viewer,&image,x,y,feet,top,bottom,rx,ry,
         (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr};
@@ -48,7 +70,7 @@ static bool opaqueAt(const Image &image,doom_wounds::Point point) {
 // Recreate the uncut surface only when a shot arrives. Its triangles carry
 // the same UVs as the drawn strips, so intersection also inverts flinching.
 static bool surfaceHit(const WoundSurface &surface,const mobj_t &shooter,float x,float y,float z,
-                       float dx,float dy,float slope,doom_wounds::Point &point) {
+                       float dx,float dy,float slope,doom_wounds::Point &point,float *distance=nullptr) {
     const Image &image=*surface.image;
     float left=-(float)image.left,right=left+image.width;
     float u0=surface.flipped?(float)image.width:0,u1=surface.flipped?0:(float)image.width;
@@ -85,6 +107,7 @@ static bool surfaceHit(const WoundSurface &surface,const mobj_t &shooter,float x
         if(!opaqueAt(image,at))continue;
         nearest=t;point=at;hit=true;
     }
+    if(hit&&distance)*distance=nearest;
     return hit;
 }
 
@@ -106,14 +129,14 @@ static doom_wounds::Point projected(Wound &wound,const Image &image,bool flipped
     return point;
 }
 
-void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage,const mobj_t *shooter) {
-    if(!settings.wounds||!target||!target->info)return;
-    if(!(target->info->flags&MF_COUNTKILL)&&target->type!=MT_SKULL)return;
-    if(target->sprite<0||target->sprite>=numsprites)return;
+static bool captureSpriteHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,const mobj_t *shooter,SpriteImpact &impact) {
+    if(!target||!target->info)return false;
+    if(!(target->info->flags&MF_COUNTKILL)&&target->type!=MT_SKULL)return false;
+    if(target->sprite<0||target->sprite>=numsprites)return false;
     const auto &sprite=sprites[target->sprite];int frame=target->frame&FF_FRAMEMASK;
-    if(frame>=sprite.numframes)return;
+    if(frame>=sprite.numframes)return false;
     float dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
-    if(length<1e-4f)return;
+    if(length<1e-4f)return false;
     dx/=length;dy/=length;
     float viewYaw=std::atan2(dy,dx),sourceYaw;
     float a=(float)(target->angle*(2*doomPi/4294967296.0));
@@ -121,7 +144,7 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
     auto drawn=surfaces.find(target);
     if(shooter&&drawn!=surfaces.end()&&drawn->second.viewer==shooter&&leveltime-drawn->second.tic<=2) {
         const WoundSurface &surface=drawn->second;
-        if(!surfaceHit(surface,*shooter,units(fx),units(fy),units(fz),dx,dy,units(slope),point))return;
+        if(!surfaceHit(surface,*shooter,units(fx),units(fy),units(fz),dx,dy,units(slope),point,&impact.distance))return false;
         source=surface.image;flipped=surface.flipped;sourceYaw=surface.yaw;
         viewYaw=std::atan2(surface.rx,-surface.ry);
     } else {
@@ -132,18 +155,92 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
         const auto &sf=sprite.spriteframes[frame];
         unsigned rotation=sf.rotate?(angle-target->angle+(unsigned)(ANG45/2)*9)>>29:0;
         source=&lumpImage(firstspritelump+sf.lump[rotation],false);flipped=sf.flip[rotation];sourceYaw=a;
-        if(source->pixels.empty())return;
+        if(source->pixels.empty())return false;
         if(shooter&&shooter->player)viewYaw=(float)(shooter->angle*(2*doomPi/4294967296.0));
         float nx=std::cos(viewYaw),ny=std::sin(viewYaw),along=dx*nx+dy*ny;
-        if(std::abs(along)<1e-4f)return;
+        if(std::abs(along)<1e-4f)return false;
         float ox=units(fx)-units(target->x),oy=units(fy)-units(target->y),t=-(ox*nx+oy*ny)/along;
         float height=units(fz)-units(target->z)+t*units(slope);
         float across=(ox+dx*t)*ny-(oy+dy*t)*nx;
         float left=-(float)source->left,right=left+source->width;
         point={flipped?right-across:across-left,source->top-height};
+        impact.distance=t;
     }
     const Image &image=*source;
-    if(!opaqueAt(image,point))return;
+    if(!opaqueAt(image,point))return false;
+    impact.image=source;impact.point=point;impact.flipped=flipped;
+    impact.viewYaw=viewYaw;impact.sourceYaw=sourceYaw;
+    return true;
+}
+
+int criticalBegin(mobj_t *shooter,fixed_t x,fixed_t y,fixed_t z,fixed_t dx,fixed_t dy,fixed_t slope,fixed_t range) {
+    bulletImpacts.clear();bulletResults.clear();bulletShooter=nullptr;
+    if(!settings.accelerated||!settings.criticalParts||!shooter||range<=0)return 0;
+    bulletShooter=shooter;bulletX=x;bulletY=y;bulletZ=z;
+    bulletDx=dx;bulletDy=dy;bulletSlope=slope;bulletRange=range;
+    return 1;
+}
+int criticalThing(mobj_t *target,critical_hit_t *result) {
+    // Explicit anatomy profiles; future eye/core profiles belong here.
+    static const struct { mobjtype_t type;int multiplier; } profiles[]={
+        {MT_POSSESSED,2},{MT_SHOTGUY,2},{MT_CHAINGUY,2},{MT_WOLFSS,2}};
+    if(!bulletShooter||!target||target==bulletShooter||target->player||target->health<=0||!(target->flags&MF_SHOOTABLE))return 0;
+    auto profile=std::find_if(std::begin(profiles),std::end(profiles),[&](const auto &p){return p.type==target->type;});
+    if(profile==std::end(profiles)||(criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
+    auto cached=bulletResults.find(target);
+    if(cached!=bulletResults.end()){*result=cached->second;return 1;}
+    *result={-1,1};
+    auto drawn=surfaces.find(target);
+    if((drawn==surfaces.end()||drawn->second.viewer!=bulletShooter||leveltime-drawn->second.tic>2)&&prepareCriticalSurface)
+        prepareCriticalSurface(target,bulletShooter);
+    SpriteImpact impact;
+    // surfaceHit reconstructs its origin from shooter XY. Use the actual
+    // collision-checked peek origin while retaining the real viewer identity.
+    mobj_t origin=*bulletShooter;origin.x=bulletX;origin.y=bulletY;
+    auto surface=surfaces.find(target);
+    bool hit=false;
+    if(surface!=surfaces.end()&&surface->second.viewer==bulletShooter&&leveltime-surface->second.tic<=2) {
+        float length=std::hypot(units(bulletDx),units(bulletDy));
+        if(length>0) {
+            impact.image=surface->second.image;impact.flipped=surface->second.flipped;
+            impact.sourceYaw=surface->second.yaw;impact.viewYaw=std::atan2(surface->second.rx,-surface->second.ry);
+            const auto &s=surface->second;
+            float dx=units(bulletDx)/length,dy=units(bulletDy)/length;
+            float ox=s.x-units(bulletX),oy=s.y-units(bulletY),along=ox*dx+oy*dy;
+            float reach=std::max(std::abs((float)s.image->left),std::abs((float)(s.image->width-s.image->left)));
+            if(s.posed)reach+=s.image->height*(std::abs(s.pose.lean[0])+std::abs(s.pose.lean[1])+std::abs(s.pose.whip[0])+std::abs(s.pose.whip[1]));
+            if(std::abs(ox*dy-oy*dx)<=reach&&along>=-reach&&along<=units(bulletRange)+reach)
+                hit=surfaceHit(s,origin,units(bulletX),units(bulletY),units(bulletZ),
+                    dx,dy,units(bulletSlope),impact.point,&impact.distance);
+        }
+    }
+    if(hit&&impact.distance>=0&&impact.distance<=units(bulletRange)) {
+        result->fraction=(fixed_t)std::lround(impact.distance/units(bulletRange)*FRACUNIT);
+        auto head=heads.find(impact.image);
+        if(head==heads.end()) {
+            HeadProfile h{};const auto &im=*impact.image;
+            h.found=doom_joints::findHead(im.pixels.data(),im.width,im.height,im.left,im.top,h.head);
+            head=heads.emplace(impact.image,h).first;
+        }
+        const auto &h=head->second;const auto &im=*impact.image;
+        float across=impact.point.u-im.left,height=im.top-impact.point.v;
+        if(h.found&&height>=h.head.neck&&std::abs(across-h.head.middle)<=h.head.width/2) {
+            impact.part=SpriteImpact::Head;impact.multiplier=profile->multiplier;
+        }
+        result->multiplier=impact.multiplier;
+        bulletImpacts[target]=impact;
+    }
+    bulletResults[target]=*result;return 1;
+}
+
+void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage,const mobj_t *shooter) {
+    if(!settings.wounds)return;
+    SpriteImpact impact;
+    auto captured=bulletImpacts.find(target);
+    if(p_critical_trace&&shooter==bulletShooter&&captured!=bulletImpacts.end())impact=captured->second;
+    else if(!captureSpriteHit(target,fx,fy,fz,fdx,fdy,slope,shooter,impact))return;
+    const Image &image=*impact.image;auto point=impact.point;
+    bool flipped=impact.flipped;float viewYaw=impact.viewYaw,sourceYaw=impact.sourceYaw;
     float height=image.top-point.v,across=flipped?image.width-image.left-point.u:point.u-image.left;
     uint32_t seed=hash32((uint32_t)std::lround(point.u*16)*73856093u^(uint32_t)std::lround(point.v*16)*19349663u^
                          (uint32_t)leveltime*83492791u^(uint32_t)target->type*2654435761u);
@@ -176,7 +273,7 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
     }
     list.push_back(wound);
 }
-void forgetWounds(const mobj_t *thing) {wounds.erase(thing);surfaces.erase(thing);}
+void forgetWounds(const mobj_t *thing) {wounds.erase(thing);surfaces.erase(thing);bulletImpacts.erase(thing);bulletResults.erase(thing);}
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
     auto found=wounds.find(thing);
     if(found==wounds.end())return 0;
@@ -187,7 +284,7 @@ int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
     }
     return count;
 }
-void woundsShutdown() {wounds.clear();surfaces.clear();lyings.clear();standing.clear();}
+void woundsShutdown() {wounds.clear();surfaces.clear();lyings.clear();standing.clear();bulletImpacts.clear();bulletResults.clear();heads.clear();bulletShooter=nullptr;}
 
 // How tall a monster stands, by its first drawing, to tell lying death drawings.
 static float standingTop(const mobj_t &thing) {

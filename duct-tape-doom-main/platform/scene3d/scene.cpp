@@ -37,6 +37,7 @@ int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 #include "../../linuxdoom-1.10/p_local.h"
 }
 #include "../settings_panel.h"
+namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
 
 namespace doom3d {
 GpuTextureRef arcadePodiumTexture;
@@ -184,6 +185,9 @@ void applySettings() {
     R_WallImpact=settings.accelerated?wallImpact:nullptr;
     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
     R_BloodHit=settings.accelerated?bloodHit:nullptr;
+    P_CriticalBegin=settings.accelerated?criticalBegin:nullptr;
+    P_CriticalThing=settings.accelerated?criticalThing:nullptr;
+    prepareCriticalSurface=criticalSurface;criticalVoxelModel=voxelMonster;
     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
     R_PlaneImpact=settings.accelerated?planeImpact:nullptr;
     R_ShotPassed=settings.accelerated?glassShot:nullptr;
@@ -224,6 +228,8 @@ void sceneInit(SDL_Window *window) {
     if(paletteOption&&paletteOption+1<myargc)settings.palette=atoi(myargv[paletteOption+1])!=0;
 }
 void sceneShutdown() {
+    P_CriticalBegin=nullptr;P_CriticalThing=nullptr;p_critical_trace=0;
+    prepareCriticalSurface=nullptr;criticalVoxelModel=nullptr;
     arcadePodiumTexture.reset();arcade_podium_hires=0;
     arcadeRankTexture.reset();
     for(auto &texture:keyHandTextures)texture.reset();keyHandVisible=keyWeaponDrop=0;

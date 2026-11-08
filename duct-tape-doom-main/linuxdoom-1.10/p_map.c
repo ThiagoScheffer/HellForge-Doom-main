@@ -1146,6 +1146,10 @@ static boolean PTR_ShootPlane (fixed_t frac)
 static fixed_t solidFraction;
 static float solidPoint[6];
 static int solidOwner;
+int p_critical_trace=0;
+int (*P_CriticalBegin)(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t)=NULL;
+int (*P_CriticalThing)(mobj_t*,critical_hit_t*)=NULL;
+static int criticalBullet=0;
 boolean PTR_ShootTraverse (intercept_t* in)
 {
     fixed_t		x;
@@ -1161,6 +1165,8 @@ boolean PTR_ShootTraverse (intercept_t* in)
     fixed_t		dist;
     fixed_t		thingtopslope;
     fixed_t		thingbottomslope;
+    critical_hit_t critical={-1,1};
+    int spriteHit=0,hitDamage=la_damage;
 		
     if(SV_Active()&&in->frac>=solidFraction&&solidFraction<FRACUNIT){
         if(SV_MapMode()&&in->isaline&&R_WallImpact&&
@@ -1278,6 +1284,11 @@ boolean PTR_ShootTraverse (intercept_t* in)
     
     if (!(th->flags&MF_SHOOTABLE))
 	return true;		// corpse or something
+
+    spriteHit=p_critical_trace && P_CriticalThing && P_CriticalThing(th,&critical);
+    if(spriteHit && critical.fraction<0)return true;
+
+    if(!spriteHit) {
 		
     // check angles to see if the thing can be aimed at
     dist = FixedMul (attackrange, in->frac);
@@ -1290,11 +1301,13 @@ boolean PTR_ShootTraverse (intercept_t* in)
 
     if (thingbottomslope > aimslope)
 	return true;		// shot under the thing
+    }
 
     
     // hit thing
     // position a bit closer
     frac = in->frac - FixedDiv (10*FRACUNIT,attackrange);
+    if(spriteHit) { frac=in->frac;hitDamage*=critical.multiplier; }
     la_hit = th;
 
     x = trace.x + FixedMul (trace.dx, frac);
@@ -1308,16 +1321,16 @@ boolean PTR_ShootTraverse (intercept_t* in)
     else
     {
 	/* Blood-only translation tag is saved with the ordinary actor flags. */
-        mobj_t *blood = P_SpawnBlood (x,y,z, la_damage);
+        mobj_t *blood = P_SpawnBlood (x,y,z, hitDamage);
         int tint = th->type == MT_HEAD ? 1 : (th->type == MT_BRUISER || th->type == MT_KNIGHT) ? 2 : 0;
         blood->flags |= tint << MF_TRANSSHIFT;
 	if (R_BloodHit)
-	    R_BloodHit (th, shootthing, x, y, z, trace.dx, trace.dy, aimslope, la_damage);
+	    R_BloodHit (th, shootthing, x, y, z, trace.dx, trace.dy, aimslope, hitDamage);
     }
 
     la_hit=th;
     if (la_damage)
-	P_DamageMobj (th, shootthing, shootthing, la_damage);
+	P_DamageMobj (th, shootthing, shootthing, hitDamage);
 
     // don't go any farther
     return false;
@@ -1414,9 +1427,11 @@ P_LineAttack
     if(SV_Active())solidFraction=(fixed_t)(FRACUNIT*SV_Trace(x1/(float)FRACUNIT,y1/(float)FRACUNIT,shootz/(float)FRACUNIT,
         (x2-x1)/(float)FRACUNIT,(y2-y1)/(float)FRACUNIT,FixedMul(slope,distance)/(float)FRACUNIT,solidPoint,&solidOwner));
     la_hit=NULL;la_endfrac=FRACUNIT;
+    p_critical_trace=criticalBullet && damage>0 && t1->player && !netgame && !demoplayback && !demorecording
+        && P_CriticalBegin && P_CriticalThing && P_CriticalBegin(t1,x1,y1,shootz,x2-x1,y2-y1,slope,distance);
     if (P_PathTraverse ( x1, y1,
 			 x2, y2,
-			 PT_ADDLINES|PT_ADDTHINGS,
+			 PT_ADDLINES|PT_ADDTHINGS|(p_critical_trace?PT_CRITICAL:0),
 			 PTR_ShootTraverse ))
     {la_endfrac=FRACUNIT;if(la_freeaim)PTR_ShootPlane(FRACUNIT);}
     if(SV_Active()&&!la_hit&&solidFraction<FRACUNIT&&la_endfrac>=solidFraction){
@@ -1435,9 +1450,15 @@ P_LineAttack
         }
     }
     la_freeaim = false;
+    p_critical_trace=0;
     if(P_ShotTraced&&damage)P_ShotTraced(t1,la_hit,x1,y1,shootz,x1+FixedMul(x2-x1,la_endfrac),y1+FixedMul(y2-y1,la_endfrac),shootz+FixedMul(aimslope,FixedMul(la_endfrac,attackrange)));
 }
  
+void P_BulletAttack(mobj_t *actor,angle_t angle,fixed_t range,fixed_t slope,int damage) {
+    criticalBullet=1;
+    P_LineAttack(actor,angle,range,slope,damage);
+    criticalBullet=0;
+}
 
 
 //
