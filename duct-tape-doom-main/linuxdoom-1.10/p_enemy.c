@@ -705,6 +705,7 @@ void A_Look (mobj_t* actor)
 //
 void A_Chase (mobj_t*	actor)
 {
+    P_WeakpointFrenzyTarget(actor);
     int		delta;
 
     if (actor->reactiontime)

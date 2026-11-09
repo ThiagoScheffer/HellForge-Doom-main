@@ -340,6 +340,12 @@ extern std::array<bool,maxLights> fogOnly;
 extern std::array<uint8_t,maxLights> lightKinds;
 extern uint8_t lightKind;
 void muzzleFlash(mobj_t *source,int weapon,int projectile);
+void combatImpact(const wp_damage_event_t*);
+void combatBleed(mobj_t*);
+int cosmeticBulletLocate(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*);
+extern float headshotUntil;
+extern unsigned headshotLevel;
+extern uint64_t headshotDischarge;
 void sparkFlash(float x,float y,float z,float radius,float strength,const std::array<float,3> &color);
 void appendLight(float x,float y,float z,float radius,float strength,const std::array<float,3> &color,const mobj_t *source,float directionality,bool occluded=true,float baked=0,
                  const std::array<float,4> &spot={});

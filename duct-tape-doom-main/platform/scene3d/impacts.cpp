@@ -111,6 +111,47 @@ void flatImpactParticles(float x,float y,float z,bool ceiling,Image &image,float
 }
 // Called only after a door actually moves upward. Emit at the two jambs,
 // never across the face; distance, cadence and a global budget bound the work.
+static void doorTrackSpark(float x,float y,float z,float nx,float ny) {
+    if(debris.size()>=512)return;
+    float out=randomRange(15,45),slide=randomRange(-24,24);
+    debris.push_back({x,y,z,nx*out-ny*slide,ny*out+nx*slide,randomRange(-12,38),
+        gameSeconds(),randomRange(.16f,.3f),randomRange(.7f,1.2f),{1,.65f,.18f},1});
+}
+float headshotUntil=0;
+unsigned headshotLevel=~0u;
+uint64_t headshotDischarge=0;
+static unsigned combatLevel=~0u;
+struct CombatParticleHit {uint64_t shot;float x,y,z;int tic;};
+static std::vector<CombatParticleHit> combatParticleHits;
+static void combatSparks(const wp_damage_event_t &event,bool head) {
+    const auto &hit=event.impact;
+    if(combatLevel!=r_levelserial){combatParticleHits.clear();headshotUntil=0;headshotDischarge=0;combatLevel=r_levelserial;}
+    combatParticleHits.erase(std::remove_if(combatParticleHits.begin(),combatParticleHits.end(),[](const auto &h){return h.tic!=leveltime;}),combatParticleHits.end());
+    for(const auto &h:combatParticleHits)if(h.shot==event.dischargeId&&std::hypot(h.x-hit.x,h.y-hit.y)<6&&std::abs(h.z-hit.z)<6)return;
+    if(combatParticleHits.size()>=32)return;
+    combatParticleHits.push_back({event.dischargeId,hit.x,hit.y,hit.z,leveltime});dropOldLevelImpacts();
+    float nx=units(event.source->x)-hit.x,ny=units(event.source->y)-hit.y,len=std::hypot(nx,ny);
+    if(len<.001f){nx=1;ny=0;}else{nx/=len;ny/=len;}
+    for(int i=0;i<(head?5:4)&&debris.size()<512;++i) {
+        doorTrackSpark(hit.x+nx,hit.y+ny,hit.z,nx,ny);
+    }
+}
+void combatImpact(const wp_damage_event_t *event) {
+    if(!event||event->impact.confidence!=100||event->baseDamage<=0||!event->source||!event->source->player)return;
+    const auto &e=*event;
+    bool head=e.impact.region==WP_HEAD&&e.finalDamage>e.baseDamage&&
+        (e.kind==WP_BULLET||e.kind==WP_SHOTGUN_PELLET);
+    if(combatLevel!=r_levelserial){headshotUntil=0;headshotDischarge=0;combatLevel=r_levelserial;combatParticleHits.clear();}
+    if(head&&settings.headshotFeedback) {
+        if((settings.headshotFeedback&1)&&e.source==players[displayplayer].mo&&
+            (!e.dischargeId||headshotDischarge!=e.dischargeId)) {
+            headshotUntil=gameSeconds()+.35f;headshotLevel=r_levelserial;headshotDischarge=e.dischargeId;
+        }
+        if(settings.headshotFeedback&2)combatSparks(e,true);
+    }
+    if(settings.monsterMetalSparks&&e.impact.region==WP_LEGS&&(e.target->type==MT_BABY||e.target->type==MT_SPIDER)&&
+        (e.kind==WP_BULLET||e.kind==WP_SHOTGUN_PELLET||e.kind==WP_ROCKET_DIRECT||e.kind==WP_PLASMA_DIRECT||e.kind==WP_BFG_DIRECT))combatSparks(e,false);
+}
 void doorMotion(sector_t *sector) {
     if(!settings.breakableWalls||!settings.doorSparks||gamestate!=GS_LEVEL||!players[displayplayer].mo)return;
     int index=int(sector-sectors);
@@ -136,10 +177,7 @@ void doorMotion(sector_t *sector) {
             float x=ax+dx*f+nx*2,y=ay+dy*f+ny*2;
             if(std::hypot(x-px,y-py)>640)continue;
             for(int n=0;n<2&&debris.size()<512;++n) {
-                float out=randomRange(15,45),slide=randomRange(-24,24);
-                debris.push_back({x,y,units(sector->ceilingheight)+1,
-                    nx*out+dx/len*slide,ny*out+dy/len*slide,randomRange(-12,38),
-                    now,randomRange(.16f,.3f),randomRange(.7f,1.2f),{1,.65f,.18f},1});
+                doorTrackSpark(x,y,units(sector->ceilingheight)+1,nx,ny);
                 ++budget;
             }
         }

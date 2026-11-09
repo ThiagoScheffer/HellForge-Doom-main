@@ -133,3 +133,5 @@ This is targeted native support for the supplied mod versions, **not a general Z
 - The supplied Toasty portrait/audio are separate media assets; the engine's GPL does not relicense those assets.
 
 See [LICENSE](LICENSE), [licenses/NOTICE.txt](licenses/NOTICE.txt), and [licenses/THIRD_PARTY.md](licenses/THIRD_PARTY.md). Original per-component licensing and attribution requirements remain applicable.
+
+Monster combat additions: [metal-leg sparks, headshot feedback, bleeding and temporary infighting](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md).

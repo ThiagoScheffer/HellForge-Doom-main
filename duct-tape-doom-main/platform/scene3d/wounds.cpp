@@ -66,7 +66,7 @@ constexpr float maxRadius=3.0f;
 
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
                float top,float bottom,float rx,float ry,const BodyPose *pose,int rotation) {
-    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities)||!thing||!thing->info||thing->health<=0)return;
+    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks)||!thing||!thing->info||thing->health<=0)return;
     if(!(thing->info->flags&MF_COUNTKILL)&&thing->type!=MT_SKULL)return;
     surfaces[thing]={viewer,&image,x,y,feet,top,bottom,rx,ry,
         (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr,thing->sprite,thing->frame,rotation};
@@ -181,9 +181,28 @@ static bool captureSpriteHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fix
     return true;
 }
 
+int cosmeticBulletLocate(mobj_t *target,mobj_t *shooter,fixed_t x,fixed_t y,fixed_t z,fixed_t dx,fixed_t dy,fixed_t slope,wp_impact_t *out) {
+    if(!settings.accelerated||!settings.monsterMetalSparks||!target||!shooter||
+        (target->type!=MT_BABY&&target->type!=MT_SPIDER)||!P_WeakpointActive()||
+        (criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
+    if(prepareCriticalSurface)prepareCriticalSurface(target,shooter);
+    auto found=surfaces.find(target);if(found==surfaces.end())return 0;
+    mobj_t origin=*shooter;origin.x=x;origin.y=y;
+    float length=std::hypot(units(dx),units(dy)),distance=0;
+    if(length<=0)return 0;
+    doom_wounds::Point point{};const auto &s=found->second;
+    if(!surfaceHit(s,origin,units(x),units(y),units(z),units(dx)/length,units(dy)/length,units(slope),point,&distance))return 0;
+    const auto &image=*s.image;const auto &mask=weakpointRegionMask(target->type,image);
+    *out={};out->region=(wp_region_t)mask[(size_t)(int)point.v*image.width+(int)point.u];out->confidence=100;
+    out->x=units(x)+units(dx)/length*distance;out->y=units(y)+units(dy)/length*distance;out->z=units(z)+units(slope)*distance;
+    out->u=point.u;out->v=point.v;out->distance=distance;
+    out->sprite=s.sprite;out->frame=s.frame;out->rotation=s.rotation;out->flipped=s.flipped;
+    return 1;
+}
+
 int weakpointLocate(mobj_t *projectile,mobj_t *target,wp_impact_t *out) {
     *out={};
-    if(!settings.accelerated||!settings.weaponVulnerabilities||!projectile||!projectile->target||!target||
+    if(!settings.accelerated||(!settings.weaponVulnerabilities&&!settings.monsterMetalSparks)||!projectile||!projectile->target||!target||
         (criticalVoxelModel&&criticalVoxelModel(*target)))return 0;
     float start[3],end[3];if(!P_WeakpointTrajectory(projectile,start,end))return 0;
     float dx=end[0]-start[0],dy=end[1]-start[1],length=std::hypot(dx,dy);

@@ -521,6 +521,8 @@ P_NightmareRespawn (mobj_t* mobj)
 //
 void P_MobjThinker (mobj_t* mobj)
 {
+    P_WeakpointTick(mobj);
+    if(mobj->thinker.function.acv==(actionf_v)(-1))return;
     if(P_RomeroTick(mobj))return;
     if(SV_Active()){SV_Refresh(mobj);SV_Missile(mobj);}else P_GlobalDigRefreshHeights(mobj);
     if(mobj->type==MT_ROCKET&&mobj->threshold==ROMERO_STUCK)return;
@@ -1022,7 +1024,7 @@ P_SpawnMissile
 
     P_PhotoEvent(1,source);
     mobj_t barrageAim;
-    if(P_TacticsAim(source,&barrageAim)||P_AggressiveBarrageAim(source,&barrageAim))dest=&barrageAim;
+    if(!P_WeakpointFrenzied(source)&&(P_TacticsAim(source,&barrageAim)||P_AggressiveBarrageAim(source,&barrageAim)))dest=&barrageAim;
     if (R_MuzzleFlash) R_MuzzleFlash(source, wp_plasma, type);
 
     th = P_SpawnMobj (source->x,
@@ -1052,6 +1054,7 @@ P_SpawnMissile
 	dist = 1;
 
     th->momz = (dest->z - source->z) / dist;
+    P_WeakpointMonsterMissile(th,source);
     P_TacticsFired(source);
     P_AggressiveMissile(th,source);
     P_CheckMissileSpawn (th);

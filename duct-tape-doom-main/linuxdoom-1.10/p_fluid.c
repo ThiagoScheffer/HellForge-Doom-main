@@ -52,7 +52,7 @@ void P_FluidReset(void){
     for(int i=0;i<1024;++i){walk_t *entry=walks[i];while(entry){walk_t *next=entry->next;Z_Free(entry);entry=next;}walks[i]=NULL;}
     stepping=NULL;divisor=1;
 }
-fixed_t P_FluidMoveSpeed(mobj_t *actor){return (fixed_t)((int64_t)actor->info->speed*FRACUNIT/(stepping==actor?divisor:1));}
+fixed_t P_FluidMoveSpeed(mobj_t *actor){return P_WeakpointWalkSpeed(actor,(fixed_t)((int64_t)actor->info->speed*FRACUNIT/(stepping==actor?divisor:1)));}
 fixed_t P_FluidFloatSpeed(mobj_t *actor){return FLOATSPEED/(stepping==actor?divisor:1);}
 int P_FluidChase(mobj_t *actor,actionf_p1 action){
     if(!P_FluidEnabled()||!supported(actor)||(actor->flags&MF_SKULLFLY))return 0;

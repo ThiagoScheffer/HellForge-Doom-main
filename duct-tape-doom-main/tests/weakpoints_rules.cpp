@@ -8,6 +8,7 @@
 extern "C" {
 #include "p_local.h"
 #include "doomstat.h"
+extern int wp_test_sight;
 extern int wp_test_rng_value,wp_test_rng_calls,wp_test_damage_calls;
 }
 int leveltime=10;
@@ -21,7 +22,7 @@ static void link(mobj_t *m) {
     m->thinker.prev=thinkercap.prev;m->thinker.next=&thinkercap;thinkercap.prev->next=&m->thinker;thinkercap.prev=&m->thinker;
 }
 static void reset(int type=MT_TROOP) {
-    P_WeakpointClear();thinkercap.next=thinkercap.prev=&thinkercap;
+    P_WeakpointClear();P_WeakpointConfigureExtras(0,0);wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
     source={};target={};info={};player={};source.player=&player;
     target.type=(mobjtype_t)type;target.flags=MF_SHOOTABLE;target.health=1000;info.spawnhealth=1000;target.info=&info;
     leveltime=10;wp_test_rng_calls=wp_test_damage_calls=0;wp_test_rng_value=0;
@@ -171,8 +172,93 @@ static void injuriesAndSaves() {
     P_WeakpointForget(&plasma);check(P_WeakpointRuntimeCount()==0,"repeated projectile lifecycles do not leak records");
     p_wp_balance.aimChance=oldAim;p_wp_balance.legChance=oldLeg;
 }
+static int notifications=0;
+static void bleedingAndFrenzy() {
+    const auto balance=p_wp_balance;
+    for(auto type:{MT_TROOP,MT_KNIGHT,MT_FATSO,MT_SERGEANT}) {
+        reset(type);P_WeakpointConfigure(0,0,0);P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;
+        P_WeakpointBeginShot(&source,wp_pistol);auto e=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+        check(P_WeakpointBleeding(&target),"ordinary bullet bleeding works independently of enhanced rules");
+        check(P_WeakpointWalkSpeed(&target,10*FRACUNIT)==8*FRACUNIT,"bleeding slows only walking by twenty percent");
+        for(int i=1;i<=6;++i){leveltime=10+i*35;P_WeakpointTick(&target);check(target.health==999-i*2,"six exact bleeding damage ticks");}
+        ++leveltime;P_WeakpointTick(&target);check(!P_WeakpointBleeding(&target),"bleeding expires after six seconds");
+    }
+    reset();P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=0;
+    P_WeakpointBeginShot(&source,wp_shotgun);auto e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+    check(P_WeakpointBleeding(&target),"confirmed critical guarantees bleed even with zero ordinary chance");
+    check(wp_test_rng_calls==0,"guaranteed bleeding avoids probability draws");
+    leveltime+=20;P_WeakpointBeginShot(&source,wp_pistol);e=event(WP_BULLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+    leveltime=45;int health=target.health;P_WeakpointTick(&target);check(target.health==health-2,"refresh preserves tick cadence without stacking");
+    P_WeakpointConfigureExtras(0,0);check(!P_WeakpointBleeding(&target),"bleeding disabled cancels immediately");
+    for(auto kind:{WP_PLASMA_DIRECT,WP_ROCKET_DIRECT,WP_ROCKET_SPLASH,WP_BFG_DIRECT,WP_BFG_TRACER,WP_OTHER}) {
+        reset();P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;e=event(kind,WP_HEAD,1);P_WeakpointApply(&e);
+        check(!P_WeakpointBleeding(&target),"non-ballistic damage never causes bleeding");
+    }
+    reset();P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;e=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&e);
+    check(!P_WeakpointBleeding(&target),"unmarked shared line attacks such as melee cannot bleed");
+    for(int value:{76,77}) {
+        reset();P_WeakpointConfigure(0,0,0);P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=30;wp_test_rng_value=value;
+        P_WeakpointBeginShot(&source,wp_pistol);e=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+        check((bool)P_WeakpointBleeding(&target)==(value==76),"thirty-percent bleed RNG boundary");
+    }
+    for(auto type:{MT_FATSO,MT_KNIGHT,MT_BRUISER})for(int scenario=0;scenario<7;++scenario) {
+        reset(type);P_WeakpointConfigureExtras(0,1);p_wp_balance.frenzyChance=40;wp_test_rng_value=scenario==1?103:102;
+        mobj_t other{};other.type=target.type;other.flags=MF_SHOOTABLE|MF_COUNTKILL;other.health=100;other.x=100*FRACUNIT;link(&other);
+        if(scenario==4)wp_test_sight=0;if(scenario==5)other.x=513*FRACUNIT;
+        auto weapon=scenario==2?wp_shotgun:wp_supershotgun;P_WeakpointBeginShot(&source,weapon);
+        for(int i=0;i<4;++i){e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);e.impact.distance=scenario==3?128.1f:128;
+            if(scenario==6)e.impact.confidence=0;P_WeakpointApply(&e);}
+        int calls=wp_test_rng_calls;P_WeakpointEndShot();
+        check((bool)P_WeakpointFrenzied(&target)==(scenario==0),"frenzy type, chance, weapon, range, visibility and confidence gates");
+        check(wp_test_rng_calls-calls==(scenario==0||scenario==1||scenario==4||scenario==5?1:0),"one forty-percent roll per qualifying discharge");
+        if(scenario==0) {
+            check(target.target==&other,"same-species victim selected");
+            mobj_t missile{};link(&missile);P_WeakpointMonsterMissile(&missile,&target);
+            check(P_WeakpointFriendlyMissile(&missile),"frenzy marks its monster projectile");
+            std::vector<unsigned char> save(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());P_WeakpointClear();P_WeakpointLoad(save.data(),save.size());
+            check(P_WeakpointFrenzied(&target)&&P_WeakpointFriendlyMissile(&missile),"frenzy and marked projectiles survive save/load");
+            target.target=&source;P_WeakpointFrenzyTarget(&target);check(target.target==&other,"frenzy overrides retaliation target");
+            leveltime+=350;P_WeakpointFrenzyTarget(&target);
+            check(!P_WeakpointFrenzied(&target)&&target.target==nullptr,"ten-second frenzy expiry resumes normal acquisition");
+            check(P_WeakpointFriendlyMissile(&missile),"launched projectile remains friendly-fire capable after expiry");
+            P_WeakpointConfigureExtras(0,0);check(!P_WeakpointFriendlyMissile(&missile),"disabling feature cancels projectile override");
+        }
+    }
+    reset(MT_KNIGHT);P_WeakpointConfigureExtras(1,1);p_wp_balance.bleedChance=p_wp_balance.frenzyChance=100;
+    mobj_t other{};other.type=MT_TROOP;other.flags=MF_SHOOTABLE|MF_COUNTKILL;other.health=100;link(&other);
+    P_WeakpointBeginShot(&source,wp_supershotgun);e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+    check(P_WeakpointBleeding(&target)&&P_WeakpointFrenzied(&target),"bleeding and frenzy coexist");
+    std::vector<unsigned char> save(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());leveltime+=1000;P_WeakpointLoad(save.data(),save.size());
+    check(P_WeakpointBleeding(&target)&&P_WeakpointFrenzied(&target),"both statuses restore remaining time instead of absolute time");
+    P_WeakpointForget(&other);other.health=0;P_WeakpointFrenzyTarget(&target);check(!P_WeakpointFrenzied(&target),"no surviving victims ends frenzy early");
+    target.health=1;leveltime+=35;P_WeakpointTick(&target);check(target.health<=0&&P_WeakpointRuntimeCount()==0,"lethal bleeding releases status records");
+    reset(MT_TROOP);P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;
+    P_WeakpointBeginShot(&source,wp_pistol);e=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+    P_WeakpointConfigure(0,0,0);check(P_WeakpointBleeding(&target),"unrelated injury/weak-point toggles preserve independent bleeding");
+    notifications=0;P_WeakpointImpact=+[](const wp_damage_event_t*){++notifications;};
+    target.health=1;e=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&e);P_WeakpointNotify(&e);P_WeakpointApply(&e);
+    check(notifications==1,"one confirmed notification including lethal damage and duplicate callbacks");P_WeakpointImpact=nullptr;
+    for(int mode=0;mode<4;++mode) {
+        reset(MT_KNIGHT);P_WeakpointConfigureExtras(1,1);p_wp_balance.bleedChance=p_wp_balance.frenzyChance=100;
+        if(mode==0)netgame=true;else if(mode==1)demoplayback=true;else if(mode==2)demorecording=true;
+        else P_WeakpointTargetAllowed=+[](const mobj_t*)->int{return 0;};
+        P_WeakpointBeginShot(&source,wp_supershotgun);e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+        check(!P_WeakpointBleeding(&target)&&!P_WeakpointFrenzied(&target)&&wp_test_rng_calls==0,"new statuses excluded from demo/network/voxel paths without RNG");
+    }
+    reset(MT_KNIGHT);P_WeakpointConfigureExtras(0,1);p_wp_balance.frenzyChance=100;target.health=1;
+    P_WeakpointBeginShot(&source,wp_supershotgun);e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
+    check(!P_WeakpointFrenzied(&target)&&wp_test_rng_calls==0,"lethal discharge never rolls frenzy");
+    // Previous 60-byte v1 records must retain their injury/provenance prefix.
+    reset(MT_BABY);p_wp_balance.legChance=100;e=event(WP_ROCKET_DIRECT,WP_LEGS,1);P_WeakpointApply(&e);
+    save.resize(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());
+    std::vector<unsigned char> legacy(save.begin(),save.begin()+68);legacy[0]=1;
+    uint32_t bytes=76;for(int i=0;i<4;++i)legacy.push_back((unsigned char)(bytes>>(8*i)));
+    for(char c:{'W','P','0','1'})legacy.push_back(c);
+    check(P_WeakpointLoad(legacy.data(),legacy.size())==76&&P_WeakpointImmobilized(&target),"v1 save records remain compatible after v2 status extension");
+    p_wp_balance=balance;P_WeakpointConfigureExtras(0,0);
+}
 int main() {
-    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();
+    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");
     P_WeakpointReadBalance("wp_heavy_head",900);check(p_wp_balance.heavyHead==190,"out-of-range tuning is ignored");

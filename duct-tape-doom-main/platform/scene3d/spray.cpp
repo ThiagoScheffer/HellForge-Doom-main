@@ -108,6 +108,22 @@ static void burst(float x,float y,float z,float dx,float dy,const Burst &b) {
     }
 }
 
+void combatBleed(mobj_t *actor) {
+    if(!sprayOn()||!actor||actor->health<=0)return;
+    struct Position {float x,y;int tic;unsigned level;};
+    static std::unordered_map<const mobj_t*,Position> positions;
+    static unsigned serial=~0u;
+    if(serial!=r_levelserial){positions.clear();serial=r_levelserial;}
+    float x=units(actor->x),y=units(actor->y);auto found=positions.find(actor);
+    if(found==positions.end()||leveltime-found->second.tic>2){positions[actor]={x,y,leveltime,r_levelserial};return;}
+    float dx=x-found->second.x,dy=y-found->second.y;
+    found->second={x,y,leveltime,r_levelserial};
+    if((leveltime%5)||std::hypot(dx,dy)<.05f)return;
+    checkSprayLevel();BloodSourceScope bloodSource(actor);
+    throwDrop(x,y,units(actor->z)+std::min(24.f,units(actor->height)*.45f),-dx*8,-dy*8,-15,1.1f,randomRange(3,6),BLOOD_SPECK);
+    // Bounded cosmetic cache; expired actors are never dereferenced.
+    if(positions.size()>512)positions.clear();
+}
 void sprayHit(const mobj_t *target,float x,float y,float z,float dx,float dy,float slope,int damage) {
     BloodSourceScope bloodSource(target);
     if(!target||!bleeds(*target))return;

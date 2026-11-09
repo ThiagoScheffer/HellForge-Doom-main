@@ -128,14 +128,14 @@ bool createPipelines() {
     weaponPipeline=pipeline(wv,world,alphaBlend,depthAlways,msaa,color);
     weaponAddPipeline=pipeline(wv,world,addBlend,depthAlways,msaa,color);
     hudPipeline=pipeline(wv,hud,alphaBlend,depthAlways,msaa,color);
-    solidPipeline=pipeline(wv,solid,alphaBlend,depthAlways,msaa,color);
+    solidPipeline=pipeline(wv,particle,alphaBlend,depthAlways,msaa,color);
     // After the mist, overlays continue in a pass without a depth target.
     mistPipeline=pipeline(wv,mist,alphaBlend,noDepth,msaa,color);
     shaftPipeline=pipeline(wv,mist,addBlend,noDepth,msaa,color);
     overlayWeaponPipeline=pipeline(wv,world,alphaBlend,noDepth,msaa,color);
     overlayWeaponAddPipeline=pipeline(wv,world,addBlend,noDepth,msaa,color);
     overlayHudPipeline=pipeline(wv,hud,alphaBlend,noDepth,msaa,color);
-    overlaySolidPipeline=pipeline(wv,solid,alphaBlend,noDepth,msaa,color);
+    overlaySolidPipeline=pipeline(wv,particle,alphaBlend,noDepth,msaa,color);
     reflectOpaquePipeline=pipeline(rv,opaque,opaqueBlend,depthWrite,one,color);
     reflectPrepassPipeline=pipeline(rv,solid,depthBlend,depthWrite,one,color);
     reflectSkyPipeline=pipeline(kv,sky,opaqueBlend,depthTest,one,color);

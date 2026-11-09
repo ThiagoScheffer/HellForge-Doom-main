@@ -447,11 +447,20 @@ std::vector<SpriteDraw> weaponDraws(const Uniforms &camera) {
 }
 std::vector<Vertex> crosshairVertices(float worldW,float worldH) {
     std::vector<Vertex> cross;
-    if(!worldPending||!settings.crosshair||menuactive)return cross;
+    if(!worldPending||menuactive)return cross;
     float px=2/worldW,py=2/worldH;
+    if(settings.crosshair) {
     screenQuad(cross,-7*px,py,5*px,2*py,0,0,1,1);screenQuad(cross,2*px,py,5*px,2*py,0,0,1,1);
     screenQuad(cross,-px,7*py,2*px,5*py,0,0,1,1);screenQuad(cross,-px,-2*py,2*px,5*py,0,0,1,1);
-    for(auto &v:cross){v.x+=cornerPeekAim[0];v.y+=cornerPeekAim[1];}
+    }
+    for(auto &v:cross){v.x+=cornerPeekAim[0];v.y+=cornerPeekAim[1];v.red=.85f;v.green=1;v.blue=.85f;v.light=.8f;}
+    if((settings.headshotFeedback&1)&&headshotLevel==r_levelserial&&headshotUntil>gameSeconds()) {
+        size_t start=cross.size();
+        const char *rows[]={"1010111","1010100","1110111","1010001","1010111"};
+        for(int y=0;y<5;++y)for(int x=0;x<7;++x)if(rows[y][x]=='1')
+            screenQuad(cross,(12+x)*px,(-10-y)*py,px,py,0,0,1,1);
+        for(size_t i=start;i<cross.size();++i){cross[i].red=1;cross[i].green=.65f;cross[i].blue=.18f;}
+    }
     return cross;
 }
 } // namespace doom3d

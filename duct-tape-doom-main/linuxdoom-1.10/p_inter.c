@@ -847,7 +847,7 @@ P_DamageMobj
     if ( !(target->flags & MF_SHOOTABLE) )
 	return;	// shouldn't happen...
 		
-    if(R_DamageHit)R_DamageHit(target,inflictor,source,damage);
+    if(R_DamageHit&&!p_wp_bleed_damage)R_DamageHit(target,inflictor,source,damage);
 
     if (target->health <= 0)
 	return;
@@ -859,7 +859,7 @@ P_DamageMobj
 	target->momx = target->momy = target->momz = 0;
     }
 
-    if (R_DamageHit)
+    if (R_DamageHit&&!p_wp_bleed_damage)
 	R_DamageHit (target, inflictor, source, damage);
 	
     player = target->player;
@@ -952,7 +952,7 @@ P_DamageMobj
     }
     
     // do the damage	
-    P_AggressiveDamage(target,inflictor,source,damage);
+    if(!p_wp_bleed_damage)P_AggressiveDamage(target,inflictor,source,damage);
     if(damage>0)Arcade_Impact(inflictor,source,target);
     Arcade_Damage(source,target,damage);
     if(damage>0)P_PhotoEvent(2,target);
@@ -964,6 +964,8 @@ P_DamageMobj
 	return;
     }
 
+    if(p_wp_bleed_damage)return;
+
     if ( (P_Random () < target->info->painchance)
 	 && !(target->flags&MF_SKULLFLY) )
     {
@@ -974,7 +976,7 @@ P_DamageMobj
 			
     target->reactiontime = 0;		// we're awake now...	
 
-    if ( (!target->threshold || target->type == MT_VILE)
+    if ( !P_WeakpointFrenzied(target) && (!target->threshold || target->type == MT_VILE)
 	 && source && source != target
 	 && source->type != MT_VILE)
     {

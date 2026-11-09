@@ -89,3 +89,7 @@ The nonvisual harness also accepts `--solid` to exercise the launcher's solid-ma
 These are approximate sprite-based anatomical surfaces, not 3D skeleton hitboxes. Conservative mechanical leg masks cover verified exterior leg/foot pixels; ambiguous chassis overlaps and hidden regions remain ordinary hits. Replacement-art anatomy and very oblique/curved projectile contacts can fall back to ordinary localized damage. Large-map and physical LAN performance are not certified by the bounded smoke fixtures; LAN mechanics remain disabled.
 
 No balance defaults were changed from the approved plan. Suggested playtesting focuses on boss plasma time-to-kill, close Pinky execution frequency, and whether mechanical vulnerabilities overshadow ordinary weapon selection; these are review topics, not implemented balance changes.
+
+## Feedback and additional statuses
+
+Build 2026.11.9.2 adds independently controlled metal-leg sparks, selectable headshot confirmation, bullet bleeding and close-super-shotgun frenzy. See [behavior, configuration and monster/status matrix](MONSTER-FEEDBACK-AND-STATUSES.md). The damage matrix above remains unchanged.
