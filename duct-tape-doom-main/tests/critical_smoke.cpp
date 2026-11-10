@@ -225,8 +225,10 @@ static void visualFrame() {
         std::puts("PASS four real sprite headshots and before/after GPU captures");I_Quit();
     }
 }
+#include "settings_persistence.inc"
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(!settingsCase.empty()){settingsPersistenceFrame();return;}
     if(visualSurvival){survivalVisualFrame();return;}
     if(visualFeedback){feedbackVisualFrame();return;}
     if(visualEnhanced){enhancedVisualFrame();return;}
@@ -238,15 +240,20 @@ int main(int argc,char **argv) {
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
     visual=visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
     std::string config=output+"/doom.cfg",graphics=output+"/graphics.cfg";
-    FILE *f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
+    FILE *f=nullptr;
+    if(settingsCase.empty()) {
+    f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);std::fclose(f);
     if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
+    }
     f=std::fopen(config.c_str(),"w");if(!f)return 2;std::fputs("show_messages 0\n",f);std::fclose(f);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
         "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":visual?"1":"4"};
+    if(!settingsCase.empty())args.emplace_back("-classic");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
     if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}
     myargc=(int)pointers.size();myargv=pointers.data();singletics=true;D_DoomMain();return 0;

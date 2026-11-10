@@ -633,3 +633,36 @@ extern "C" int I_TestSettingsControls(void) {
     I_Render3DSettingsKey(SDL_SCANCODE_F10,0);
     return 1;
 }
+
+#ifdef DOOM_TEST_DRIVER
+// Drive the actual F4 apply/discard handlers against an isolated -graphics path.
+extern "C" int I_TestSettingsPersistence(int mode) {
+    I_Render3DSettingsMenu();
+    if(mode>=3){
+        panel.draft.criticalParts=!settings.criticalParts;panel.draft.fov=settings.fov+5;
+        if(mode==3)I_Render3DSettingsKey(SDL_SCANCODE_F10,0);
+        return mode==3?!panel.open:panel.open;
+    }
+    panel.draft.accelerated=1;
+    auto choose=[](const char *key){
+        for(size_t t=0;t<panel.tabs.size();++t){selectTab((int)t);
+            for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;
+                if(o&&o->key&&std::string(o->key)==key){panel.selected=(int)i;return true;}}}
+        return false;
+    };
+    for(const char *key:{"critical_parts","enhanced_weak_points","monster_weapon_vulnerabilities","localized_injury_effects",
+        "monster_bleeding","headshot_frenzy","monster_feeding","monster_metal_sparks","fog","emissive","corner_peek"}) {
+        if(!choose(key))return 0;*selectedOption().flag=0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        if(*selectedOption().flag!=1)return 0;
+    }
+    if(!choose("headshot_sound"))return 0;*selectedOption().flag=1;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+    if(!choose("headshot_feedback"))return 0;*selectedOption().flag=0;
+    for(int i=0;i<3;++i)I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+    if(!choose("scale"))return 0;*selectedOption().flag=50;I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+    if(!choose("fov"))return 0;*selectedOption().number=90;I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+    if(!choose("peek_left"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);I_Render3DSettingsKey(SDL_SCANCODE_Z,0);
+    if(mode==2)I_Render3DSettingsClick(620,helpRow*cellHeight+8,1);
+    else I_Render3DSettingsKey(mode==1?SDL_SCANCODE_F4:SDL_SCANCODE_ESCAPE,0);
+    return !panel.open&&settings.criticalParts&&settings.headshotFeedback==3&&settings.fov==95&&settings.peekLeft==SDL_SCANCODE_Z;
+}
+#endif

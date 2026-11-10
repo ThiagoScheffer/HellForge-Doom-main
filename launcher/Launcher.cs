@@ -254,10 +254,9 @@ internal static class SettingsBackup {
 
 // Visual and startup layer. Compatible with the existing .NET Framework 4.x build.
 internal static class GraphicsPerformance {
-    // Only graphical effects are overridden; gameplay, controls, audio and IWAD
-    // selection remain as configured by the player. The original file is never edited.
+    // Low-FX is a starting preset for new profiles. Existing F4 choices are never overridden.
     private static readonly Dictionary<string,string> LowFx = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
-        {"msaa","0"}, {"scale","85"}, {"soft_effects","0"}, {"surface_detail","0"},
+        {"msaa","0"}, {"scale","75"}, {"soft_effects","0"}, {"surface_detail","0"},
         {"varied_highlights","0"}, {"uneven_tiles","0"}, {"uneven_walls","0"},
         {"weapon_lighting","0"}, {"glass_reflections","0"}, {"emissive","0"},
         {"glossy_screens","0"}, {"glowing_eyes","0"}, {"blood_shine","0"},
@@ -279,8 +278,7 @@ internal static class GraphicsPerformance {
         {"unoccluded_surface_lights","0"}, {"grid_sprite_light","0"}
     };
 
-    internal static string CreateTemporaryConfig(string original) {
-        var lines = File.ReadAllLines(original);
+    private static string[] StartingDefaults(string[] lines) {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int originalScale = 100;
         foreach(string line in lines) {
@@ -293,7 +291,7 @@ internal static class GraphicsPerformance {
             }
         }
         var output = new List<string>(lines.Length+LowFx.Count+2);
-        output.Add("# Temporary low-FX configuration; the original graphics.cfg is not changed.");
+        output.Add("# Low-FX starting defaults. Changes applied in F4 are saved to this profile.");
         foreach(string line in lines) {
             var trimmed=line.Trim();
             if(trimmed.Length==0 || trimmed.StartsWith("#")) {output.Add(line);continue;}
@@ -301,16 +299,25 @@ internal static class GraphicsPerformance {
             string value;
             if(parts.Length>0 && LowFx.TryGetValue(parts[0],out value)) {
                 // Never raise a render scale that the user has already reduced.
-                if(parts[0].Equals("scale",StringComparison.OrdinalIgnoreCase))value=Math.Min(originalScale,85).ToString();
+                if(parts[0].Equals("scale",StringComparison.OrdinalIgnoreCase))value=Math.Min(originalScale,75).ToString();
                 if(seen.Add(parts[0])) output.Add(parts[0]+" "+value);
             } else output.Add(line);
         }
         foreach(var entry in LowFx)if(seen.Add(entry.Key))
-            output.Add(entry.Key+" "+(entry.Key=="scale"?Math.Min(originalScale,85).ToString():entry.Value));
-        Directory.CreateDirectory(Data.Home);
-        string path=Path.Combine(Data.Home,"graphics-lowfx-"+Guid.NewGuid().ToString("N")+".cfg");
-        File.WriteAllLines(path,output.ToArray(),new UTF8Encoding(false));
-        return path;
+            output.Add(entry.Key+" "+(entry.Key=="scale"?Math.Min(originalScale,75).ToString():entry.Value));
+        return output.ToArray();
+    }
+    internal static string PrepareConfig(string profile,string bundled,bool lowFx) {
+        if(File.Exists(profile))return profile;
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(profile)));
+        string temporary=profile+".initial-"+Guid.NewGuid().ToString("N")+".tmp";
+        try {
+            if(lowFx)File.WriteAllLines(temporary,StartingDefaults(File.ReadAllLines(bundled)),new UTF8Encoding(false));
+            else File.Copy(bundled,temporary);
+            try {File.Move(temporary,profile);}
+            catch(IOException){if(!File.Exists(profile))throw;}
+        }finally{if(File.Exists(temporary))File.Delete(temporary);}
+        return profile;
     }
 }
 
@@ -655,10 +662,10 @@ internal sealed class Launcher : Form {
         footer.Controls.Add(status);
         export=CreateButton("EXPORT SETTINGS",ExportSettings,quiet:true);footer.Controls.Add(export);
         import=CreateButton("IMPORT SETTINGS",ImportSettings,quiet:true);footer.Controls.Add(import);
-        lowFx.Text="LOW-FX GAME MODE";lowFx.Checked=true;lowFx.AutoSize=false;
+        lowFx.Text="LOW-FX DEFAULTS";lowFx.Checked=true;lowFx.AutoSize=false;
         lowFx.FlatStyle=FlatStyle.Flat;lowFx.ForeColor=Palette.Accent;lowFx.BackColor=Palette.Card;
         lowFx.Font=tagFont;lowFx.Cursor=Cursors.Hand;footer.Controls.Add(lowFx);
-        tips.SetToolTip(lowFx,"Default ON: launch with a temporary low-effects graphics.cfg and suspend launcher animation. Your normal graphics.cfg is preserved.");
+        tips.SetToolTip(lowFx,"Starting preset for new profiles only. Existing profiles are unchanged. Your F4 Apply/close choices are always saved and used on the next launch.");
         lan=CreateButton("LAN / CO-OP",PlayLan);footer.Controls.Add(lan);
         play=CreateButton("▶  PLAY GAME",Play,primary:true);footer.Controls.Add(play);
         AcceptButton=play;
@@ -787,7 +794,6 @@ internal sealed class Launcher : Form {
         if(games.SelectedItem==null){BrowseGame();return;}
         SetLaunching(true);
         if(scanCancellation!=null)scanCancellation.Cancel();
-        string temporaryGraphics=null;
         bool enteredGameMode=false;
         try {
             string game=(string)games.SelectedItem;
@@ -807,9 +813,7 @@ internal sealed class Launcher : Form {
             if(IsDisposed||Disposing)return;
             if(multiplayer)args+=" -lanmenu";
             Directory.CreateDirectory(Data.Profile);
-            string graphics=Path.Combine(Data.Profile,"graphics.cfg");
-            if(!File.Exists(graphics))File.Copy(Data.BundledResource("graphics.cfg"),graphics);
-            if(performance){temporaryGraphics=GraphicsPerformance.CreateTemporaryConfig(graphics);graphics=temporaryGraphics;}
+            string graphics=GraphicsPerformance.PrepareConfig(Path.Combine(Data.Profile,"graphics.cfg"),Data.BundledResource("graphics.cfg"),performance);
             args+=" -graphics "+Data.Quote(graphics);
             Save();status.Text="Launching game…";
             var start=new ProcessStartInfo(engine,args){WorkingDirectory=Data.Home,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
@@ -834,7 +838,6 @@ internal sealed class Launcher : Form {
         }catch(Exception e){
             if(!IsDisposed&&!Disposing){status.Text="Launch failed.";MessageBox.Show(this,e.Message,"Cannot start game",MessageBoxButtons.OK,MessageBoxIcon.Error);}
         }finally{
-            if(temporaryGraphics!=null)try{File.Delete(temporaryGraphics);}catch(IOException){}catch(UnauthorizedAccessException){}
             gameRunning=false;
             if(!IsDisposed&&!Disposing){
                 if(enteredGameMode){hero.LeaveGameMode();Show();WindowState=FormWindowState.Normal;Activate();}

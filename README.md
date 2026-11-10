@@ -137,3 +137,5 @@ See [LICENSE](LICENSE), [licenses/NOTICE.txt](licenses/NOTICE.txt), and [license
 Monster combat additions: [metal-leg sparks, headshot feedback, bleeding and temporary infighting](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md).
 
 Current combat update: [stronger metal sparks, blood headshot feedback, progressive bleeding and optional monster feeding](docs/changes/MONSTER-SURVIVAL-AI.md).
+
+F4 persistence: [applied choices now survive Low-FX launches and restarts](docs/changes/F4-SETTINGS-PERSISTENCE.md). Use Esc, F4 or Apply/close to save; F10 discards.
