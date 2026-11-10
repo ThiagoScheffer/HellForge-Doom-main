@@ -1,6 +1,9 @@
 /* Bullet impacts and explosions: wall and floor decals, scorches and
    debris. */
 #include "internal.h"
+extern "C" {
+#include "../audio/sound_options.h"
+}
 #include "p_digwall.h"
 extern "C" {
 #include "p_solid.h"
@@ -111,46 +114,81 @@ void flatImpactParticles(float x,float y,float z,bool ceiling,Image &image,float
 }
 // Called only after a door actually moves upward. Emit at the two jambs,
 // never across the face; distance, cadence and a global budget bound the work.
-static void doorTrackSpark(float x,float y,float z,float nx,float ny) {
+static void doorTrackSpark(float x,float y,float z,float nx,float ny,bool metal=false) {
     if(debris.size()>=512)return;
-    float out=randomRange(15,45),slide=randomRange(-24,24);
-    debris.push_back({x,y,z,nx*out-ny*slide,ny*out+nx*slide,randomRange(-12,38),
-        gameSeconds(),randomRange(.16f,.3f),randomRange(.7f,1.2f),{1,.65f,.18f},1});
+    float out=metal?randomRange(90,230):randomRange(15,45),slide=metal?randomRange(-135,135):randomRange(-24,24);
+    float scale=metal?p_wp_balance.sparkScale/100.f:1;
+    debris.push_back({x,y,z,nx*out-ny*slide,ny*out+nx*slide,metal?randomRange(-120,150):randomRange(-12,38),
+        gameSeconds(),metal?randomRange(.15f,.35f):randomRange(.16f,.3f),randomRange(.7f,1.2f)*scale,metal?std::array<float,3>{1,.78f,.24f}:std::array<float,3>{1,.65f,.18f},1});
+    if(!metal||SV_Active())return;
+    auto &p=debris.back();const auto *sector=R_PointInSubsector((fixed_t)(x*FRACUNIT),(fixed_t)(y*FRACUNIT))->sector;
+    float floor=floorZ(sector)+.3f;
+    if(z>=floor){float t=(p.vz+std::sqrt(p.vz*p.vz+840*(z-floor)))/420;
+        if(t>0&&t<p.life){
+            float bx=x+p.vx*t,by=y+p.vy*t;const auto *landing=R_PointInSubsector((fixed_t)(bx*FRACUNIT),(fixed_t)(by*FRACUNIT))->sector;
+            if(landing->floorpic!=skyflatnum&&std::abs(floorZ(landing)+.3f-floor)<.5f){p.bounce=t;p.bx=bx;p.by=by;p.bz=floor;p.bvx=p.vx*.55f;p.bvy=p.vy*.55f;p.bvz=std::abs(p.vz-420*t)*.3f;}}}
+    float h=std::hypot(p.vx,p.vy);WallHit wall;
+    if(h>1&&firstSolidWall(x,y,z,p.vx/h,p.vy/h,(p.vz-210*p.life)/h,h*p.life,wall)) {
+        float t=wall.t/h,zz=z+p.vz*t-210*t*t;WallSpan span;
+        if((p.bounce<0||t<p.bounce)&&wallSpan(lines[wall.line],wall.side,wall.section,span)&&zz>=span.bottom&&zz<=span.top){
+            float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);if(len>0){float wx=ey/len,wy=-ex/len,dot=p.vx*wx+p.vy*wy;
+                p.bounce=t;p.bx=x+p.vx*t+wx*.3f;p.by=y+p.vy*t+wy*.3f;p.bz=zz;p.bvx=(p.vx-1.4f*dot*wx)*.6f;p.bvy=(p.vy-1.4f*dot*wy)*.6f;p.bvz=(p.vz-420*t)*.6f;}}
+    }
 }
 float headshotUntil=0;
 unsigned headshotLevel=~0u;
 uint64_t headshotDischarge=0;
 static unsigned combatLevel=~0u;
-struct CombatParticleHit {uint64_t shot;float x,y,z;int tic;};
+CombatFeedbackStats combatFeedbackStats;
+struct CombatParticleHit {const mobj_t *target;uint64_t shot;float x,y,z;int tic,count=0;};
 static std::vector<CombatParticleHit> combatParticleHits;
-static void combatSparks(const wp_damage_event_t &event,bool head) {
+static uint64_t headshotSoundDischarge=0;
+static int sparkBudgetTic=-1,sparkBudget=0;
+static bool combatBurst(const wp_damage_event_t &event,bool metal) {
     const auto &hit=event.impact;
-    if(combatLevel!=r_levelserial){combatParticleHits.clear();headshotUntil=0;headshotDischarge=0;combatLevel=r_levelserial;}
     combatParticleHits.erase(std::remove_if(combatParticleHits.begin(),combatParticleHits.end(),[](const auto &h){return h.tic!=leveltime;}),combatParticleHits.end());
-    for(const auto &h:combatParticleHits)if(h.shot==event.dischargeId&&std::hypot(h.x-hit.x,h.y-hit.y)<6&&std::abs(h.z-hit.z)<6)return;
-    if(combatParticleHits.size()>=32)return;
-    combatParticleHits.push_back({event.dischargeId,hit.x,hit.y,hit.z,leveltime});dropOldLevelImpacts();
+    uint64_t shot=event.dischargeId?event.dischargeId:event.eventId;
+    auto found=std::find_if(combatParticleHits.begin(),combatParticleHits.end(),[&](const auto &h){return h.shot==shot&&h.target==event.target;});
+    if(!metal){
+        if(found!=combatParticleHits.end())return false;
+        if(combatParticleHits.size()>=32)return false;
+        combatParticleHits.push_back({event.target,shot,hit.x,hit.y,hit.z,leveltime,0});return true;
+    }
+    if(found==combatParticleHits.end()){
+        if(combatParticleHits.size()>=32)return false;
+        combatParticleHits.push_back({event.target,shot,hit.x,hit.y,hit.z,leveltime,0});found=combatParticleHits.end()-1;
+    }
+    if(sparkBudgetTic!=leveltime){sparkBudget=0;sparkBudgetTic=leveltime;}
+    int requested=event.kind==WP_SHOTGUN_PELLET?p_wp_balance.sparkPellet:p_wp_balance.sparkBullet;
+    int count=std::max(0,std::min({requested,p_wp_balance.sparkCap-found->count,128-sparkBudget,512-(int)debris.size()}));
+    if(!count)return false;
     float nx=units(event.source->x)-hit.x,ny=units(event.source->y)-hit.y,len=std::hypot(nx,ny);
     if(len<.001f){nx=1;ny=0;}else{nx/=len;ny/=len;}
-    for(int i=0;i<(head?5:4)&&debris.size()<512;++i) {
-        doorTrackSpark(hit.x+nx,hit.y+ny,hit.z,nx,ny);
-    }
+    dropOldLevelImpacts();
+    for(int i=0;i<count;++i)doorTrackSpark(hit.x+nx,hit.y+ny,hit.z,nx,ny,true);
+    found->count+=count;sparkBudget+=count;combatFeedbackStats.metalParticles+=count;
+    sparkFlash(hit.x+nx*3,hit.y+ny*3,hit.z,56,.65f,{1,.68f,.2f});
+    return true;
 }
 void combatImpact(const wp_damage_event_t *event) {
-    if(!event||event->impact.confidence!=100||event->baseDamage<=0||!event->source||!event->source->player)return;
+    if(!event||!P_WeakpointActive()||event->impact.confidence!=100||event->baseDamage<=0||!event->source||!event->source->player)return;
     const auto &e=*event;
     bool head=e.impact.region==WP_HEAD&&e.finalDamage>e.baseDamage&&
         (e.kind==WP_BULLET||e.kind==WP_SHOTGUN_PELLET);
-    if(combatLevel!=r_levelserial){headshotUntil=0;headshotDischarge=0;combatLevel=r_levelserial;combatParticleHits.clear();}
+    if(combatLevel!=r_levelserial){headshotUntil=0;headshotDischarge=0;headshotSoundDischarge=0;sparkBudgetTic=-1;sparkBudget=0;combatLevel=r_levelserial;combatParticleHits.clear();combatFeedbackStats={};}
     if(head&&settings.headshotFeedback) {
         if((settings.headshotFeedback&1)&&e.source==players[displayplayer].mo&&
             (!e.dischargeId||headshotDischarge!=e.dischargeId)) {
             headshotUntil=gameSeconds()+.35f;headshotLevel=r_levelserial;headshotDischarge=e.dischargeId;
         }
-        if(settings.headshotFeedback&2)combatSparks(e,true);
+        if((settings.headshotFeedback&2)&&combatBurst(e,false))combatHeadBlood(e);
+        uint64_t soundShot=e.dischargeId?e.dischargeId:e.eventId;
+        if(settings.headshotSound&&e.source==players[displayplayer].mo&&soundShot!=headshotSoundDischarge){
+            headshotSoundDischarge=soundShot;I_HeadshotSound();++combatFeedbackStats.headSounds;
+        }
     }
     if(settings.monsterMetalSparks&&e.impact.region==WP_LEGS&&(e.target->type==MT_BABY||e.target->type==MT_SPIDER)&&
-        (e.kind==WP_BULLET||e.kind==WP_SHOTGUN_PELLET||e.kind==WP_ROCKET_DIRECT||e.kind==WP_PLASMA_DIRECT||e.kind==WP_BFG_DIRECT))combatSparks(e,false);
+        (e.kind==WP_BULLET||e.kind==WP_SHOTGUN_PELLET||e.kind==WP_ROCKET_DIRECT||e.kind==WP_PLASMA_DIRECT||e.kind==WP_BFG_DIRECT))combatBurst(e,true);
 }
 void doorMotion(sector_t *sector) {
     if(!settings.breakableWalls||!settings.doorSparks||gamestate!=GS_LEVEL||!players[displayplayer].mo)return;
@@ -458,6 +496,7 @@ void buildImpacts(const Uniforms &camera) {
     // it falls fast and shrinks once before it is gone.
     for(auto &p:debris) {
         float t=std::floor((now-p.born)*TICRATE)/TICRATE,x=p.x+p.vx*t,y=p.y+p.vy*t,z=p.z+p.vz*t-210*t*t;
+        if(p.bounce>=0&&t>=p.bounce){float after=t-p.bounce;x=p.bx+p.bvx*after;y=p.by+p.bvy*after;z=p.bz+p.bvz*after-210*after*after;}
         const sector_t *sector=R_PointInSubsector((fixed_t)(x*FRACUNIT),(fixed_t)(y*FRACUNIT))->sector;
         float floor=floorZ(sector)+0.2f;
         size_t index=sector-sectors;

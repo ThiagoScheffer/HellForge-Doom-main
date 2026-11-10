@@ -39,6 +39,7 @@ enum {
     IMPACT_FLYBY,          /* a bullet whizzing past the player's head */
     IMPACT_GORE_BURST,     /* a kill's wet burst, drops pattering down */
     IMPACT_GORE_SLAP,      /* a body slapping into a floor or wall */
+    IMPACT_HEADSHOT,       /* original short wet snap and descending confirmation tone */
     IMPACT_KINDS
 };
 

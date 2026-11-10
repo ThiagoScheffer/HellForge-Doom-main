@@ -20,6 +20,7 @@ void I_SetMadeSounds(int impacts, int glass, int ambient, float amount, int step
 void I_SetAlternativeComputerSounds(int enabled);
 /* A made-up effect (an IMPACT_ kind of audio/impact_synth.h) at a map point. */
 void I_MadeSound(int kind, float x, float y, float z);
+void I_HeadshotSound(void);
 /* Fixtures shot out around a map point: their ambient sound stops. */
 void I_AmbienceSilence(float x, float y, float z, float radius);
 /* A window pane on a map line, whole or broken: through a whole one ambience is muffled. */

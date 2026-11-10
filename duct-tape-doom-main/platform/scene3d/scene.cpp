@@ -187,6 +187,7 @@ void applySettings() {
     R_BloodHit=settings.accelerated?bloodHit:nullptr;
     P_WeakpointConfigure(settings.accelerated&&settings.enhancedWeakPoints,settings.accelerated&&settings.weaponVulnerabilities,settings.accelerated&&settings.localizedInjuries);
     P_WeakpointConfigureExtras(settings.accelerated&&settings.monsterBleeding,settings.accelerated&&settings.headshotFrenzy);
+    P_WeakpointConfigureFeeding(settings.accelerated&&settings.monsterFeeding);
     P_WeakpointImpact=settings.accelerated?combatImpact:nullptr;
     P_WeakpointBleedVisual=settings.accelerated?combatBleed:nullptr;
     P_WeakpointBulletLocate=settings.accelerated?cosmeticBulletLocate:nullptr;
@@ -236,6 +237,7 @@ void sceneInit(SDL_Window *window) {
 }
 void sceneShutdown() {
     P_WeakpointImpact=nullptr;P_WeakpointBleedVisual=nullptr;P_WeakpointBulletLocate=nullptr;P_WeakpointConfigureExtras(0,0);
+    P_WeakpointConfigureFeeding(0);
     P_WeakpointLocate=nullptr;P_WeakpointTargetAllowed=nullptr;P_WeakpointConfigure(0,0,0);
     P_CriticalBegin=nullptr;P_CriticalThing=nullptr;p_critical_trace=0;
     prepareCriticalSurface=nullptr;criticalVoxelModel=nullptr;

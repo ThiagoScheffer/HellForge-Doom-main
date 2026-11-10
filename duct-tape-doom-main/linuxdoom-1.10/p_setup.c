@@ -851,7 +851,7 @@ P_SetupLevel
 
 
     // UNUSED W_Profile ();
-    P_WeakpointClear();
+    P_WeakpointClear();P_WeakpointInitFeedingHooks();
     P_InitThinkers ();
 
     // if working with a devlopment map, reload it

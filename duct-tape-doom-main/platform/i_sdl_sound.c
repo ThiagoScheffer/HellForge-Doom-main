@@ -558,6 +558,10 @@ static void play_kind(int kind, float x, float y, float z, float level, float re
     last[kind][0] = variant;
     play_through(MadeBank_Impact(kind, variant), x, y, z, level, reach, OCCLUSION_OPEN_HZ, personal);
 }
+void I_HeadshotSound(void) {
+    const mobj_t *listener=players[consoleplayer].mo;if(!listener)return;
+    play_kind(IMPACT_HEADSHOT,listener->x/(float)FRACUNIT,listener->y/(float)FRACUNIT,listener->z/(float)FRACUNIT,.65f,1,1);
+}
 void I_MadeSound(int kind, float x, float y, float z)
 {
     if (!made_impacts || kind < 0 || kind >= IMPACT_KINDS) return;

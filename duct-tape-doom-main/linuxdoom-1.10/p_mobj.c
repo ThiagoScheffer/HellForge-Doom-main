@@ -374,7 +374,7 @@ void P_ZMovement (mobj_t* mo)
 	    dist = P_AproxDistance (mo->x - mo->target->x,
 				    mo->y - mo->target->y);
 	    
-	    delta =(mo->target->z + (mo->height>>1)) - mo->z;
+	    delta = P_WeakpointFeeding(mo) ? mo->target->floorz-mo->z : (mo->target->z + (mo->height>>1)) - mo->z;
 
 	    if (delta<0 && dist < -(delta*3) )
 		mo->z -= FLOATSPEED;

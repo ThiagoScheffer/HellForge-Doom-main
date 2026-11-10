@@ -351,3 +351,11 @@ void bloodShutdown() {
     sprayShutdown();
 }
 } // namespace doom3d
+
+#ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestCombatBloodWalls(int *out,int capacity) {
+    int count=(int)doom3d::bloodWalls.size();
+    for(int i=0;i<std::min(count,capacity);++i)out[i]=doom3d::bloodWalls[count-std::min(count,capacity)+i].line;
+    return count;
+}
+#endif

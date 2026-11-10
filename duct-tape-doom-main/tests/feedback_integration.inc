@@ -35,7 +35,7 @@ static void feedbackAndStatusIntegration() {
         P_WeakpointBeginShot(shooter,wp_pistol);shoot(shooter,hx+.5f-hi.left,128,hi.top-hy-.5f);P_WeakpointEndShot();
         check(human->health==9990,"feedback selector never changes headshot damage");
         check((headshotUntil>gameSeconds())==((mode&1)!=0),"HS selector controls HUD feedback");
-        check((!debris.empty())==((mode&2)!=0),"HS selector controls world effect");
+        check(debris.empty(),"hidden blood suppresses physical HS spray in every selector mode");
         bool pending=worldPending;worldPending=true;
         check((!crosshairVertices(640,400).empty())==((mode&1)!=0),"HS HUD appears even with crosshair disabled");worldPending=pending;
     }
@@ -59,7 +59,7 @@ static void feedbackAndStatusIntegration() {
         forgetWounds(target);woundView(target,shooter,im,false,0,128,top-im.top,top,top-im.height,1,0);
         debris.clear();P_WeakpointBeginShot(shooter,wp_pistol);shoot(shooter,x,128,z);P_WeakpointEndShot();
         check(target->health==9995,"cosmetic leg sparks preserve ordinary bullet damage");
-        check(debris.size()==4,"confirmed metal-leg bullet reuses bounded door-track spark particles");
+        check(debris.size()==(size_t)p_wp_balance.sparkBullet,"confirmed metal-leg bullet reuses bounded door-track spark particles");
         settings.monsterMetalSparks=0;debris.clear();P_WeakpointBeginShot(shooter,wp_pistol);shoot(shooter,x,128,z);P_WeakpointEndShot();
         check(debris.empty()&&target->health==9990,"metal sparks toggle independent of collision and damage");settings.monsterMetalSparks=1;
         // Locate a direct plasma impact, with vulnerabilities still off.
@@ -69,7 +69,7 @@ static void feedbackAndStatusIntegration() {
         wp_impact_t impact{};int localized=weakpointLocate(plasma,target,&impact);
         if(localized&&impact.region==WP_LEGS){
             debris.clear();P_WeakpointProjectileHit(plasma,target,5);
-            check(target->health==9985&&debris.size()==4,"cosmetic-only direct plasma leg contact sparks without vulnerabilities");
+            check(target->health==9985&&debris.size()==(size_t)p_wp_balance.sparkBullet,"cosmetic-only direct plasma leg contact sparks without vulnerabilities");
         }
         P_RemoveMobj(plasma);P_RemoveMobj(target);
     }

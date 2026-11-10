@@ -112,7 +112,7 @@ constexpr float bounceStrength=1.0f;
 // A light that casts things' floor shadows (addEnemyShadow).
 // Bake-only static lights near the eye, for the fog glow (collectSurfaceLights).
 struct StaticFog { float x,y,z,radius,strength;std::array<float,3> color; };
-struct Debris { float x,y,z,vx,vy,vz,born,life,size; std::array<float,3> color; float light=1;bool liquidHit=false; }; // color unlit.
+struct Debris { float x,y,z,vx,vy,vz,born,life,size; std::array<float,3> color; float light=1;bool liquidHit=false;float bounce=-1,bx=0,by=0,bz=0,bvx=0,bvy=0,bvz=0; }; // color unlit.
 struct FlatDecal { float x,y,born,size;int sector;bool ceiling,flip; };
 struct WallSpan { Point a,b;float bottom,top,anchor;int texture; };
 // Where a ray meets a wall (firstSolidWall).
@@ -340,6 +340,9 @@ extern std::array<bool,maxLights> fogOnly;
 extern std::array<uint8_t,maxLights> lightKinds;
 extern uint8_t lightKind;
 void muzzleFlash(mobj_t *source,int weapon,int projectile);
+struct CombatFeedbackStats {int metalParticles=0,headBursts=0,headSounds=0,wallSplats=0,bleedDrops=0,bleedPools=0;};
+extern CombatFeedbackStats combatFeedbackStats;
+void combatHeadBlood(const wp_damage_event_t&);
 void combatImpact(const wp_damage_event_t*);
 void combatBleed(mobj_t*);
 int cosmeticBulletLocate(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*);

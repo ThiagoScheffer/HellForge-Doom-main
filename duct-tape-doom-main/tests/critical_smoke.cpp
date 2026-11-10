@@ -20,6 +20,7 @@ static std::string output;
 static bool visual=false;
 static bool visualEnhanced=false;
 static bool visualFeedback=false;
+static bool visualSurvival=false;
 static bool solidMode=false;
 static std::string visualCapture;
 static int checks=0;
@@ -171,6 +172,8 @@ static void run() {
 }
 #include "weakpoints_integration.inc"
 #include "feedback_integration.inc"
+#include "survival_integration.inc"
+#include "survival_visual.inc"
 static void visualFrame() {
     static std::vector<mobj_t*> victims;
     static int step=0,lastTic=-1,wait=0;
@@ -224,15 +227,17 @@ static void visualFrame() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(visualSurvival){survivalVisualFrame();return;}
     if(visualFeedback){feedbackVisualFrame();return;}
     if(visualEnhanced){enhancedVisualFrame();return;}
     if(visual){visualFrame();return;}
-    run();featureSwitchConfig();enhancedCoverage();cachedHitBenchmark();balanceHitCounts();realProjectiles();localizedRockets();realBFGAndMovement();realShotgunDischarges();realInjuriesAndSave();feedbackAndStatusIntegration();std::printf("PASS %d total engine integration checks\n",checks);I_Quit();
+    run();featureSwitchConfig();enhancedCoverage();cachedHitBenchmark();balanceHitCounts();realProjectiles();localizedRockets();realBFGAndMovement();realShotgunDischarges();realInjuriesAndSave();feedbackAndStatusIntegration();survivalIntegration();std::printf("PASS %d total engine integration checks\n",checks);I_Quit();
 }
 int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
-    visual=visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
+    visual=visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
     std::string config=output+"/doom.cfg",graphics=output+"/graphics.cfg";
     FILE *f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);std::fclose(f);
@@ -241,7 +246,7 @@ int main(int argc,char **argv) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
-        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visual?"1":"4"};
+        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":visual?"1":"4"};
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
     if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}
     myargc=(int)pointers.size();myargv=pointers.data();singletics=true;D_DoomMain();return 0;

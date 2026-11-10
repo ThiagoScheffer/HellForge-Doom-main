@@ -965,6 +965,7 @@ P_DamageMobj
     }
 
     if(p_wp_bleed_damage)return;
+    if(damage>0)P_WeakpointFeedingHurt(target);
 
     if ( (P_Random () < target->info->painchance)
 	 && !(target->flags&MF_SKULLFLY) )
@@ -976,7 +977,7 @@ P_DamageMobj
 			
     target->reactiontime = 0;		// we're awake now...	
 
-    if ( !P_WeakpointFrenzied(target) && (!target->threshold || target->type == MT_VILE)
+    if ( !P_WeakpointFrenzied(target) && !P_WeakpointFeeding(target) && (!target->threshold || target->type == MT_VILE)
 	 && source && source != target
 	 && source->type != MT_VILE)
     {

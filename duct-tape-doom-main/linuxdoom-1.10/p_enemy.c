@@ -29,6 +29,7 @@ static const char
 rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 #include "m_random.h"
@@ -706,6 +707,7 @@ void A_Look (mobj_t* actor)
 void A_Chase (mobj_t*	actor)
 {
     P_WeakpointFrenzyTarget(actor);
+    if(P_WeakpointFeedingChase(actor))return;
     int		delta;
 
     if (actor->reactiontime)
@@ -753,9 +755,10 @@ void A_Chase (mobj_t*	actor)
     
     if(P_TacticsMove(actor))return;
     if(P_AggressiveManeuver(actor))return;
+    int woundedAttack=P_WeakpointBleedOpportunity(actor);
 
     // do not attack twice in a row
-    if ((actor->flags & MF_JUSTATTACKED) && !P_AggressiveEnabled() && !P_TacticsCanFire(actor))
+    if ((actor->flags & MF_JUSTATTACKED) && !P_AggressiveEnabled() && !P_TacticsCanFire(actor) && !woundedAttack)
     {
 	actor->flags &= ~MF_JUSTATTACKED;
 	if (gameskill != sk_nightmare && !fastparm)
@@ -778,7 +781,7 @@ void A_Chase (mobj_t*	actor)
     if (actor->info->missilestate)
     {
 	if (!P_AggressiveEnabled() && !P_TacticsCanFire(actor) && gameskill < sk_nightmare
-	    && !fastparm && actor->movecount)
+	    && !fastparm && actor->movecount && !woundedAttack)
 	{
 	    goto nomissile;
 	}
@@ -1013,6 +1016,7 @@ void A_TroopAttack (mobj_t* actor)
 
 void A_SargAttack (mobj_t* actor)
 {
+    if(P_WeakpointFeedingAttack(actor))return;
     int		damage;
 
     if (!actor->target)
@@ -1028,6 +1032,7 @@ void A_SargAttack (mobj_t* actor)
 
 void A_HeadAttack (mobj_t* actor)
 {
+    if(P_WeakpointFeedingAttack(actor))return;
     int		damage;
 	
     if (!actor->target)
@@ -2097,4 +2102,45 @@ void A_PlayerScream (mobj_t* mo)
     }
     
     S_StartSound (mo, sound);
+}
+
+// Geometry-checked straight feeding approaches, reusing native step/headroom probes.
+static mobj_t *foodCorridorActor;
+static boolean PTR_FoodCorridor(intercept_t *in) {
+    line_t *line=in->d.line;
+    if(!(line->flags&ML_TWOSIDED)||(line->flags&(ML_BLOCKING|ML_BLOCKMONSTERS)))return false;
+    P_LineOpening(line);return opentop-openbottom>=foodCorridorActor->height;
+}
+static int P_FoodPath(mobj_t *actor,mobj_t *food) {
+    if(!P_CheckSight(actor,food))return 0;
+    foodCorridorActor=actor;
+    if(!P_PathTraverse(actor->x,actor->y,food->x,food->y,PT_ADDLINES,PTR_FoodCorridor))return 0;
+    double dx=(double)food->x-actor->x,dy=(double)food->y-actor->y;
+    double distance=hypot(dx,dy),stop=(double)actor->radius+food->radius+8*FRACUNIT;
+    if(distance<=stop)return 1;
+    double travel=distance-stop;int steps=(int)(travel/(16*FRACUNIT))+1;
+    if(steps>64)return 0;
+    fixed_t x=actor->x,y=actor->y,z=actor->type==MT_HEAD?actor->floorz:actor->z;
+    int i;for(i=1;i<=steps;++i) {
+        fixed_t nx=actor->x+(fixed_t)(dx/distance*travel*i/steps),ny=actor->y+(fixed_t)(dy/distance*travel*i/steps),nextZ;
+        if(!P_PursuitEdge(actor,x,y,z,nx,ny,&nextZ))return 0;
+        x=nx;y=ny;z=nextZ;
+    }
+    return 1;
+}
+static int P_FoodMove(mobj_t *actor) {
+    if(!actor->target)return 0;
+    actor->movedir=(int)((R_PointToAngle2(actor->x,actor->y,actor->target->x,actor->target->y)+ANG45/2)>>29)&7;
+    if(P_Move(actor))return 1;
+    P_NewChaseDir(actor);return 0;
+}
+static void P_FoodAnimate(mobj_t *actor) {
+    statenum_t state=(statenum_t)(actor->info->meleestate?actor->info->meleestate:actor->info->missilestate);
+    if(state!=S_NULL)P_SetMobjState(actor,state);else P_WeakpointStopFeeding(actor);
+}
+static void P_FoodWake(mobj_t *actor){if(actor->state==&states[actor->info->spawnstate]&&actor->info->seestate!=S_NULL)P_SetMobjState(actor,(statenum_t)actor->info->seestate);}
+static void P_FoodVoice(mobj_t *actor){if(actor->info->painsound)S_StartSound(actor,actor->info->painsound);}
+void P_WeakpointInitFeedingHooks(void) {
+    P_WeakpointFoodPath=P_FoodPath;P_WeakpointFoodMove=P_FoodMove;P_WeakpointFoodAnimate=P_FoodAnimate;
+    P_WeakpointFoodWake=P_FoodWake;P_WeakpointFoodConsume=P_RemoveMobj;P_WeakpointPainVoice=P_FoodVoice;
 }

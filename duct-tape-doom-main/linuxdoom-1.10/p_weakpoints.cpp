@@ -11,9 +11,15 @@ extern "C" {
 #include "m_random.h"
 }
 wp_balance_t p_wp_balance={200,175,150,150,150,200,175,150,200,300,150,150,125,
-    30,25,8,105,105,30,35,175,96,128,3,7,10,50,30,210,2,20,40,350,128,512};
+    30,25,8,105,105,30,35,175,96,128,3,7,10,50,30,210,2,20,40,350,128,512,3,4,280,350,15,25,105,70,30,60,384,16,5,10,35,105,175,128,14,8,32,175,175,64,3};
 int p_wp_enhanced=0,p_wp_vulnerabilities=0,p_wp_injuries=0;
-int p_wp_bleeding=0,p_wp_frenzy=0,p_wp_bleed_damage=0;
+int p_wp_bleeding=0,p_wp_frenzy=0,p_wp_bleed_damage=0,p_wp_feeding=0;
+int (*P_WeakpointFoodPath)(mobj_t*,mobj_t*)=nullptr;
+int (*P_WeakpointFoodMove)(mobj_t*)=nullptr;
+void (*P_WeakpointFoodAnimate)(mobj_t*)=nullptr;
+void (*P_WeakpointFoodWake)(mobj_t*)=nullptr;
+void (*P_WeakpointFoodConsume)(mobj_t*)=nullptr;
+void (*P_WeakpointPainVoice)(mobj_t*)=nullptr;
 void (*P_WeakpointImpact)(const wp_damage_event_t*)=nullptr;
 void (*P_WeakpointBleedVisual)(mobj_t*)=nullptr;
 int (*P_WeakpointBulletLocate)(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*)=nullptr;
@@ -26,6 +32,11 @@ struct Runtime {
     bool directProcessed=false,friendlyMissile=false;
     int bleedUntil=0,bleedNext=0,frenzyUntil=0;
     mobj_t *bleedSource=nullptr,*frenzyTarget=nullptr;
+    int bleedTier=0,bleedVoiceNext=0,attackCredit=0,bleedPlayer=-1;
+    uint64_t bleedDischarge=0;
+    int feedPhase=0,feedUntil=0,feedCooldown=0,feedSearch=0;
+    bool noEat=false;
+    mobj_t *feedTarget=nullptr,*feedPrevious=nullptr;
     float start[3]={},end[3]={};
     uint64_t shot=0;
 };
@@ -75,7 +86,7 @@ void P_WeakpointConfigure(int enhanced,int vulnerabilities,int injuries) {
     if(enhanced!=p_wp_enhanced||vulnerabilities!=p_wp_vulnerabilities||injuries!=p_wp_injuries) {
         for(auto it=runtime.begin();it!=runtime.end();) {
             auto &r=it->second;r.aimUntil=r.aimCooldown=r.legUntil=r.legCooldown=r.offset=0;
-            if(r.kind==WP_OTHER&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile)it=runtime.erase(it);else ++it;
+            if(r.kind==WP_OTHER&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile&&!r.feedPhase&&!r.feedCooldown&&!r.feedSearch&&!r.noEat)it=runtime.erase(it);else ++it;
         }
     }
     p_wp_enhanced=enhanced;p_wp_vulnerabilities=vulnerabilities;p_wp_injuries=injuries;
@@ -134,8 +145,15 @@ void P_WeakpointAfterDamage(const wp_damage_event_t *e) {
             P_WeakpointRegionPercent(e->target->type,e->kind,e->impact.region,100)>100;
         if(critical||roll(p_wp_balance.bleedChance)) {
             auto &r=runtime[e->target];
-            if(r.bleedUntil<=leveltime)r.bleedNext=leveltime+TICRATE;
-            r.bleedUntil=leveltime+p_wp_balance.bleedDuration;r.bleedSource=e->source;
+            uint64_t discharge=e->dischargeId?e->dischargeId:e->eventId;
+            if(r.bleedUntil<leveltime||!r.bleedTier) {
+                r.bleedTier=1;r.bleedNext=leveltime+TICRATE;r.attackCredit=0;
+                r.bleedVoiceNext=leveltime+p_wp_balance.bleedVoice2;
+            } else if(r.bleedDischarge!=discharge)r.bleedTier=std::min(3,r.bleedTier+1);
+            r.bleedDischarge=discharge;
+            int duration=r.bleedTier==3?p_wp_balance.bleedDuration3:r.bleedTier==2?p_wp_balance.bleedDuration2:p_wp_balance.bleedDuration;
+            r.bleedUntil=leveltime+duration;r.bleedSource=e->source;r.bleedPlayer=-1;
+            for(int i=0;i<MAXPLAYERS;++i)if(e->source->player==&players[i]){r.bleedPlayer=i;break;}
         }
     }
     if(!p_wp_injuries||e->impact.confidence<100)return;
@@ -233,9 +251,17 @@ void P_WeakpointAttackEnd(mobj_t *actor){auto it=runtime.find(actor);if(it!=runt
 void P_WeakpointForget(mobj_t *actor){
     runtime.erase(actor);pellets.erase(actor);
     for(auto &entry:runtime){if(entry.second.bleedSource==actor)entry.second.bleedSource=nullptr;
-        if(entry.second.frenzyTarget==actor)entry.second.frenzyTarget=nullptr;}
+        if(entry.second.frenzyTarget==actor)entry.second.frenzyTarget=nullptr;
+        if(entry.second.feedPrevious==actor)entry.second.feedPrevious=nullptr;
+        if(entry.second.feedTarget==actor){
+            if(entry.first->target==actor){
+                auto *previous=entry.second.feedPrevious;
+                entry.first->target=!P_WeakpointFrenzied(entry.first)&&previous&&previous->health>0&&(previous->flags&MF_SHOOTABLE)?previous:nullptr;
+            }
+            entry.second.feedTarget=nullptr;
+        }}
 }
-void P_WeakpointClear(void){runtime.clear();pellets.clear();shotSource=nullptr;shotId=0;}
+void P_WeakpointClear(void){P_WeakpointFeedingReset();runtime.clear();pellets.clear();shotSource=nullptr;shotId=0;}
 size_t P_WeakpointRuntimeCount(void){return runtime.size();}
 
 void P_WeakpointNotify(wp_damage_event_t *e) {
@@ -247,7 +273,7 @@ void P_WeakpointConfigureExtras(int bleeding,int frenzy) {
     p_wp_bleeding=bleeding;p_wp_frenzy=frenzy;
     for(auto &entry:runtime) {
         auto &r=entry.second;
-        if(!bleeding){r.bleedUntil=r.bleedNext=0;r.bleedSource=nullptr;}
+        if(!bleeding){r.bleedUntil=r.bleedNext=r.bleedTier=r.bleedVoiceNext=r.attackCredit=0;r.bleedDischarge=0;r.bleedSource=nullptr;r.bleedPlayer=-1;}
         if(!frenzy||!p_wp_enhanced) {
             if(r.frenzyUntil&&entry.first->target==r.frenzyTarget){entry.first->target=nullptr;entry.first->threshold=0;}
             r.frenzyUntil=0;r.frenzyTarget=nullptr;
@@ -296,31 +322,52 @@ int P_WeakpointFriendlyMissile(mobj_t *missile) {
     auto it=runtime.find(missile);return P_WeakpointActive()&&p_wp_frenzy&&it!=runtime.end()&&it->second.friendlyMissile;
 }
 void P_WeakpointTick(mobj_t *actor) {
+    if(p_wp_feeding)P_WeakpointFeedingTick(actor);
     auto it=runtime.find(actor);if(it==runtime.end())return;
     if(!allowed(actor)) {
-        if(it->second.kind==WP_OTHER&&!it->second.friendlyMissile)P_WeakpointForget(actor);
+        if(it->second.kind==WP_OTHER&&!it->second.friendlyMissile&&!it->second.noEat)P_WeakpointForget(actor);
         return;
     }
     P_WeakpointFrenzyTarget(actor);
     it=runtime.find(actor);if(it==runtime.end())return;
-    if(!p_wp_bleeding||it->second.bleedUntil<leveltime){it->second.bleedUntil=it->second.bleedNext=0;it->second.bleedSource=nullptr;}
+    if(!p_wp_bleeding||it->second.bleedUntil<leveltime){it->second.bleedUntil=it->second.bleedNext=it->second.bleedTier=it->second.attackCredit=0;it->second.bleedSource=nullptr;it->second.bleedPlayer=-1;}
     if(P_WeakpointBleeding(actor)) {
         if(leveltime>=it->second.bleedNext) {
-            auto *source=it->second.bleedSource;it->second.bleedNext+=TICRATE;
-            p_wp_bleed_damage=1;P_DamageMobj(actor,nullptr,source,p_wp_balance.bleedDamage);p_wp_bleed_damage=0;
+            auto *source=it->second.bleedSource;
+            if(!source&&it->second.bleedPlayer>=0)source=players[it->second.bleedPlayer].mo;
+            it->second.bleedNext+=TICRATE;
+            p_wp_bleed_damage=1;P_DamageMobj(actor,nullptr,source,P_WeakpointBleedDamage(actor));p_wp_bleed_damage=0;
             if(actor->health<=0){P_WeakpointForget(actor);return;}
+        }
+        it=runtime.find(actor);
+        if(it!=runtime.end()&&it->second.bleedTier>=2&&leveltime>=it->second.bleedVoiceNext) {
+            it->second.bleedVoiceNext=leveltime+(it->second.bleedTier==3?p_wp_balance.bleedVoice3:p_wp_balance.bleedVoice2);
+            if(P_WeakpointPainVoice)P_WeakpointPainVoice(actor);
         }
         if(P_WeakpointBleedVisual)P_WeakpointBleedVisual(actor);
     }
     it=runtime.find(actor);
     if(it!=runtime.end()) {
         const auto &r=it->second;
-        if(r.kind==WP_OTHER&&!r.friendlyMissile&&!r.bleedUntil&&!r.frenzyUntil&&r.aimUntil<=leveltime&&
+        if(r.kind==WP_OTHER&&!r.friendlyMissile&&!r.noEat&&!r.bleedUntil&&!r.frenzyUntil&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.aimUntil<=leveltime&&
             r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)runtime.erase(it);
     }
 }
 
-// Numeric tuning is deliberately config-only: the F4 panel exposes three switches.
+int P_WeakpointBleedTier(mobj_t *actor) {
+    auto it=runtime.find(actor);return P_WeakpointBleeding(actor)&&it!=runtime.end()?it->second.bleedTier:0;
+}
+int P_WeakpointBleedDamage(mobj_t *actor) {
+    int tier=P_WeakpointBleedTier(actor);return tier==3?p_wp_balance.bleedDamage3:tier==2?p_wp_balance.bleedDamage2:p_wp_balance.bleedDamage;
+}
+int P_WeakpointBleedOpportunity(mobj_t *actor) {
+    int tier=P_WeakpointBleedTier(actor);if(tier<2||!actor->target||P_WeakpointFeeding(actor))return 0;
+    auto &r=runtime[actor];r.attackCredit+=tier==3?p_wp_balance.bleedAttack3:p_wp_balance.bleedAttack2;
+    if(r.attackCredit<100)return 0;r.attackCredit-=100;return 1;
+}
+#include "p_feeding.inc"
+
+// Numeric tuning is config-only; F4 exposes feature controls.
 namespace {
 struct BalanceKey {const char *name;int *value;int low,high;};
 BalanceKey keys[]={
@@ -331,6 +378,12 @@ BalanceKey keys[]={
     WP_KEY(eyeExecutionChance,"eye_execution_chance",0,100),WP_KEY(aimChance,"aim_chance",0,100),WP_KEY(aimDegrees,"aim_degrees",0,30),WP_KEY(aimDuration,"aim_duration",1,350),WP_KEY(aimCooldown,"aim_cooldown",1,3500),
     WP_KEY(legChance,"leg_chance",0,100),WP_KEY(legDuration,"leg_duration",1,350),WP_KEY(legCooldown,"leg_cooldown",1,3500),WP_KEY(shotgunRange,"shotgun_range",1,1024),WP_KEY(ssgRange,"ssg_range",1,1024),WP_KEY(shotgunQuota,"shotgun_quota",1,7),WP_KEY(ssgQuota,"ssg_quota",1,20),WP_KEY(bleedChance,"bleed_chance",0,100),WP_KEY(bleedDuration,"bleed_duration",35,3500),WP_KEY(bleedDamage,"bleed_damage",1,100),WP_KEY(bleedSlow,"bleed_slow",0,90),
     WP_KEY(frenzyChance,"frenzy_chance",0,100),WP_KEY(frenzyDuration,"frenzy_duration",1,3500),WP_KEY(frenzyRange,"frenzy_range",1,1024),WP_KEY(frenzySearch,"frenzy_search",1,2048),
+    WP_KEY(bleedDamage2,"bleed_damage_2",1,100),WP_KEY(bleedDamage3,"bleed_damage_3",1,100),WP_KEY(bleedDuration2,"bleed_duration_2",35,3500),WP_KEY(bleedDuration3,"bleed_duration_3",35,3500),
+    WP_KEY(bleedAttack2,"bleed_attack_2",0,50),WP_KEY(bleedAttack3,"bleed_attack_3",0,50),WP_KEY(bleedVoice2,"bleed_voice_2",35,3500),WP_KEY(bleedVoice3,"bleed_voice_3",35,3500),
+    WP_KEY(feedStart,"feed_start",1,50),WP_KEY(feedStop,"feed_stop",51,100),WP_KEY(feedRadius,"feed_radius",64,1024),WP_KEY(feedBite,"feed_bite",1,100),
+    WP_KEY(feedLiveHeal,"feed_live_heal",1,20),WP_KEY(feedCorpseHeal,"feed_corpse_heal",1,25),WP_KEY(feedSearch,"feed_search",7,350),WP_KEY(feedPursuit,"feed_pursuit",35,350),WP_KEY(feedCooldown,"feed_cooldown",35,3500),WP_KEY(feedThreat,"feed_threat",0,256),
+    WP_KEY(sparkBullet,"metal_sparks_bullet",1,32),WP_KEY(sparkPellet,"metal_sparks_pellet",1,16),WP_KEY(sparkCap,"metal_sparks_cap",1,64),WP_KEY(sparkScale,"metal_spark_scale",100,300),
+    WP_KEY(headBloodScale,"head_blood_scale",100,300),WP_KEY(headWallReach,"head_wall_reach",1,96),WP_KEY(headWallMarks,"head_wall_marks",0,3),
     WP_KEY(lowHealthPercent,"low_health_percent",0,100),WP_KEY(faceMajorityPercent,"face_majority_percent",1,100)
 #undef WP_KEY
 };
@@ -347,10 +400,10 @@ uint32_t get(const unsigned char *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|(
 std::vector<mobj_t*> actors(){std::vector<mobj_t*> out;for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next)if(t->function.acp1==(actionf_p1)P_MobjThinker)out.push_back((mobj_t*)t);return out;}
 }
 size_t P_WeakpointSave(unsigned char *destination) {
-    auto list=actors();std::vector<unsigned char> out;put(out,2);put(out,0);uint32_t count=0;
+    auto list=actors();std::vector<unsigned char> out;put(out,3);put(out,0);uint32_t count=0;
     for(size_t i=0;i<list.size();++i) {
         auto it=runtime.find(list[i]);if(it==runtime.end())continue;const auto &r=it->second;
-        if(r.kind==WP_OTHER&&!r.friendlyMissile&&r.bleedUntil<=leveltime&&r.frenzyUntil<=leveltime&&r.aimUntil<=leveltime&&r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)continue;
+        if(r.kind==WP_OTHER&&!r.friendlyMissile&&!r.noEat&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.bleedUntil<=leveltime&&r.frenzyUntil<=leveltime&&r.aimUntil<=leveltime&&r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)continue;
         ++count;put(out,(uint32_t)i+1);put(out,r.kind);put(out,r.directProcessed);
         put(out,(uint32_t)r.shot);put(out,(uint32_t)(r.shot>>32));
         for(int n:{r.aimUntil,r.aimCooldown,r.legUntil,r.legCooldown})put(out,(uint32_t)std::max(0,n-leveltime));
@@ -359,6 +412,11 @@ size_t P_WeakpointSave(unsigned char *destination) {
         for(int n:{r.bleedUntil,r.bleedNext,r.frenzyUntil})put(out,(uint32_t)std::max(0,n-leveltime));
         auto actorId=[&](mobj_t *actor)->uint32_t{auto found=std::find(list.begin(),list.end(),actor);return found==list.end()?0:(uint32_t)(found-list.begin()+1);};
         put(out,actorId(r.bleedSource));put(out,actorId(r.frenzyTarget));put(out,r.friendlyMissile);
+        put(out,r.bleedTier);put(out,(uint32_t)r.bleedDischarge);put(out,(uint32_t)(r.bleedDischarge>>32));
+        put(out,std::max(0,r.bleedVoiceNext-leveltime));put(out,r.attackCredit);
+        put(out,r.feedPhase);put(out,actorId(r.feedTarget));put(out,actorId(r.feedPrevious));
+        for(int timer:{r.feedUntil,r.feedCooldown,r.feedSearch})put(out,std::max(0,timer-leveltime));
+        put(out,r.noEat);put(out,(uint32_t)(r.bleedPlayer+1));
     }
     for(int i=0;i<4;++i)out[4+i]=(unsigned char)(count>>(i*8));
     put(out,(uint32_t)(out.size()+8));out.insert(out.end(),{'W','P','0','1'});
@@ -368,8 +426,8 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
     P_WeakpointClear();if(length<16||std::memcmp(data+length-4,"WP01",4))return 0;
     size_t bytes=get(data+length-8);if(bytes<16||bytes>length)return 0;
     const auto *p=data+length-bytes;uint32_t count=get(p+4);
-    uint32_t version=get(p);size_t stride=version==1?60:84;
-    if((version!=1&&version!=2)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
+    uint32_t version=get(p);size_t stride=version==1?60:version==2?84:136;
+    if((version!=1&&version!=2&&version!=3)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
     auto list=actors();p+=8;
     for(uint32_t i=0;i<count;++i,p+=stride) {
         uint32_t id=get(p),kind=get(p+4);if(!id||id>list.size()||kind>WP_OTHER+7)continue;
@@ -378,13 +436,34 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
         int *timers[]={&r.aimUntil,&r.aimCooldown,&r.legUntil,&r.legCooldown};
         for(int k=0;k<4;++k)*timers[k]=leveltime+(int)std::min(get(p+20+k*4),3500u);
         for(int k=0;k<3;++k){r.start[k]=(int32_t)get(p+36+k*4)/(float)FRACUNIT;r.end[k]=(int32_t)get(p+48+k*4)/(float)FRACUNIT;}
-        if(version==2) {
+        if(version>=2) {
             int *extra[]={&r.bleedUntil,&r.bleedNext,&r.frenzyUntil};
             for(int k=0;k<3;++k){auto ticks=std::min(get(p+60+k*4),3500u);*extra[k]=ticks?leveltime+(int)ticks:0;}
             auto ref=[&](uint32_t n)->mobj_t*{return n&&n<=list.size()?list[n-1]:nullptr;};
             r.bleedSource=ref(get(p+72));r.frenzyTarget=ref(get(p+76));r.friendlyMissile=get(p+80)!=0;
         }
-        runtime[list[id-1]]=r;
+        if(version==3) {
+            r.bleedTier=(int)std::min(get(p+84),3u);r.bleedDischarge=(uint64_t)get(p+88)|((uint64_t)get(p+92)<<32);
+            serial=std::max(serial,r.bleedDischarge);r.bleedVoiceNext=leveltime+(int)std::min(get(p+96),3500u);r.attackCredit=(int)std::min(get(p+100),99u);
+            r.feedPhase=(int)std::min(get(p+104),3u);
+            auto ref=[&](uint32_t n)->mobj_t*{return n&&n<=list.size()?list[n-1]:nullptr;};
+            r.feedTarget=ref(get(p+108));r.feedPrevious=ref(get(p+112));
+            int *timers3[]={&r.feedUntil,&r.feedCooldown,&r.feedSearch};
+            for(int k=0;k<3;++k){uint32_t remain=std::min(get(p+116+k*4),3500u);*timers3[k]=remain?leveltime+(int)remain:0;}
+            r.noEat=get(p+128)!=0;r.bleedPlayer=get(p+132)>0&&get(p+132)<=MAXPLAYERS?(int)get(p+132)-1:-1;
+            if(r.bleedTier&&r.bleedUntil==0)r.bleedUntil=leveltime;
+            if(!r.feedTarget)r.feedPhase=0;
+        } else if(r.bleedUntil>=leveltime&&r.bleedUntil>0)r.bleedTier=1;
+        auto *actor=list[id-1];
+        // A save cannot re-arm statuses whose current feature switch is off.
+        if(!p_wp_bleeding){r.bleedUntil=r.bleedNext=r.bleedTier=r.bleedVoiceNext=r.attackCredit=0;r.bleedDischarge=0;r.bleedSource=nullptr;r.bleedPlayer=-1;}
+        if(!p_wp_feeding){
+            if(r.feedPhase&&actor->target==r.feedTarget)actor->target=r.feedPrevious&&r.feedPrevious->health>0&&(r.feedPrevious->flags&MF_SHOOTABLE)?r.feedPrevious:nullptr;
+            r.feedPhase=r.feedUntil=r.feedCooldown=r.feedSearch=0;r.feedTarget=r.feedPrevious=nullptr;
+        }
+        if(!p_wp_frenzy||!p_wp_enhanced){if(r.frenzyUntil&&actor->target==r.frenzyTarget){actor->target=nullptr;actor->threshold=0;}r.frenzyUntil=0;r.frenzyTarget=nullptr;}
+        if(!p_wp_frenzy)r.friendlyMissile=false;
+        runtime[actor]=r;
     }
     return bytes;
 }

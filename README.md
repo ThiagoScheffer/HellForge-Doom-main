@@ -135,3 +135,5 @@ This is targeted native support for the supplied mod versions, **not a general Z
 See [LICENSE](LICENSE), [licenses/NOTICE.txt](licenses/NOTICE.txt), and [licenses/THIRD_PARTY.md](licenses/THIRD_PARTY.md). Original per-component licensing and attribution requirements remain applicable.
 
 Monster combat additions: [metal-leg sparks, headshot feedback, bleeding and temporary infighting](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md).
+
+Current combat update: [stronger metal sparks, blood headshot feedback, progressive bleeding and optional monster feeding](docs/changes/MONSTER-SURVIVAL-AI.md).

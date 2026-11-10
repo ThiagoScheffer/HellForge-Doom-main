@@ -9,6 +9,7 @@ extern "C" {
 #include "p_local.h"
 #include "doomstat.h"
 extern int wp_test_sight;
+extern mobj_t *wp_test_last_source;
 extern int wp_test_rng_value,wp_test_rng_calls,wp_test_damage_calls;
 }
 int leveltime=10;
@@ -22,7 +23,9 @@ static void link(mobj_t *m) {
     m->thinker.prev=thinkercap.prev;m->thinker.next=&thinkercap;thinkercap.prev->next=&m->thinker;thinkercap.prev=&m->thinker;
 }
 static void reset(int type=MT_TROOP) {
-    P_WeakpointClear();P_WeakpointConfigureExtras(0,0);wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
+    P_WeakpointConfigureFeeding(0);P_WeakpointClear();P_WeakpointConfigureExtras(0,0);
+    P_WeakpointFoodPath=nullptr;P_WeakpointFoodMove=nullptr;P_WeakpointFoodAnimate=nullptr;P_WeakpointFoodWake=nullptr;P_WeakpointFoodConsume=nullptr;P_WeakpointPainVoice=nullptr;
+    for(auto &p:players)p={};wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
     source={};target={};info={};player={};source.player=&player;
     target.type=(mobjtype_t)type;target.flags=MF_SHOOTABLE;target.health=1000;info.spawnhealth=1000;target.info=&info;
     leveltime=10;wp_test_rng_calls=wp_test_damage_calls=0;wp_test_rng_value=0;
@@ -188,7 +191,7 @@ static void bleedingAndFrenzy() {
     check(P_WeakpointBleeding(&target),"confirmed critical guarantees bleed even with zero ordinary chance");
     check(wp_test_rng_calls==0,"guaranteed bleeding avoids probability draws");
     leveltime+=20;P_WeakpointBeginShot(&source,wp_pistol);e=event(WP_BULLET,WP_HEAD,1);P_WeakpointApply(&e);P_WeakpointEndShot();
-    leveltime=45;int health=target.health;P_WeakpointTick(&target);check(target.health==health-2,"refresh preserves tick cadence without stacking");
+    leveltime=45;int health=target.health;P_WeakpointTick(&target);check(target.health==health-3,"refresh preserves tick cadence while raising severity");
     P_WeakpointConfigureExtras(0,0);check(!P_WeakpointBleeding(&target),"bleeding disabled cancels immediately");
     for(auto kind:{WP_PLASMA_DIRECT,WP_ROCKET_DIRECT,WP_ROCKET_SPLASH,WP_BFG_DIRECT,WP_BFG_TRACER,WP_OTHER}) {
         reset();P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;e=event(kind,WP_HEAD,1);P_WeakpointApply(&e);
@@ -257,8 +260,9 @@ static void bleedingAndFrenzy() {
     check(P_WeakpointLoad(legacy.data(),legacy.size())==76&&P_WeakpointImmobilized(&target),"v1 save records remain compatible after v2 status extension");
     p_wp_balance=balance;P_WeakpointConfigureExtras(0,0);
 }
+#include "survival_rules.inc"
 int main() {
-    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();
+    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");
     P_WeakpointReadBalance("wp_heavy_head",900);check(p_wp_balance.heavyHead==190,"out-of-range tuning is ignored");

@@ -1,5 +1,7 @@
 # Monster feedback, bleeding and headshot frenzy
 
+Historical behavior for build 2026.11.9.2. [Build 2026.11.10.0](MONSTER-SURVIVAL-AI.md) supersedes flat bleeding and amber world bursts, strengthens sparks, and adds optional feeding.
+
 Build 2026.11.9.2, 9 November 2026. Extends [the anatomical combat matrix](ENHANCED-MONSTER-COMBAT.md) without changing its damage multipliers.
 
 ## F4 ? Combat

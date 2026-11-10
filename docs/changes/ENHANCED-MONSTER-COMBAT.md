@@ -93,3 +93,5 @@ No balance defaults were changed from the approved plan. Suggested playtesting f
 ## Feedback and additional statuses
 
 Build 2026.11.9.2 adds independently controlled metal-leg sparks, selectable headshot confirmation, bullet bleeding and close-super-shotgun frenzy. See [behavior, configuration and monster/status matrix](MONSTER-FEEDBACK-AND-STATUSES.md). The damage matrix above remains unchanged.
+
+Build 2026.11.10.0 extends feedback and statuses with [progressive bleeding and monster feeding](MONSTER-SURVIVAL-AI.md). Existing anatomical/weapon damage multipliers remain unchanged.
