@@ -1387,8 +1387,24 @@ void DEH_Init (void)
     int i;
     int p;
 
+    static int tablesInitialized;
+    if(!tablesInitialized){
+        static const char *extra[]={"TNT1","DOGS","PLS1","PLS2","BON3","BON4","BLD2"};
+        static char extraNames[100][5];
+        for(i=0;i<7;i++)sprnames[NUMSPRITES_VANILLA+i]=(char*)extra[i];
+        for(i=0;i<100;i++){snprintf(extraNames[i],5,"SP%02d",i);sprnames[NUMSPRITES_VANILLA+7+i]=extraNames[i];}
+        for(i=NUMSTATES_VANILLA;i<NUMSTATES;i++){
+            states[i].sprite=NUMSPRITES_VANILLA;states[i].tics=-1;states[i].nextstate=i;
+        }
+        for(i=NUMMOBJTYPES_VANILLA;i<NUMMOBJTYPES;i++){
+            mobjinfo[i].doomednum=-1;mobjinfo[i].spawnhealth=1000;
+            mobjinfo[i].radius=16*FRACUNIT;mobjinfo[i].height=16*FRACUNIT;
+            mobjinfo[i].mass=100;mobjinfo[i].spawnstate=NUMSTATES_VANILLA;
+        }
+        tablesInitialized=1;
+    }
     for (i = 0; i < NUMSTATES; i++)
-	original_actions[i] = states[i].action;
+        original_actions[i] = states[i].action;
 
     // -nodeh skips the patches embedded in the WADs.
     if (!M_CheckParm ("-nodeh"))

@@ -51,6 +51,8 @@ std::vector<LightBlocker> lightBlockers;
 std::unordered_map<int,Image> images;
 std::map<const std::vector<Vertex>*,std::vector<VertexSection>> vertexSections;
 std::map<int,std::vector<Vertex>> batches,shadowBatches,decalBatches,effectBatches,effectAddBatches,mirrorBatches;
+std::vector<TranslucentWorldBatch> translucentWorld;
+std::map<int,std::vector<Vertex>> transferredSkies;
 std::vector<Vertex> mistVertices,particleVertices,crestVertices,heatVertices,skyVertices,shaftVertices;
 GpuTextureRef seamTexture,contactTexture,cloudTexture,wallBakeTexture,flatLightTexture,causticTexture,causticPattern,shoreTexture;
 GpuTextureRef wallDirectionTexture,flatDirectionTexture;
@@ -250,6 +252,7 @@ void sceneShutdown() {
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     vertexSections.clear();batches.clear();shadowBatches.clear();decalBatches.clear();effectBatches.clear();effectAddBatches.clear();mirrorBatches.clear();particleVertices.clear();
     mistVertices.clear();skyVertices.clear();shaftVertices.clear();heatVertices.clear();
+    translucentWorld.clear();transferredSkies.clear();
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
     rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
@@ -262,6 +265,9 @@ static void startLevel() {
     stopRelight();
     vertexSections.clear();batches.clear();shadowBatches.clear();mirrorBatches.clear();clearSurfaceLights();shotLightsShutdown();
     bakeAtlasNewLevel();sunNewLevel();lightBakeNewLevel();clearStaticGrid();indirectNewLevel();
+    // No image from a previous level owns a permanent GPU allocation.
+    // Active textures are uploaded lazily by the new map's preparation.
+    images.clear();
     oldThings.clear();oldHeights.clear();tickTime=0;
     resetWeaponPositions();
     bodyMotionShutdown();
@@ -330,19 +336,21 @@ static bool wornPlate(int key,int pic,bool flat) {
 SurfaceBinding surfaceBinding(int key) {
     Image &image=images.at(key);
     const Image *next=&image;float blend=0;
-    int pic=key>=0?key:-1-key-firstflat,nextPic=0;
+    bool translucent=key>=0x20000000&&key<0x20000000+numtextures;
+    int sourceKey=translucent?key-0x20000000:key;
+    int pic=sourceKey>=0?sourceKey:-1-sourceKey-firstflat,nextPic=0;
     bool flat=key<0&&pic>=0&&pic<numflats;
     int speed=key>=0||flat?P_PicAnimationNext(key>=0,pic,&nextPic):0;
     if((key>=0||flat)&&leveltime>0) {
         if(speed>0) {
-            const Image &candidate=key>=0?wallImage(nextPic):lumpImage(firstflat+nextPic,true);
+            const Image &candidate=key>=0?wallImage(translucent?translucentWallImage(nextPic):nextPic):lumpImage(firstflat+nextPic,true);
             if(candidate.width==image.width&&candidate.height==image.height) {
                 next=&candidate;blend=((leveltime-1)%speed+renderFraction)/speed;
             }
         }
     }
     SurfaceBinding binding={&image,next,blend};
-    binding.frameMean[3]=surfaceMaterial(key,pic,flat)+(settings.wornPlates&&wornPlate(key,pic,flat)?16:0);
+    binding.frameMean[3]=surfaceMaterial(sourceKey,pic,flat)+(settings.wornPlates&&wornPlate(sourceKey,pic,flat)?16:0);
     float floor=flat?liquidDetailFloor(pic):0;
     static unsigned meanLevel=~0u;
     static std::unordered_map<int,std::array<float,3>> means;
@@ -565,7 +573,7 @@ FrameView prepareFrame(int w,int h) {
         if(profile.skip&I_RENDER3D_SKIP_FOG) {fogLights={};camera.materials[2]=0;}
         if(profile.skip&I_RENDER3D_SKIP_BLOOM) camera.materials[1]=0;
     }
-    if(!worldPending) {mistVertices.clear();shaftVertices.clear();heatVertices.clear();skyVertices.clear();}
+    if(!worldPending) {translucentWorld.clear();transferredSkies.clear();mistVertices.clear();shaftVertices.clear();heatVertices.clear();skyVertices.clear();}
     uint64_t masksStart=profileStart();
     stamp(3);
     assignLightMasks();

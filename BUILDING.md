@@ -30,3 +30,10 @@ ctest --test-dir build -C Release --output-on-failure
 GPU tests create game windows. The original engine documentation is preserved in `duct-tape-doom-main/README.md`; the root README describes this customized build. The weapon-switch capture data and its regeneration procedure are documented in `duct-tape-doom-main/tools/switch-reference/README.txt`.
 
 Shared destruction geometry tests: `cmake -S . -B volume-build`, `cmake --build volume-build --config Release`, then `ctest --test-dir volume-build -C Release --output-on-failure`.
+Large-map compatibility regressions use an owned Doom II IWAD. Configure
+`-DDOOM_COMPAT_TEST_IWAD="D:/Games/DOOM2.WAD"` and optionally
+`-DDOOM_COMPAT_TEST_WAD="F:/Maps/Sunder 2512.wad"`, then build and run CTest as
+above. These add generated format/action tests and an isolated per-map loading,
+classic-frame and save/load check. See
+[the compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md) for commands and
+the distinction between smoke coverage and campaign completion.

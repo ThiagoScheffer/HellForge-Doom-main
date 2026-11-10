@@ -56,6 +56,7 @@ void    Z_FileDumpHeap (FILE *f);
 void    Z_CheckHeap (void);
 void    Z_ChangeTag2 (void *ptr, int tag);
 int     Z_FreeMemory (void);
+void Z_Usage(size_t *used,size_t *purgeable,size_t *available);
 
 
 typedef struct memblock_s

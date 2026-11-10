@@ -28,6 +28,7 @@ rcsid[] = "$Id: p_ceilng.c,v 1.4 1997/02/03 16:47:53 b1 Exp $";
 #include "z_zone.h"
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 #include "s_sound.h"
 
@@ -196,7 +197,7 @@ EV_DoCeiling
     while ((secnum = P_FindSectorFromLineTag(line,secnum)) >= 0)
     {
 	sec = &sectors[secnum];
-	if (sec->specialdata)
+	if (sec->specialdata || (!p_boom_compat && sec->floordata))
 	    continue;
 	
 	// new door thinker

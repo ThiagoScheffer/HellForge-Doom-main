@@ -54,8 +54,36 @@ static void parse(const char *data,size_t size){
         if(n<180){maps[n]=parsed;if(n==count)++count;}
     }
 }
+/* Classic MAPINFO syntax used by Boom-targeting WADs. Only metadata is
+ * interpreted; this is not an ACS/DECORATE/ZDoom gameplay interpreter. */
+static void parseLegacy(const char *data,size_t size){
+    const char *p=data,*end=data+size;char word[2048],value[2048];
+    mapinfo_t entry={0};int active=0;
+    while(token(&p,end,word,sizeof(word))){
+        if(equal(word,"map")){
+            if(active && count<180)maps[count++]=entry;
+            memset(&entry,0,sizeof(entry));active=0;
+            if(!token(&p,end,value,sizeof(value))||strlen(value)>8)continue;
+            copy(entry.map,sizeof(entry.map),value);
+            if(!token(&p,end,value,sizeof(value)))break;
+            copy(entry.title,sizeof(entry.title),value);active=1;
+        }else if(active){
+            char *field=NULL;size_t cap=0;
+#define LEGACY(name,member) if(equal(word,name)){field=entry.member;cap=sizeof(entry.member);}
+            LEGACY("sky1",sky) else LEGACY("music",music) else LEGACY("titlepatch",levelpic)
+            else LEGACY("next",next) else LEGACY("secretnext",secret)
+#undef LEGACY
+            if(field && token(&p,end,value,sizeof(value)))copy(field,cap,value);
+        }
+    }
+    if(active && count<180)maps[count++]=entry;
+}
 void G_LoadMapInfo(void){
     count=0;
+    int legacy=W_CheckNumForName("MAPINFO");
+    if(legacy>=0){int size=W_LumpLength(legacy);if(size>0&&size<=1024*1024){
+        const char *data=W_CacheLumpNum(legacy,PU_STATIC);parseLegacy(data,(size_t)size);Z_Free((void*)data);
+    }}
     for(int i=0;i<numlumps;++i)if(!memcmp(lumpinfo[i].name,"UMAPINFO",8)){
         int size=W_LumpLength(i);if(size<=0||size>1024*1024)continue;
         const char *data=W_CacheLumpNum(i,PU_CACHE);parse(data,(size_t)size);

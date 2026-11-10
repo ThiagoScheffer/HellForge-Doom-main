@@ -28,6 +28,7 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "i_system.h"
 #include "z_zone.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 // State.
 #include "doomstat.h"
@@ -212,7 +213,7 @@ void P_UnArchiveWorld (void)
 	sec->lightlevel = *get++;
 	sec->special = *get++;		// needed?
 	sec->tag = *get++;		// needed?
-	sec->specialdata = 0;
+	sec->specialdata = 0;sec->floordata = 0;
 	sec->soundtarget = 0;
     }
     
@@ -408,7 +409,8 @@ enum
     tc_flash,
     tc_strobe,
     tc_glow,
-    tc_endspecials
+    tc_endspecials,
+    tc_boom_elevator
 
 } specials_e;	
 
@@ -480,9 +482,9 @@ void P_ArchiveSpecials (void)
 	    continue;
 	}
 			
-	if (th->function.acp1 == (actionf_p1)T_MoveFloor)
+	if (th->function.acp1 == (actionf_p1)T_MoveFloor || th->function.acp1 == (actionf_p1)T_BoomElevator)
 	{
-	    *save_p++ = tc_floor;
+	    *save_p++ = th->function.acp1 == (actionf_p1)T_BoomElevator?tc_boom_elevator:tc_floor;
 	    PADSAVEP();
 	    floor = (floormove_t *)save_p;
 	    memcpy (floor, th, sizeof(*floor));
@@ -592,14 +594,17 @@ void P_UnArchiveSpecials (void)
 	    P_AddThinker (&door->thinker);
 	    break;
 				
+	  case tc_boom_elevator:
 	  case tc_floor:
 	    PADSAVEP();
 	    floor = Z_Malloc (sizeof(*floor), PU_LEVEL, NULL);
 	    memcpy (floor, save_p, sizeof(*floor));
 	    save_p += sizeof(*floor);
-	    floor->sector = &sectors[(uintptr_t)floor->sector];
-	    floor->sector->specialdata = floor;
-	    floor->thinker.function.acp1 = (actionf_p1)T_MoveFloor;
+	    if((uintptr_t)floor->sector>=(uintptr_t)numsectors)I_Error("Invalid saved floor sector");
+        floor->sector = &sectors[(uintptr_t)floor->sector];
+	    floor->sector->floordata = floor;
+	    floor->thinker.function.acp1 = tclass==tc_boom_elevator?(actionf_p1)T_BoomElevator:(actionf_p1)T_MoveFloor;
+        if(tclass==tc_boom_elevator)floor->sector->specialdata=floor;
 	    P_AddThinker (&floor->thinker);
 	    break;
 				
@@ -609,7 +614,7 @@ void P_UnArchiveSpecials (void)
 	    memcpy (plat, save_p, sizeof(*plat));
 	    save_p += sizeof(*plat);
 	    plat->sector = &sectors[(uintptr_t)plat->sector];
-	    plat->sector->specialdata = plat;
+	    plat->sector->floordata = plat;
 
 	    if (plat->thinker.function.acp1)
 		plat->thinker.function.acp1 = (actionf_p1)T_PlatRaise;

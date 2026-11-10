@@ -3,10 +3,17 @@ using System.IO;
 using System.IO.Compression;
 using System.Drawing;
 using System.Linq;
+using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Xml.Linq;
 
 internal static class SettingsBackupTests {
+    static IEnumerable<Control> Descendants(Control parent) {
+        foreach(Control child in parent.Controls) {
+            yield return child;
+            foreach(Control nested in Descendants(child))yield return nested;
+        }
+    }
     static void Check(bool condition,string name) { if(!condition)throw new Exception(name);Console.WriteLine("PASS "+name); }
     static void Rejected(string path,string name) {
         bool rejected=false;try { SettingsBackup.Read(path); } catch(InvalidDataException) { rejected=true; } catch(System.Xml.XmlException) { rejected=true; }
@@ -20,6 +27,13 @@ internal static class SettingsBackupTests {
         string root=Path.Combine(Path.GetTempPath(),"Tuin-settings-tests-"+Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            // Keep the UI check isolated too: construction can initialize its
+            // profile. These paths are overridden only in this test process.
+            var fields=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+            typeof(Data).GetField("Home",fields).SetValue(null,Path.Combine(root,"launcher-home"));
+            typeof(Data).GetField("Profile",fields).SetValue(null,Path.Combine(root,"launcher-profile"));
+            typeof(Data).GetField("Screenshots",fields).SetValue(null,Path.Combine(root,"screenshots"));
+            Directory.CreateDirectory(Data.Home);Directory.CreateDirectory(Data.Profile);
             string source=Path.Combine(root,"source"),target=Path.Combine(root,"target"),backup=Path.Combine(root,"backup.zip");
             Directory.CreateDirectory(source);Directory.CreateDirectory(target);
             File.WriteAllText(Path.Combine(source,"graphics.cfg"),"graphics test");
@@ -53,7 +67,7 @@ internal static class SettingsBackupTests {
             using(var form=new Launcher()) {
                 form.ShowInTaskbar=false;form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-20000,-20000);
                 form.Show();Application.DoEvents();
-                Check(form.Controls.Cast<Control>().Any(c=>c.Text=="Export settings...")&&form.Controls.Cast<Control>().Any(c=>c.Text=="Import settings..."),"backup controls present");
+                Check(Descendants(form).Any(c=>c.Text=="EXPORT SETTINGS")&&Descendants(form).Any(c=>c.Text=="IMPORT SETTINGS"),"backup controls present");
                 Check(form.Controls.Cast<Control>().All(c=>c.Bottom<=form.ClientSize.Height),"controls fit launcher height");
                 using(var bitmap=new Bitmap(form.Width,form.Height)) { form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save("build/launcher-preview.png"); }
             }

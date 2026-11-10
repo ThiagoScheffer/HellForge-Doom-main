@@ -222,7 +222,14 @@ Z_Malloc
 	if (rover == start)
 	{
 	    // scanned all the way around the list
-	    I_Error ("Z_Malloc: failed on allocation of %i bytes", size);
+	    size_t used=0,purgeable=0,available=0;int largest=0;
+        for(memblock_t *b=mainzone->blocklist.next;b!=&mainzone->blocklist;b=b->next){
+            if(!b->user){available+=b->size;if(b->size>largest)largest=b->size;}
+            else if(b->tag>=PU_PURGELEVEL)purgeable+=b->size;
+            else used+=b->size;
+        }
+        I_Error("Z_Malloc: request %d bytes; capacity %d MiB; used %zu, free %zu, purgeable %zu, largest free %d bytes. Try -heapsize <MiB> (16..2047).",
+                size,mainzone->size/(1024*1024),used,available,purgeable,largest);
 	}
 	
 	if (rover->user)
@@ -470,3 +477,14 @@ int Z_FreeMemory (void)
     return free;
 }
 
+
+/* Accounting only: does not purge, allocate, or disturb the rover. */
+void Z_Usage(size_t *used,size_t *purgeable,size_t *available)
+{
+    *used=*purgeable=*available=0;
+    for(memblock_t *b=mainzone->blocklist.next;b!=&mainzone->blocklist;b=b->next){
+        if(!b->user)*available+=b->size;
+        else if(b->tag>=PU_PURGELEVEL)*purgeable+=b->size;
+        else *used+=b->size;
+    }
+}

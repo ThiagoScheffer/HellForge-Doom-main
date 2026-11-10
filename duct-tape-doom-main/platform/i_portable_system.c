@@ -24,6 +24,8 @@
 #include "i_sound.h"
 #include "i_video.h"
 #include "m_misc.h"
+#include "m_argv.h"
+#include <errno.h>
 #include "d_net.h"
 #include "g_game.h"
 #include "game_profile.h"
@@ -31,7 +33,11 @@
 #include <SDL3/SDL.h>
 #endif
 
+#if defined(DOOM_NATIVE) && UINTPTR_MAX > UINT32_MAX
+int mb_used = 512;
+#else
 int mb_used = 128;
+#endif
 static ticcmd_t emptycmd;
 
 ticcmd_t *I_BaseTiccmd(void) { return &emptycmd; }
@@ -40,9 +46,18 @@ int I_GetHeapSize(void) { return mb_used * 1024 * 1024; }
 byte *I_ZoneBase(int *size)
 {
     byte *memory;
-    if (mb_used < 1 || mb_used > INT_MAX / (1024 * 1024))
+    int arg=M_CheckParm("-heapsize");
+    if(arg){
+        char *end;errno=0;
+        if(arg+1>=myargc)I_Error("-heapsize requires MiB (16..2047)");
+        long value=strtol(myargv[arg+1],&end,10);
+        if(errno || *end || value<16 || value>2047)I_Error("Invalid -heapsize; expected 16..2047 MiB");
+        mb_used=(int)value;
+    }
+    if (mb_used < 16 || mb_used > INT_MAX / (1024 * 1024))
         I_Error("Invalid zone size");
     *size = I_GetHeapSize();
+    printf("Zone capacity: %d MiB\n",mb_used);
     memory = malloc((size_t)*size);
     if (!memory)
         I_Error("Could not allocate the DOOM memory zone");

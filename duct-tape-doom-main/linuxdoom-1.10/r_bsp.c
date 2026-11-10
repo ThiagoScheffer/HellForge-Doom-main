@@ -44,6 +44,7 @@ rcsid[] = "$Id: r_bsp.c,v 1.4 1997/02/03 22:45:12 b1 Exp $";
 #include "r_state.h"
 
 //#include "r_local.h"
+#include "p_boom.h"
 
 
 
@@ -344,7 +345,9 @@ void R_AddLine (seg_t*	line)
     if (x1 == x2)
 	return;				
 	
+    static sector_t boomBack;
     backsector = line->backsector;
+    if(backsector)backsector=P_BoomRenderSector(backsector,&boomBack,1);
 
     // Single sided line?
     if (!backsector)
@@ -368,6 +371,9 @@ void R_AddLine (seg_t*	line)
     if (backsector->ceilingpic == frontsector->ceilingpic
 	&& backsector->floorpic == frontsector->floorpic
 	&& backsector->lightlevel == frontsector->lightlevel
+	&& backsector->floor_xoffs==frontsector->floor_xoffs && backsector->floor_yoffs==frontsector->floor_yoffs
+        && backsector->ceiling_xoffs==frontsector->ceiling_xoffs && backsector->ceiling_yoffs==frontsector->ceiling_yoffs
+        && backsector->heightsec==frontsector->heightsec
 	&& curline->sidedef->midtexture == 0)
     {
 	return;
@@ -536,7 +542,8 @@ void R_Subsector (int num)
 
     sscount++;
     sub = &subsectors[num];
-    frontsector = sub->sector;
+    sector_t boomFront;
+    frontsector = P_BoomRenderSector(sub->sector,&boomFront,0);
     count = sub->numlines;
     line = &segs[sub->firstline];
 
@@ -544,7 +551,8 @@ void R_Subsector (int num)
     {
 	floorplane = R_FindPlane (frontsector->floorheight,
 				  frontsector->floorpic,
-				  frontsector->lightlevel);
+				  frontsector->floorlightsec>=0?sectors[frontsector->floorlightsec].lightlevel:frontsector->lightlevel,
+                                  frontsector->floor_xoffs,frontsector->floor_yoffs,frontsector->skyline);
     }
     else
 	floorplane = NULL;
@@ -554,12 +562,13 @@ void R_Subsector (int num)
     {
 	ceilingplane = R_FindPlane (frontsector->ceilingheight,
 				    frontsector->ceilingpic,
-				    frontsector->lightlevel);
+				    frontsector->ceilinglightsec>=0?sectors[frontsector->ceilinglightsec].lightlevel:frontsector->lightlevel,
+                                  frontsector->ceiling_xoffs,frontsector->ceiling_yoffs,frontsector->skyline);
     }
     else
 	ceilingplane = NULL;
 		
-    R_AddSprites (frontsector);	
+    R_AddSprites (sub->sector);	
 
     while (count--)
     {

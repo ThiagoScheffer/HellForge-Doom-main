@@ -121,15 +121,7 @@ R_InstallSpriteLump
 		
     if (rotation == 0)
     {
-	// the lump should be used for all rotations
-	if (sprtemp[frame].rotate == false)
-	    I_Error ("R_InitSprites: Sprite %s frame %c has "
-		     "multip rot=0 lump", spritename, 'A'+frame);
-
-	if (sprtemp[frame].rotate == true)
-	    I_Error ("R_InitSprites: Sprite %s frame %c has rotations "
-		     "and a rot=0 lump", spritename, 'A'+frame);
-			
+        // Later artwork replaces earlier rotations, including a full frame.
 	sprtemp[frame].rotate = false;
 	for (r=0 ; r<8 ; r++)
 	{
@@ -139,20 +131,13 @@ R_InstallSpriteLump
 	return;
     }
 	
-    // the lump is only used for one rotation
-    if (sprtemp[frame].rotate == false)
-	I_Error ("R_InitSprites: Sprite %s frame %c has rotations "
-		 "and a rot=0 lump", spritename, 'A'+frame);
-		
-    sprtemp[frame].rotate = true;
-
-    // make 0 based
-    rotation--;		
-    if (sprtemp[frame].lump[rotation] != -1)
-	I_Error ("R_InitSprites: Sprite %s : %c : %c "
-		 "has two lumps mapped to it",
-		 spritename, 'A'+frame, '1'+rotation);
-		
+    // Switching a previously unrotated frame to rotated replacement art
+    // requires a complete rotation set; the final consistency pass checks it.
+    if(sprtemp[frame].rotate==false){
+        for(r=0;r<8;r++){sprtemp[frame].lump[r]=-1;sprtemp[frame].flip[r]=0;}
+    }
+    sprtemp[frame].rotate=true;
+    rotation--;
     sprtemp[frame].lump[rotation] = lump - firstspritelump;
     sprtemp[frame].flip[rotation] = (byte)flipped;
 }
@@ -222,10 +207,7 @@ void R_InitSpriteDefs (char** namelist)
 		frame = lumpinfo[l].name[4] - 'A';
 		rotation = lumpinfo[l].name[5] - '0';
 
-		if (modifiedgame)
-		    patched = W_GetNumForName (lumpinfo[l].name);
-		else
-		    patched = l;
+		patched = l;
 
 		R_InstallSpriteLump (patched, frame, rotation, false);
 
@@ -358,18 +340,20 @@ fixed_t		sprtopscreen;
 
 void R_DrawMaskedColumn (column_t* column)
 {
-    int		topscreen;
-    int 	bottomscreen;
+    int64_t		topscreen;
+    int64_t 	bottomscreen;
     fixed_t	basetexturemid;
 	
+    int previous=-1,savedHeight=dc_texheight;dc_texheight=0;
     basetexturemid = dc_texturemid;
 	
     for ( ; column->topdelta != 0xff ; ) 
     {
 	// calculate unclipped screen coordinates
 	//  for post
-	topscreen = sprtopscreen + spryscale*column->topdelta;
-	bottomscreen = topscreen + spryscale*column->length;
+	int top=column->topdelta;if(top<=previous)top+=previous;previous=top;
+	topscreen = (int64_t)sprtopscreen + (int64_t)spryscale*top;
+	bottomscreen = topscreen + (int64_t)spryscale*column->length;
 
 	dc_yl = (topscreen+FRACUNIT-1)>>FRACBITS;
 	dc_yh = (bottomscreen-1)>>FRACBITS;
@@ -382,17 +366,17 @@ void R_DrawMaskedColumn (column_t* column)
 	if (dc_yl <= dc_yh)
 	{
 	    dc_source = (byte *)column + 3;
-	    dc_texturemid = basetexturemid - (column->topdelta<<FRACBITS);
+	    dc_texturemid = basetexturemid - (top*FRACUNIT);
 	    // dc_source = (byte *)column + 3 - column->topdelta;
 
 	    // Drawn by either R_DrawColumn
 	    //  or (SHADOW) R_DrawFuzzColumn.
-	    colfunc ();	
+	    int savedX=dc_x;colfunc ();dc_x=savedX;	
 	}
 	column = (column_t *)(  (byte *)column + column->length + 4);
     }
 	
-    dc_texturemid = basetexturemid;
+    dc_texturemid = basetexturemid;dc_texheight=savedHeight;
 }
 
 

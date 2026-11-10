@@ -26,6 +26,9 @@ extern "C" {
 #include "../../linuxdoom-1.10/p_weakpoints.h"
 #include "doomstat.h"
 #include "r_state.h"
+#ifdef DOOM_BOOM_SECTORS
+#include "../../linuxdoom-1.10/p_boom.h"
+#endif
 #include "r_sky.h"
 #include "doomdata.h"
 #include "v_video.h"
@@ -139,6 +142,7 @@ extern const char *graphicsConfig;
 void loadSettings();
 
 // images.cpp
+int translucentWallImage(int index);
 void imagesShutdown();
 void prepareVoxelModels();
 bool drawVoxel(std::map<int,std::vector<Vertex>> &,const mobj_t &,int,int,angle_t,float,float,float,float,const std::array<float,3>&,unsigned,unsigned,const Uniforms&);

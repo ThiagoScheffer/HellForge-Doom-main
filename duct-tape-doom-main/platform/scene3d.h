@@ -250,6 +250,9 @@ extern std::map<int,std::vector<Vertex>> batches,shadowBatches,decalBatches,effe
 // The sprites of the glass mirror pass, seen from the mirrored eye, the
 // player's own included (addThing in scene3d/geometry.cpp).
 extern std::map<int,std::vector<Vertex>> mirrorBatches;
+struct TranslucentWorldBatch {int texture;float distance;std::vector<Vertex> vertices;};
+extern std::vector<TranslucentWorldBatch> translucentWorld;
+extern std::map<int,std::vector<Vertex>> transferredSkies;
 extern std::vector<Vertex> mistVertices,particleVertices,heatVertices;
 // HDR-only rubble emission, depth tested before the bloom blur.
 extern std::vector<Vertex> rubbleEmissionVertices;

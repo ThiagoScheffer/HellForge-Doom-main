@@ -274,6 +274,7 @@ void P_LoadSectors (int lump)
     ss = sectors;
     for (i=0 ; i<numsectors ; i++, ss++, ms++)
     {
+	ss->heightsec=ss->floorlightsec=ss->ceilinglightsec=-1;
 	ss->floorheight = SHORT(ms->floorheight)<<FRACBITS;
 	ss->ceilingheight = SHORT(ms->ceilingheight)<<FRACBITS;
 	ss->floorpic = R_FlatNumForName(ms->floorpic);
@@ -315,7 +316,8 @@ void P_LoadNodes (int lump)
 	no->dy = SHORT(mn->dy)<<FRACBITS;
 	for (j=0 ; j<2 ; j++)
 	{
-	    no->children[j] = SHORT(mn->children[j]);
+	    uint32_t child=(uint16_t)SHORT(mn->children[j]);
+            no->children[j]=(child&0x8000u)?NF_SUBSECTOR|(child&0x7fffu):child;
 	    for (k=0 ; k<4 ; k++)
 		no->bbox[j][k] = SHORT(mn->bbox[j][k])<<FRACBITS;
 	}
@@ -330,7 +332,7 @@ void P_LoadNodes (int lump)
 // ZDoom/DeePBSP extended nodes keep everything in NODES and leave SEGS and
 // SSECTORS empty; reading them as vanilla data crashed at the player start.
 //
-static void P_CheckNodeFormat (int lumpnum)
+static int P_CheckNodeFormat (int lumpnum)
 {
     static const char* formats[] = { "XNOD", "ZNOD", "XGLN", "ZGLN",
 				     "XGL2", "ZGL2", "XGL3", "ZGL3", "xNd4" };
@@ -348,17 +350,19 @@ static void P_CheckNodeFormat (int lumpnum)
 	memcpy (magic, data, 4);
 	Z_Free (data);
     }
+    if (!memcmp(magic,"XNOD",4)) return 1;
     for (i=0 ; i<(int)(sizeof(formats)/sizeof(formats[0])) ; i++)
 	if (!memcmp (magic, formats[i], 4))
-	    I_Error ("%s uses extended %.4s nodes, which this engine does "
-		     "not support.\nThis WAD needs a Boom- or ZDoom-compatible "
-		     "source port.", mapname, formats[i]);
+	    I_Error ("%s uses unsupported %.4s nodes.\nSupported formats are classic Doom and uncompressed XNOD; rebuild the nodes in one of those formats.", mapname, formats[i]);
 
     if (!W_LumpLength (lumpnum+ML_SEGS) || !W_LumpLength (lumpnum+ML_SSECTORS))
 	I_Error ("%s has no SEGS or SSECTORS. The map needs a node "
 		 "builder run, or a source port with built-in nodes.", mapname);
+    return 0;
 }
 
+
+#include "p_xnodes.inc"
 
 //
 // P_CheckNodeIndices
@@ -384,6 +388,20 @@ static void P_CheckNodeIndices (void)
 	    else
 		P_CheckIndex (child, numnodes, "node child");
 	}
+    int *degree=calloc((size_t)numnodes,sizeof(int));
+    int *queue=malloc((size_t)numnodes*sizeof(int));
+    if(numnodes && (!degree||!queue)) I_Error("Map BSP validation: out of memory");
+    for(i=0;i<numnodes;i++)for(j=0;j<2;j++)
+        if(!(nodes[i].children[j]&NF_SUBSECTOR))++degree[nodes[i].children[j]];
+    int head=0,tail=0;
+    for(i=0;i<numnodes;i++)if(!degree[i])queue[tail++]=i;
+    while(head<tail){int at=queue[head++];for(j=0;j<2;j++){
+        uint32_t child=nodes[at].children[j];
+        if(!(child&NF_SUBSECTOR)&&!--degree[child])queue[tail++]=child;
+    }}
+    free(degree);free(queue);
+    if(tail!=numnodes)I_Error("Map BSP contains a cycle");
+
 }
 
 
@@ -601,7 +619,7 @@ static void P_CreateBlockMap (void)
     int		numblocks;
     int*	counts;
     int*	fill;
-    int32_t	size;
+    size_t	size;
 
     for (i = 0; i < numvertexes; i++)
     {
@@ -614,8 +632,8 @@ static void P_CreateBlockMap (void)
     if (!numvertexes)
 	minx = miny = maxx = maxy = 0;
     // A margin below the map, as the original node builders left.
-    minx -= 8;
-    miny -= 8;
+    minx = minx < -32760 ? -32768 : minx-8;
+    miny = miny < -32760 ? -32768 : miny-8;
     bmapwidth = ((maxx - minx) >> (MAPBLOCKSHIFT-FRACBITS)) + 1;
     bmapheight = ((maxy - miny) >> (MAPBLOCKSHIFT-FRACBITS)) + 1;
     numblocks = bmapwidth * bmapheight;
@@ -657,13 +675,14 @@ static void P_CreateBlockMap (void)
 	    size = 4 + numblocks;
 	    for (i = 0; i < numblocks; i++)
 		size += counts[i] + 2;
-	    blockmaplump = Z_Malloc (size * sizeof(*blockmaplump), PU_LEVEL, 0);
+            if(size>INT_MAX/sizeof(*blockmaplump))I_Error("P_CreateBlockMap: blockmap exceeds allocator capacity");
+	    blockmaplump = Z_Malloc ((int)(size * sizeof(*blockmaplump)), PU_LEVEL, 0);
 	    size = 4 + numblocks;
 	    for (i = 0; i < numblocks; i++)
 	    {
-		blockmaplump[4 + i] = size;
+		blockmaplump[4 + i] = (int32_t)size;
 		blockmaplump[size] = 0;
-		fill[i] = size + 1;
+		fill[i] = (int)size + 1;
 		size += counts[i] + 2;
 		blockmaplump[size - 1] = -1;
 	    }
@@ -701,7 +720,17 @@ void P_LoadBlockMap (int lump)
 	    blockmaplump[i] = value == 0xffff ? -1 : value;
 	}
 	Z_Free (data);
-	if (count < 4 + blockmaplump[2] * blockmaplump[3])
+        size_t cells=(size_t)blockmaplump[2]*blockmaplump[3];
+        int invalid=!blockmaplump[2]||!blockmaplump[3]||cells>(size_t)(count-4);
+        for(size_t cell=0;!invalid&&cell<cells;cell++){
+            int at=blockmaplump[4+cell];
+            if(at<0||at>=count){invalid=1;break;}
+            while(at<count && blockmaplump[at]!=-1){
+                if(blockmaplump[at]<0||blockmaplump[at]>=numlines){invalid=1;break;}++at;
+            }
+            if(at==count)invalid=1;
+        }
+	if (invalid)
 	{
 	    Z_Free (blockmaplump);
 	    P_CreateBlockMap ();
@@ -886,15 +915,19 @@ P_SetupLevel
     P_LoadLineDefs (lumpnum+ML_LINEDEFS);
     // After the lines, so a missing blockmap can be rebuilt from them.
     P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
-    P_CheckNodeFormat (lumpnum);
-    P_LoadSubsectors (lumpnum+ML_SSECTORS);
-    P_LoadNodes (lumpnum+ML_NODES);
-    P_LoadSegs (lumpnum+ML_SEGS);
+    if (P_CheckNodeFormat(lumpnum)) P_LoadXNodes(lumpnum+ML_NODES);
+    else {
+        P_LoadSubsectors (lumpnum+ML_SSECTORS);
+        P_LoadNodes (lumpnum+ML_NODES);
+        P_LoadSegs (lumpnum+ML_SEGS);
+    }
     P_CheckNodeIndices ();
 	
     {
 	// Vanilla read past a short REJECT lump; pad it with zeros (visible).
-	int needed = (numsectors*numsectors + 7) / 8;
+	size_t bytes = ((size_t)numsectors*numsectors + 7) / 8;
+        if (bytes > INT_MAX) I_Error("Map REJECT exceeds allocator capacity");
+        int needed = (int)bytes;
 	int length = W_LumpLength (lumpnum+ML_REJECT);
 
 	if (length >= needed)

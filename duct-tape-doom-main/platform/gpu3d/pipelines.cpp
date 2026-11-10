@@ -6,7 +6,7 @@
 namespace gpu3d {
 SDL_GPUSampleCount sampleCount=SDL_GPU_SAMPLECOUNT_1;
 static SDL_GPUShader *worldVertexShader,*reflectVertexShader,*screenVertexShader,*skyVertexShader;
-SDL_GPUGraphicsPipeline *opaquePipeline,*skyPipeline,*skySurfacePipeline,*reflectSkySurfacePipeline,*worldPipeline,*shadowPipeline,*decalPipeline,*effectAddPipeline,*particlePipeline,*crestPipeline,*heatPipeline,
+SDL_GPUGraphicsPipeline *opaquePipeline,*skyPipeline,*skySurfacePipeline,*reflectSkySurfacePipeline,*worldPipeline,*translucentPipeline,*reflectTranslucentPipeline,*shadowPipeline,*decalPipeline,*effectAddPipeline,*particlePipeline,*crestPipeline,*heatPipeline,
     *weaponPipeline,*weaponAddPipeline,*hudPipeline,*solidPipeline,*mistPipeline,*shaftPipeline,*overlayWeaponPipeline,*overlayWeaponAddPipeline,*overlayHudPipeline,*overlaySolidPipeline,
     *reflectOpaquePipeline,*reflectSkyPipeline,*reflectWorldPipeline,*emissionPipeline,*rubbleEmissionPipeline,*blurPipeline,*presentPipeline,*depthPipeline,*prepassPipeline,*coveragePipeline,*cutoutPipeline,
     *settingsPipeline,*glassPipeline,*reflectPrepassPipeline;
@@ -118,6 +118,8 @@ bool createPipelines() {
     skyPipeline=pipeline(kv,sky,opaqueBlend,depthTest,msaa,color);
     skySurfacePipeline=pipeline(wv,skySurface,opaqueBlend,depthWrite,msaa,color);
     worldPipeline=pipeline(wv,world,alphaBlend,depthWrite,msaa,color);
+    translucentPipeline=pipeline(wv,world,alphaBlend,depthTest,msaa,color);
+    reflectTranslucentPipeline=pipeline(rv,world,mirrorBlend,depthTest,one,color);
     shadowPipeline=pipeline(wv,shadow,alphaBlend,depthTest,msaa,color);
     decalPipeline=pipeline(wv,decal,alphaBlend,depthTest,msaa,color);
     effectAddPipeline=pipeline(wv,decal,addBlend,depthTest,msaa,color);
@@ -151,14 +153,14 @@ bool createPipelines() {
         if(s)SDL_ReleaseGPUShader(device,s);
     for(SDL_GPUShader **s:{&worldVertexShader,&reflectVertexShader,&screenVertexShader,&skyVertexShader})
         if(*s) {SDL_ReleaseGPUShader(device,*s);*s=nullptr;}
-    for(auto *p:{opaquePipeline,skyPipeline,skySurfacePipeline,reflectSkySurfacePipeline,worldPipeline,shadowPipeline,decalPipeline,effectAddPipeline,particlePipeline,crestPipeline,heatPipeline,weaponPipeline,weaponAddPipeline,overlayWeaponAddPipeline,hudPipeline,
+    for(auto *p:{translucentPipeline,reflectTranslucentPipeline,opaquePipeline,skyPipeline,skySurfacePipeline,reflectSkySurfacePipeline,worldPipeline,shadowPipeline,decalPipeline,effectAddPipeline,particlePipeline,crestPipeline,heatPipeline,weaponPipeline,weaponAddPipeline,overlayWeaponAddPipeline,hudPipeline,
                  solidPipeline,mistPipeline,shaftPipeline,overlayWeaponPipeline,overlayHudPipeline,overlaySolidPipeline,reflectOpaquePipeline,
                  reflectSkyPipeline,reflectWorldPipeline,emissionPipeline,rubbleEmissionPipeline,blurPipeline,presentPipeline,depthPipeline,prepassPipeline,coveragePipeline,cutoutPipeline,settingsPipeline,glassPipeline,reflectPrepassPipeline})
         if(!p)return false;
     return true;
 }
 void releasePipelines() {
-    for(SDL_GPUGraphicsPipeline **p:{&opaquePipeline,&skyPipeline,&skySurfacePipeline,&reflectSkySurfacePipeline,&worldPipeline,&shadowPipeline,&decalPipeline,&effectAddPipeline,&particlePipeline,&crestPipeline,&heatPipeline,
+    for(SDL_GPUGraphicsPipeline **p:{&translucentPipeline,&reflectTranslucentPipeline,&opaquePipeline,&skyPipeline,&skySurfacePipeline,&reflectSkySurfacePipeline,&worldPipeline,&shadowPipeline,&decalPipeline,&effectAddPipeline,&particlePipeline,&crestPipeline,&heatPipeline,
             &weaponPipeline,&hudPipeline,&solidPipeline,&mistPipeline,&shaftPipeline,&overlayWeaponPipeline,&overlayHudPipeline,&overlaySolidPipeline,
             &reflectOpaquePipeline,&reflectSkyPipeline,&reflectWorldPipeline,&emissionPipeline,&rubbleEmissionPipeline,&blurPipeline,&presentPipeline,&depthPipeline,&prepassPipeline,&coveragePipeline,&cutoutPipeline,
             &settingsPipeline,&glassPipeline,&reflectPrepassPipeline})

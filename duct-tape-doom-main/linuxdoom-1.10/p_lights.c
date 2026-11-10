@@ -32,6 +32,7 @@ rcsid[] = "$Id: p_lights.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 
 // State.
@@ -222,7 +223,7 @@ void EV_StartLightStrobing(line_t*	line)
     while ((secnum = P_FindSectorFromLineTag(line,secnum)) >= 0)
     {
 	sec = &sectors[secnum];
-	if (sec->specialdata)
+	if (sec->specialdata || (!p_boom_compat && sec->floordata))
 	    continue;
 	
 	P_SpawnStrobeFlash (sec,SLOWDARK, 0);

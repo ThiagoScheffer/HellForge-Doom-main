@@ -43,6 +43,7 @@ rcsid[] = "$Id: p_spec.c,v 1.6 1997/02/03 22:45:12 b1 Exp $";
 
 #include "r_local.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 #include "g_game.h"
 
@@ -84,7 +85,7 @@ typedef struct
 
 #define MAXANIMS                32
 
-extern anim_t	anims[MAXANIMS];
+extern anim_t*	anims;
 extern anim_t*	lastanim;
 
 //
@@ -133,7 +134,7 @@ animdef_t		animdefs[] =
     {-1}
 };
 
-anim_t		anims[MAXANIMS];
+anim_t*		anims;
 anim_t*		lastanim;
 
 // Renderer query, no simulation effect: the frame after pic in its
@@ -166,7 +167,31 @@ void P_InitPicAnims (void)
     int		i;
 
     
-    //	Init animation
+    // Boom ANIMATED is a packed 23-byte record stream, terminated by -1.
+    int lump=W_CheckNumForName("ANIMATED");
+    if(lump>=0){
+        int length=W_LumpLength(lump);
+        if(length<1 || length>1024*1024)I_Error("ANIMATED: invalid length");
+        const byte *data=W_CacheLumpNum(lump,PU_STATIC);
+        anims=Z_Malloc((length/23+1)*sizeof(*anims),PU_STATIC,0);lastanim=anims;
+        size_t at=0;
+        while(at<(size_t)length && data[at]!=255){
+            if((size_t)length-at<23 || data[at]>3)I_Error("ANIMATED: truncated or invalid record");
+            char first[9],last[9];memcpy(last,data+at+1,8);last[8]=0;memcpy(first,data+at+10,8);first[8]=0;
+            int speed=(int)((uint32_t)data[at+19]|(uint32_t)data[at+20]<<8|(uint32_t)data[at+21]<<16|(uint32_t)data[at+22]<<24);
+            int base=(data[at]&1)?R_CheckTextureNumForName(first):R_CheckFlatNumForName(first);
+            int end=(data[at]&1)?R_CheckTextureNumForName(last):R_CheckFlatNumForName(last);
+            if(base>=0 && end>=0){
+                if(end<=base || speed<=0)I_Error("ANIMATED: invalid cycle %.8s..%.8s",first,last);
+                lastanim->istexture=data[at]&1;lastanim->basepic=base;lastanim->picnum=end;
+                lastanim->numpics=end-base+1;lastanim->speed=speed;++lastanim;
+            }
+            at+=23;
+        }
+        if(at>=(size_t)length)I_Error("ANIMATED: missing terminator");
+        Z_Free((void*)data);return;
+    }
+    anims=Z_Malloc(MAXANIMS*sizeof(*anims),PU_STATIC,0);
     lastanim = anims;
     for (i=0 ; animdefs[i].istexture != -1 ; i++)
     {
@@ -486,6 +511,7 @@ P_CrossSpecialLine
     int		ok;
 
     line = &lines[linenum];
+    if(P_BoomActivate(line,thing,side,0)>=0)return;
     
     //	Triggers that other things can activate
     if (!thing->player)
@@ -949,6 +975,7 @@ P_ShootSpecialLine
   line_t*	line )
 {
     int		ok;
+    if(P_BoomActivate(line,thing,0,2)>=0)return;
     
     //	Impacts that other things can activate.
     if (!thing->player)
@@ -1004,6 +1031,14 @@ void P_PlayerInSpecialSector (player_t* player)
     if (player->mo->z != sector->floorheight)
 	return;	
 
+    if((unsigned short)sector->special>=32){
+        unsigned flags=(unsigned short)sector->special;
+        if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);sector->special&=~128;}
+        int damage=(flags>>5)&3;
+        if(damage&&!(leveltime&31)&&(!player->powers[pw_ironfeet]||(damage==3&&P_Random()<5)))
+            P_DamageMobj(player->mo,NULL,NULL,damage==1?5:damage==2?10:20);
+        return;
+    }
     // Has hitten ground.
     switch (sector->special)
     {
@@ -1071,6 +1106,7 @@ int		levelTimeCount;
 
 void P_UpdateSpecials (void)
 {
+    P_BoomTick();
     anim_t*	anim;
     int		pic;
     int		i;
@@ -1166,7 +1202,7 @@ int EV_DoDonut(line_t*	line)
 	s1 = &sectors[secnum];
 		
 	// ALREADY MOVING?  IF SO, KEEP GOING...
-	if (s1->specialdata)
+	if (s1->floordata)
 	    continue;
 			
 	rtn = 1;
@@ -1181,7 +1217,7 @@ int EV_DoDonut(line_t*	line)
 	    //	Spawn rising slime
 	    floor = Z_Malloc (sizeof(*floor), PU_LEVSPEC, 0);
 	    P_AddThinker (&floor->thinker);
-	    s2->specialdata = floor;
+	    s2->floordata = floor;
 	    floor->thinker.function.acp1 = (actionf_p1) T_MoveFloor;
 	    floor->type = donutRaise;
 	    floor->crush = false;
@@ -1195,7 +1231,7 @@ int EV_DoDonut(line_t*	line)
 	    //	Spawn lowering donut-hole
 	    floor = Z_Malloc (sizeof(*floor), PU_LEVSPEC, 0);
 	    P_AddThinker (&floor->thinker);
-	    s1->specialdata = floor;
+	    s1->floordata = floor;
 	    floor->thinker.function.acp1 = (actionf_p1) T_MoveFloor;
 	    floor->type = lowerFloor;
 	    floor->crush = false;
@@ -1263,7 +1299,9 @@ void P_SpawnSpecials (void)
 	if (!sector->special)
 	    continue;
 	
-	switch (sector->special)
+	unsigned extra=(unsigned short)sector->special&~31u;
+        if(extra&128)totalsecret++;
+        switch (sector->special&31)
 	{
 	  case 1:
 	    // FLICKERING LIGHTS
@@ -1319,6 +1357,7 @@ void P_SpawnSpecials (void)
 	    P_SpawnFireFlicker(sector);
 	    break;
 	}
+        sector->special|=extra;
     }
 
     
@@ -1348,6 +1387,7 @@ void P_SpawnSpecials (void)
     for (i = 0;i < MAXBUTTONS;i++)
 	memset(&buttonlist[i],0,sizeof(button_t));
 
+    P_BoomSpawn();
     // UNUSED: no horizonal sliders.
     //	P_InitSlidingDoorFrames();
 }

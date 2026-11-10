@@ -36,6 +36,7 @@ extern int		dc_yl;
 extern int		dc_yh;
 extern fixed_t		dc_iscale;
 extern fixed_t		dc_texturemid;
+extern int dc_texheight;
 
 // first pixel in a column
 extern byte*		dc_source;		
@@ -45,6 +46,8 @@ extern byte*		dc_source;
 // Hook in assembler or system specific BLT
 //  here.
 void 	R_DrawColumn (void);
+void R_DrawTranslucentColumn(void);
+void R_DrawTranslucentColumnLow(void);
 void 	R_DrawColumnLow (void);
 
 // The Spectre/Invisibility effect.

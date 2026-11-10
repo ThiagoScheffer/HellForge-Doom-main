@@ -139,3 +139,10 @@ Monster combat additions: [metal-leg sparks, headshot feedback, bleeding and tem
 Current combat update: [stronger metal sparks, blood headshot feedback, progressive bleeding and optional monster feeding](docs/changes/MONSTER-SURVIVAL-AI.md).
 
 F4 persistence: [applied choices now survive Low-FX launches and restarts](docs/changes/F4-SETTINGS-PERSISTENCE.md). Use Esc, F4 or Apply/close to save; F10 discards.
+## Large WAD compatibility
+
+The updated engine removes the 64 KiB texture-lookup limit, reads uncompressed
+XNOD maps and provides configurable zone memory. The native 64-bit default is
+512 MiB; add `-heapsize 1024` to launch arguments for a 1 GiB zone.
+See [large-WAD compatibility and measured limits](docs/changes/BIG-WAD-COMPATIBILITY.md)
+for Sunder verification, supported map features and remaining limitations.

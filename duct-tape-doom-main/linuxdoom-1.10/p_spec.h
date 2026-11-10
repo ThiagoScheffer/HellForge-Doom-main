@@ -338,7 +338,8 @@ typedef enum
     raiseIn5Mins,
     blazeRaise,
     blazeOpen,
-    blazeClose
+    blazeClose,
+    boomCloseThenOpen
 
 } vldoor_e;
 
@@ -569,7 +570,8 @@ typedef enum
      // raise to next highest floor, turbo-speed
     raiseFloorTurbo,       
     donutRaise,
-    raiseFloor512
+    raiseFloor512,
+    boomBuildStairs
     
 } floor_e;
 

@@ -235,7 +235,7 @@ static void drawMistDepth(SDL_GPUCommandBuffer *render,const FrameView &view,con
     for(const auto &batch:batches) if(!batch.second.empty()) {bindImage(pass,images.at(batch.first).texture,nearestClamp);drawVertices(pass,batch.second);}
     drawVoxels(render,pass,voxelDraws,false,true);
     SDL_GPUTextureSamplerBinding solid={solidTexel,nearestClamp};
-    SDL_BindGPUFragmentSamplers(pass,0,&solid,1);drawVertices(pass,skyVertices);
+    SDL_BindGPUFragmentSamplers(pass,0,&solid,1);drawVertices(pass,skyVertices);for(const auto &sky:transferredSkies)drawVertices(pass,sky.second);
     SDL_EndGPURenderPass(pass);
 }
 // The world, its shadows, decals, particles and heat haze.
@@ -348,7 +348,7 @@ static void drawBloom(SDL_GPUCommandBuffer *render,const FrameView &view,const U
     SDL_GPUTextureSamplerBinding solid={solidTexel,nearestClamp};
     SDL_BindGPUFragmentSamplers(glowPass,0,&solid,1);SDL_BindGPUFragmentSamplers(glowPass,2,&solid,1);
     float noBlend[4]={};SDL_PushGPUFragmentUniformData(render,0,noBlend,sizeof(noBlend));
-    drawVertices(glowPass,skyVertices);
+    drawVertices(glowPass,skyVertices);for(const auto &sky:transferredSkies)drawVertices(glowPass,sky.second);
     // Use the completed world depth to keep rubble emission behind intact
     // walls. Reuse the existing HDR blur, with no extra full-screen pass.
     if(!rubbleEmissionVertices.empty()){

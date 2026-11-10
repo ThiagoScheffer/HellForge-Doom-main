@@ -28,6 +28,7 @@ rcsid[] = "$Id: p_doors.c,v 1.4 1997/02/03 16:47:53 b1 Exp $";
 #include "z_zone.h"
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 #include "s_sound.h"
 
@@ -87,6 +88,7 @@ void T_VerticalDoor (vldoor_t* door)
 			     sfx_dorcls);
 		break;
 		
+	      case boomCloseThenOpen:
 	      case close30ThenOpen:
 		door->direction = 1;
 		S_StartSound((mobj_t *)&door->sector->soundorg,
@@ -143,9 +145,10 @@ void T_VerticalDoor (vldoor_t* door)
 		P_RemoveThinker (&door->thinker);  // unlink and free
 		break;
 		
+	      case boomCloseThenOpen:
 	      case close30ThenOpen:
 		door->direction = 0;
-		door->topcountdown = 35*30;
+		door->topcountdown = door->type==boomCloseThenOpen?door->topwait:35*30;
 		break;
 		
 	      default:
@@ -188,6 +191,7 @@ void T_VerticalDoor (vldoor_t* door)
 		door->topcountdown = door->topwait;
 		break;
 		
+	      case boomCloseThenOpen:
 	      case close30ThenOpen:
 	      case blazeOpen:
 	      case open:
@@ -281,7 +285,7 @@ EV_DoDoor
     while ((secnum = P_FindSectorFromLineTag(line,secnum)) >= 0)
     {
 	sec = &sectors[secnum];
-	if (sec->specialdata || sec->rocketdoorhits >= 3)
+	if (sec->specialdata || (!p_boom_compat && sec->floordata) || sec->rocketdoorhits >= 3)
 	    continue;
 		
 	
@@ -316,7 +320,8 @@ EV_DoDoor
 			 sfx_dorcls);
 	    break;
 	    
-	  case close30ThenOpen:
+	  case boomCloseThenOpen:
+	      case close30ThenOpen:
 	    door->topheight = sec->ceilingheight;
 	    door->direction = -1;
 	    S_StartSound((mobj_t *)&door->sector->soundorg,
@@ -421,9 +426,10 @@ EV_VerticalDoor
     secnum = sec-sectors;
     if (sec->rocketdoorhits >= 3) return;
 
-    if (sec->specialdata)
+    if (sec->specialdata || (!p_boom_compat && sec->floordata))
     {
 	door = sec->specialdata;
+        if(!door || door->thinker.function.acp1!=(actionf_p1)T_VerticalDoor)return;
 	switch(line->special)
 	{
 	  case	1: // ONLY FOR "RAISE" DOORS, NOT "OPEN"s
@@ -732,7 +738,7 @@ EV_SlidingDoor
     // Make sure door isn't already being animated
     sec = line->frontsector;
     door = NULL;
-    if (sec->specialdata)
+    if (sec->specialdata || (!p_boom_compat && sec->floordata))
     {
 	if (!thing->player)
 	    return;

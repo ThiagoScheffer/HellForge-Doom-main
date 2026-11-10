@@ -35,7 +35,7 @@ static int pendingOwner;
 static float unit(fixed_t x){return x/(float)FRACUNIT;}
 static bool sectorMoves(int s,int plane){
  auto& sector=sectors[s];
- if(sector.tag||sector.specialdata)return true;
+ if(sector.tag||sector.specialdata||sector.floordata)return true;
  if(!plane)return false;
  if(sector.ceilingheight<=sector.floorheight)return true;
  for(int j=0;j<sector.linecount;++j){

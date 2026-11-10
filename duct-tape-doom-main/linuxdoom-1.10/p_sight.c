@@ -316,8 +316,8 @@ P_CheckSight
 {
     int		s1;
     int		s2;
-    int		pnum;
-    int		bytenum;
+    size_t		pnum;
+    size_t		bytenum;
     int		bitnum;
     
     {int solid=SV_Sight(t1,t2);if(solid>=0)return solid;}
@@ -326,7 +326,7 @@ P_CheckSight
     // Determine subsector entries in REJECT table.
     s1 = (t1->subsector->sector - sectors);
     s2 = (t2->subsector->sector - sectors);
-    pnum = s1*numsectors + s2;
+    pnum = (size_t)s1*numsectors + s2;
     bytenum = pnum>>3;
     bitnum = 1 << (pnum&7);
 

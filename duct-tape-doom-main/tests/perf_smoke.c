@@ -551,7 +551,7 @@ void I_TestFrame(void)
             fprintf(stderr,"Notarget regression: typed ON/OFF and player visibility passed.\n");
         }
         {
-            extern int S_AdjustSoundParams(mobj_t*,mobj_t*,int*,int*,int*);
+            extern int S_AdjustSoundParams(mobj_t*,mobj_t*,fixed_t,int*,int*,int*);
             extern int snd_SfxVolume;
             mobj_t listener={0},source={0};
             int savedMap=gamemap,savedVolume=snd_SfxVolume,sep=128,pitch=128;
@@ -559,8 +559,8 @@ void I_TestFrame(void)
             for(int distance=0;distance<=1600;distance+=80) {
                 int regular=15,eighth=15;
                 source.x=distance*FRACUNIT;
-                gamemap=1;int a=S_AdjustSoundParams(&listener,&source,&regular,&sep,&pitch);
-                gamemap=8;int b=S_AdjustSoundParams(&listener,&source,&eighth,&sep,&pitch);
+                gamemap=1;int a=S_AdjustSoundParams(&listener,&source,FRACUNIT,&regular,&sep,&pitch);
+                gamemap=8;int b=S_AdjustSoundParams(&listener,&source,FRACUNIT,&eighth,&sep,&pitch);
                 if(a!=b||(a&&regular!=eighth)||(distance>=1200&&b))
                     I_Error("Positional sound falloff differs on map 8 at %d",distance);
                 if(distance==640&&(!b||eighth>=15||eighth<=0))

@@ -15,6 +15,8 @@ option(DOOM_SOUNDFONT "Bundle the GeneralUser GS SoundFont (32 MB download) for 
 set(DOOM_RELEASE_VERSION "0.1.0" CACHE STRING "Release version shown in the Mac app")
 option(DOOM_ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 include(CTest)
+set(DOOM_COMPAT_TEST_IWAD "" CACHE FILEPATH "Owned Doom II IWAD for generated compatibility regressions")
+set(DOOM_COMPAT_TEST_WAD "" CACHE FILEPATH "Optional large PWAD to verify without modifying it")
 include(TestBigEndian)
 test_big_endian(DOOM_BIG_ENDIAN)
 
@@ -65,6 +67,7 @@ set(DOOM_SOURCES
     linuxdoom-1.10/m_menu.c
     linuxdoom-1.10/m_misc.c
     linuxdoom-1.10/m_random.c
+    linuxdoom-1.10/p_boom.c
     linuxdoom-1.10/p_ceilng.c
     linuxdoom-1.10/p_arena.c
     linuxdoom-1.10/p_doors.c
@@ -177,6 +180,23 @@ add_library(doom_headless_platform OBJECT platform/i_headless.c platform/i_porta
 target_link_libraries(doom_headless_platform PUBLIC doom_core)
 add_executable(doom-headless platform/headless_main.c)
 target_link_libraries(doom-headless PRIVATE doom_headless_platform)
+
+  if(DOOM_COMPAT_TEST_IWAD)
+      find_package(Python3 COMPONENTS Interpreter REQUIRED)
+      add_test(NAME bigmap-generated-regressions COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/bigmap_regressions.py"
+          --engine $<TARGET_FILE:doom-headless> --iwad "${DOOM_COMPAT_TEST_IWAD}"
+          --out "${CMAKE_CURRENT_BINARY_DIR}/bigmap-ctest-generated")
+      set_tests_properties(bigmap-generated-regressions PROPERTIES TIMEOUT 120 LABELS compatibility)
+      if(DOOM_COMPAT_TEST_WAD)
+          add_test(NAME bigmap-real-wad COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/bigmap_smoke.py"
+              --engine $<TARGET_FILE:doom-headless> --iwad "${DOOM_COMPAT_TEST_IWAD}"
+              --wad "${DOOM_COMPAT_TEST_WAD}" --save-load
+              --out "${CMAKE_CURRENT_BINARY_DIR}/bigmap-ctest-wad")
+          set_tests_properties(bigmap-real-wad PROPERTIES TIMEOUT 240 LABELS compatibility)
+      endif()
+  endif()
 
 if(DOOM_BUILD_SDL)
     # enable_language() must run at directory scope, not inside the functions

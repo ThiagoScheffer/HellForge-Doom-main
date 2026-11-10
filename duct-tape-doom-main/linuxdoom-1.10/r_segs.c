@@ -38,6 +38,7 @@ rcsid[] = "$Id: r_segs.c,v 1.3 1997/01/29 20:10:19 b1 Exp $";
 #include "doomstat.h"
 
 #include "r_local.h"
+#include "p_boom.h"
 #include "r_sky.h"
 
 
@@ -115,9 +116,12 @@ R_RenderMaskedSegRange
     // Use different light tables
     //   for horizontal / vertical / diagonal. Diagonal?
     // OPTIMIZE: get rid of LIGHTSEGSHIFT globally
+    void (*savedColumn)(void)=colfunc;
     curline = ds->curline;
-    frontsector = curline->frontsector;
-    backsector = curline->backsector;
+    if(curline->linedef->tranlump)colfunc=detailshift?R_DrawTranslucentColumnLow:R_DrawTranslucentColumn;
+    sector_t boomFront,boomBack;
+    frontsector = P_BoomRenderSector(curline->frontsector,&boomFront,0);
+    backsector = P_BoomRenderSector(curline->backsector,&boomBack,1);
     texnum = texturetranslation[curline->sidedef->midtexture];
 	
     lightnum = (frontsector->lightlevel >> LIGHTSEGSHIFT)+extralight;
@@ -180,7 +184,7 @@ R_RenderMaskedSegRange
 	    
 	    // draw the texture
 	    col = (column_t *)( 
-		(byte *)R_GetColumn(texnum,maskedtexturecol[dc_x]) -3);
+		(byte *)R_GetMaskedColumn(texnum,maskedtexturecol[dc_x]));
 			
 	    R_DrawMaskedColumn (col);
 	    maskedtexturecol[dc_x] = MAXSHORT;
@@ -188,6 +192,7 @@ R_RenderMaskedSegRange
 	spryscale += rw_scalestep;
     }
 	
+    colfunc=savedColumn;
 }
 
 
@@ -284,6 +289,7 @@ void R_RenderSegLoop (void)
 	    dc_yl = yl;
 	    dc_yh = yh;
 	    dc_texturemid = rw_midtexturemid;
+	    dc_texheight=textureheight[midtexture]>>FRACBITS;
 	    dc_source = R_GetColumn(midtexture,texturecolumn);
 	    colfunc ();
 	    ceilingclip[rw_x] = viewheight;
@@ -306,6 +312,7 @@ void R_RenderSegLoop (void)
 		    dc_yl = yl;
 		    dc_yh = mid;
 		    dc_texturemid = rw_toptexturemid;
+		    dc_texheight=textureheight[toptexture]>>FRACBITS;
 		    dc_source = R_GetColumn(toptexture,texturecolumn);
 		    colfunc ();
 		    ceilingclip[rw_x] = mid;
@@ -335,6 +342,7 @@ void R_RenderSegLoop (void)
 		    dc_yl = mid;
 		    dc_yh = yh;
 		    dc_texturemid = rw_bottomtexturemid;
+		    dc_texheight=textureheight[bottomtexture]>>FRACBITS;
 		    dc_source = R_GetColumn(bottomtexture,
 					    texturecolumn);
 		    colfunc ();

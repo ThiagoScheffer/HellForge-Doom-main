@@ -487,5 +487,13 @@ std::array<float,3> texelColor(Image &image) {
     }
     return averageColor(image);
 }
+int translucentWallImage(int index) {
+    int key=0x20000000+index;if(images.find(key)!=images.end())return key;
+    const Image &source=wallImage(index);auto pixels=source.pixels;
+    for(size_t i=1;i<pixels.size();i+=2)pixels[i]=(byte)((pixels[i]+1)/2);
+    Image result=upload(source.width,source.height,pixels.data(),0,0,
+        source.emission.empty()?nullptr:source.emission.data(),nullptr,nullptr,true);
+    images.emplace(key,std::move(result));return key;
+}
 void imagesShutdown() {images.clear();cloudTexture=nullptr;}
 } // namespace doom3d

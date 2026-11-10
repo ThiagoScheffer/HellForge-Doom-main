@@ -34,10 +34,20 @@ static void addWall(const line_t &line,int side,Point a,Point b,float bottom,flo
         if(flat==skyflatnum)return;
         tex=-1-(firstflat+flattranslation[flat]);lumpImage(-1-tex,true);
     }else {tex=texturetranslation[tex];wallImage(tex);}
+    bool translucent=false;
+#ifdef DOOM_BOOM_SECTORS
+    translucent=span==3&&line.tranlump&&tex>=0;
+    if(translucent)tex=translucentWallImage(tex);
+#endif
     const Image &material=tex<0?lumpImage(-1-tex,true):wallImage(tex);
     float u=units(sides[line.sidenum[side]].textureoffset),len=std::hypot(b.x-a.x,b.y-a.y);
     if(addExcavatedWall(line,side,span,a,b,bottom,top,tex,anchor,light))return;
-    auto &out=batches[tex];unsigned mode=sectorMode(sides[line.sidenum[side]].sector);
+    std::vector<Vertex> *destination=&batches[tex];
+    if(translucent){
+        float x=(a.x+b.x)*0.5f-surfaceEye[0],y=(a.y+b.y)*0.5f-surfaceEye[1];
+        translucentWorld.push_back({tex,x*x+y*y,{}});destination=&translucentWorld.back().vertices;
+    }
+    auto &out=*destination;unsigned mode=sectorMode(sides[line.sidenum[side]].sector);
     if(material.leaded&&settings.emissive)mode|=MODE_STAINED_GLASS;
     size_t first=out.size();
     Vertex corners[4]={{a.x,a.y,top,u,anchor-top,light,mode},{b.x,b.y,top,u+len,anchor-top,light,mode},
@@ -198,24 +208,46 @@ static const std::vector<float> &skyTops(float fraction) {
     }
     return skyTop;
 }
+static std::vector<Vertex> &skyOutput(const sector_t *sector) {
+#ifdef DOOM_BOOM_SECTORS
+    if(sector->skyline){
+        const line_t &line=lines[std::abs(sector->skyline)-1];
+        int texture=texturetranslation[sides[line.sidenum[0]].toptexture];wallImage(texture);
+        return transferredSkies[texture];
+    }
+#endif
+    return skyVertices;
+}
 // Floors and ceilings, batched per flat; sky flats go into skyVertices.
 static void flatGeometry(const std::vector<float> &skyTop) {
     for(int i=0;i<numsubsectors;++i) {
         const auto &poly=floors[i]; if(poly.size()<3) continue;
         const sector_t *sector=subsectors[i].sector;
+#ifdef DOOM_BOOM_SECTORS
+        sector_t boomCopy;
+        const sector_t *visual=P_BoomRenderSector(const_cast<sector_t*>(sector),&boomCopy,0);
+#else
+        const sector_t *visual=sector;
+#endif
         if(digMeshEnabled()&&sector->tag==19001)continue;
         int support=P_GlobalDigBreachSupportRoom(int(sector-sectors));
         for(int ceiling=0;ceiling<2;++ceiling) {
             // A destroyed closed slab needs a roof at the exposed room's
             // ceiling, not its original coincident floor/ceiling plane.
-            int flat=ceiling?(support>=0?sectors[support].ceilingpic:sector->ceilingpic):support>=0?sectors[support].floorpic:sector->floorpic;
+            int flat=ceiling?(support>=0?sectors[support].ceilingpic:visual->ceilingpic):support>=0?sectors[support].floorpic:visual->floorpic;
             if(flat==skyflatnum) {
                 float z=ceiling?skyTop[sector-sectors]:floorZ(sector);
-                for(size_t n=1;n+1<poly.size();++n) for(Point p:{poly[0],poly[n],poly[n+1]}) skyVertices.push_back({p.x,p.y,z});
+                for(size_t n=1;n+1<poly.size();++n) for(Point p:{poly[0],poly[n],poly[n+1]}) skyOutput(sector).push_back({p.x,p.y,z});
                 continue;
             }
             int lump=firstflat+flattranslation[flat]; lumpImage(lump,true);
-            float z=sectorHeight(sector,ceiling),light=lighting(support>=0?&sectors[support]:sector);
+            float z=visual==sector?sectorHeight(sector,ceiling):units(ceiling?visual->ceilingheight:visual->floorheight);
+            const sector_t *lit=support>=0?&sectors[support]:sector;
+#ifdef DOOM_BOOM_SECTORS
+            int lightSector=ceiling?visual->ceilinglightsec:visual->floorlightsec;
+            if(lightSector>=0)lit=&sectors[lightSector];
+#endif
+            float light=lighting(lit);
             if(ceiling&&support>=0){float floor=floorZ(sector);P_GlobalDigBreachRoomBounds(int(sector-sectors),&floor,&z);}
             // MODE_MIRROR_FLOOR: this floor samples the mirrored pass.
             unsigned mirror=reflectionActive&&!ceiling&&sectorMist[sector-sectors].reflective&&std::abs(z-reflectionPlane)<0.5f?MODE_MIRROR_FLOOR:0;
@@ -226,6 +258,10 @@ static void flatGeometry(const std::vector<float> &skyTop) {
             if(!addBrokenFlat(out,i,int(sector-sectors),ceiling,lumpImage(lump,true),z,light,mirror|sectorMode(sector)))
                 for(size_t n=1;n+1<poly.size();++n) for(Point p:{poly[0],poly[n],poly[n+1]})
                     out.push_back({p.x,p.y,z,p.x,-p.y,light,mirror|sectorMode(sector)});
+#ifdef DOOM_BOOM_SECTORS
+            float ox=units(ceiling?visual->ceiling_xoffs:visual->floor_xoffs),oy=units(ceiling?visual->ceiling_yoffs:visual->floor_yoffs);
+            for(size_t n=first;n<out.size();n++){out[n].u+=ox;out[n].v+=oy;}
+#endif
             lampGlow(out,first,sector,lumpImage(lump,true));
         }
     }
@@ -235,10 +271,10 @@ static void flatGeometry(const std::vector<float> &skyTop) {
 // allSides: also wall sides facing away from the eye, for frames that
 // capture glass probes from elsewhere.
 static void wallGeometry(const Uniforms &camera,const std::vector<float> &skyTop,bool allSides) {
-    auto skyWall=[](Point a,Point b,float bottom,float top) {
+    auto skyWall=[](const sector_t *sector,Point a,Point b,float bottom,float top) {
         if(top<=bottom)return;
         for(const Vertex &v:{Vertex{a.x,a.y,bottom},Vertex{b.x,b.y,bottom},Vertex{b.x,b.y,top},
-                             Vertex{a.x,a.y,bottom},Vertex{b.x,b.y,top},Vertex{a.x,a.y,top}})skyVertices.push_back(v);
+                             Vertex{a.x,a.y,bottom},Vertex{b.x,b.y,top},Vertex{a.x,a.y,top}})skyOutput(sector).push_back(v);
     };
     for(int i=0;i<numlines;++i) {
         const line_t &line=lines[i];
@@ -252,6 +288,12 @@ static void wallGeometry(const Uniforms &camera,const std::vector<float> &skyTop
             bool facing=allSides||(b.x-a.x)*(camera.eye[1]-a.y)-(b.y-a.y)*(camera.eye[0]-a.x)<=0;
             if(!facing&&P_GlobalDigEnabled()){float damage[4];facing=P_GlobalDigBounds(i,side,damage)!=0;}
             float floor=floorZ(front),ceil=ceilZ(front),row=units(s.rowoffset),light=lighting(front);
+#ifdef DOOM_BOOM_SECTORS
+            sector_t boomFront,boomBack;
+            const sector_t *vf=P_BoomRenderSector(const_cast<sector_t*>(front),&boomFront,0);
+            const sector_t *vb=back?P_BoomRenderSector(const_cast<sector_t*>(back),&boomBack,1):nullptr;
+            if(vf!=front){floor=units(vf->floorheight);ceil=units(vf->ceilingheight);}
+#endif
             if(std::abs(b.y-a.y)<0.01) light=std::max(0.1f,light-0.04f);
             if(std::abs(b.x-a.x)<0.01) light=std::min(1.0f,light+0.04f);
             if(!back) {
@@ -261,6 +303,9 @@ static void wallGeometry(const Uniforms &camera,const std::vector<float> &skyTop
                 addWall(line,side,a,b,floor,ceil,s.midtexture,anchor+row,light,facing,0);
             } else {
                 float bf=floorZ(back),bc=ceilZ(back);
+#ifdef DOOM_BOOM_SECTORS
+                if(vb!=back){bf=units(vb->floorheight);bc=units(vb->ceilingheight);}
+#endif
                 bool sharedSky=front->ceilingpic==skyflatnum&&back->ceilingpic==skyflatnum;
                 if(bc<ceil&&!sharedSky) {
                     float anchor=(line.flags&ML_DONTPEGTOP)?ceil:bc+(s.toptexture?units(textureheight[s.toptexture]):0);
@@ -280,7 +325,7 @@ static void wallGeometry(const Uniforms &camera,const std::vector<float> &skyTop
                 }
             }
             if(front->ceilingpic==skyflatnum)
-                skyWall(a,b,back&&back->ceilingpic==skyflatnum?std::max(skyTop[back-sectors],floor):ceil,skyTop[front-sectors]);
+                skyWall(front,a,b,back&&back->ceilingpic==skyflatnum?std::max(skyTop[back-sectors],floor):ceil,skyTop[front-sectors]);
         }
     }
 }
@@ -581,12 +626,13 @@ void geometry(const Uniforms &camera,float fraction) {
     std::copy(camera.eye,camera.eye+3,surfaceEye);collectFlashes(fraction,camera);
     timing(0);collectFlatLights();timing(1);
     findReflection(camera);
-    skyVertices.clear();
+    skyVertices.clear();transferredSkies.clear();translucentWorld.clear();
     const auto &skyTop=skyTops(fraction);
     timing(2);
     if(!buildSolidScene(fraction)){
         flatGeometry(skyTop);timing(3);
         wallGeometry(camera,skyTop,planGlassCaptures(camera));
+        std::stable_sort(translucentWorld.begin(),translucentWorld.end(),[](const auto &a,const auto &b){return a.distance>b.distance;});
         buildDigMesh();
         buildSolidMapMesh();
     }

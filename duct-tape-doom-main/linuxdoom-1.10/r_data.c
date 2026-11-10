@@ -211,9 +211,11 @@ int*			texturewidthmask;
 // needed for texture pegging
 fixed_t*		textureheight;		
 int*			texturecompositesize;
-short**			texturecolumnlump;
-unsigned short**	texturecolumnofs;
+int32_t**		texturecolumnlump;
+uint32_t**		texturecolumnofs;
 byte**			texturecomposite;
+static byte **texturemasked;
+static uint32_t **texturemaskedofs;
 
 // for global animation
 int*		flattranslation;
@@ -255,20 +257,23 @@ R_DrawColumnInCache
 {
     int		count;
     int		position;
+    int previous = -1;
     byte*	source;
-    byte*	dest;
-	
-    dest = (byte *)cache + 3;
+
 	
     while (patch->topdelta != 0xff)
     {
 	source = (byte *)patch + 3;
 	count = patch->length;
-	position = originy + patch->topdelta;
+	int top = patch->topdelta;
+        if (top <= previous) top += previous;
+        previous = top;
+        position = originy + top;
 
 	if (position < 0)
 	{
 	    count += position;
+            if(count>0)source -= position;
 	    position = 0;
 	}
 
@@ -301,8 +306,8 @@ void R_GenerateComposite (int texnum)
     int			x2;
     int			i;
     column_t*		patchcol;
-    short*		collump;
-    unsigned short*	colofs;
+    int32_t*		collump;
+    uint32_t*	colofs;
 	
     texture = textures[texnum];
 
@@ -310,6 +315,7 @@ void R_GenerateComposite (int texnum)
 		      PU_STATIC, 
 		      &texturecomposite[texnum]);	
 
+    memset(block, 0, (size_t)texturecompositesize[texnum]);
     collump = texturecolumnlump[texnum];
     colofs = texturecolumnofs[texnum];
     
@@ -361,15 +367,16 @@ void R_GenerateComposite (int texnum)
 void R_GenerateLookup (int texnum)
 {
     texture_t*		texture;
-    byte*		patchcount;	// patchcount[texture->width]
+    byte *complexColumn;
+    unsigned int*	patchcount;	// avoid wrapping after 255 overlapping patches
     texpatch_t*		patch;	
     patch_t*		realpatch;
     int			x;
     int			x1;
     int			x2;
     int			i;
-    short*		collump;
-    unsigned short*	colofs;
+    int32_t*		collump;
+    uint32_t*	colofs;
 	
     texture = textures[texnum];
 
@@ -384,8 +391,9 @@ void R_GenerateLookup (int texnum)
     //  that are covered by more than one patch.
     // Fill in the lump / offset, so columns
     //  with only a single patch are all done.
-    patchcount = (byte *)alloca (texture->width);
-    memset (patchcount, 0, texture->width);
+    patchcount = calloc ((size_t)texture->width, sizeof(*patchcount));
+    complexColumn=calloc((size_t)texture->width,1);
+    if (!patchcount || !complexColumn) I_Error("R_GenerateLookup: out of memory");
     patch = texture->patches;
 		
     for (i=0 , patch = texture->patches;
@@ -393,6 +401,24 @@ void R_GenerateLookup (int texnum)
 	 i++, patch++)
     {
 	realpatch = W_CacheLumpNum (patch->patch, PU_CACHE);
+        int patchsize = W_LumpLength(patch->patch);
+        if (patchsize < 8 || SHORT(realpatch->width) < 1 ||
+            8 + (size_t)SHORT(realpatch->width)*4 > (size_t)patchsize)
+            I_Error("R_GenerateLookup: invalid patch header");
+        for (int c=0;c<SHORT(realpatch->width);++c) {
+            size_t at=(uint32_t)LONG(realpatch->columnofs[c]);
+            if (at < 8 + (size_t)SHORT(realpatch->width)*4)
+                I_Error("R_GenerateLookup: invalid patch offset");
+            for (;;) {
+                if (at >= (size_t)patchsize) I_Error("R_GenerateLookup: unterminated patch column");
+                const byte *post=(const byte*)realpatch+at;
+                if (*post==255) break;
+                if ((size_t)patchsize-at < 4+(size_t)post[1])
+                    I_Error("R_GenerateLookup: truncated patch column");
+                at+=4+(size_t)post[1];
+            }
+        }
+
 	x1 = patch->originx;
 	x2 = x1 + SHORT(realpatch->width);
 	
@@ -405,6 +431,8 @@ void R_GenerateLookup (int texnum)
 	    x2 = texture->width;
 	for ( ; x<x2 ; x++)
 	{
+            const column_t *col=(const column_t*)((const byte*)realpatch+(uint32_t)LONG(realpatch->columnofs[x-x1]));
+            if(patch->originy || col->topdelta || col->length<texture->height)complexColumn[x]=1;
 	    patchcount[x]++;
 	    collump[x] = patch->patch;
 	    colofs[x] = LONG(realpatch->columnofs[x-x1])+3;
@@ -413,29 +441,33 @@ void R_GenerateLookup (int texnum)
 	
     for (x=0 ; x<texture->width ; x++)
     {
-	if (!patchcount[x])
-	{
-	    printf ("R_GenerateLookup: column without a patch (%s)\n",
-		    texture->name);
-	    return;
-	}
+        if (!patchcount[x])
+        {
+            collump[x] = -1;
+            colofs[x] = texturecompositesize[texnum];
+            if (texturecompositesize[texnum] > INT_MAX - texture->height)
+                I_Error("R_GenerateLookup: composite too large");
+            texturecompositesize[texnum] += texture->height;
+            continue;
+        }
 	// I_Error ("R_GenerateLookup: column without a patch");
 	
-	if (patchcount[x] > 1)
+	if (patchcount[x] > 1 || complexColumn[x])
 	{
 	    // Use the cached block.
 	    collump[x] = -1;	
 	    colofs[x] = texturecompositesize[texnum];
 	    
-	    if (texturecompositesize[texnum] > 0x10000-texture->height)
+	    if (texturecompositesize[texnum] > INT_MAX-texture->height)
 	    {
-		I_Error ("R_GenerateLookup: texture %i is >64k",
+		I_Error ("R_GenerateLookup: texture %i composite exceeds allocator capacity",
 			 texnum);
 	    }
 	    
 	    texturecompositesize[texnum] += texture->height;
 	}
     }	
+    free(patchcount);free(complexColumn);
 }
 
 
@@ -452,11 +484,12 @@ R_GetColumn
     int		lump;
     int		ofs;
 	
-    col &= texturewidthmask[tex];
+    if(textures[tex]->width==(texturewidthmask[tex]+1))col &= texturewidthmask[tex];
+    else {col%=textures[tex]->width;if(col<0)col+=textures[tex]->width;}
     lump = texturecolumnlump[tex][col];
     ofs = texturecolumnofs[tex][col];
     
-    if (lump > 0)
+    if (lump >= 0)
 	return (byte *)W_CacheLumpNum(lump,PU_CACHE)+ofs;
 
     if (!texturecomposite[tex])
@@ -467,6 +500,93 @@ R_GetColumn
 
 
 
+
+/* A separate, purgeable post stream preserves transparency in multi-patch
+ * masked walls. R_GetColumn remains the dense, wrapped wall sampler. */
+typedef struct {byte *data;size_t count,capacity;} texture_posts_t;
+static void R_PostBytes(texture_posts_t *v,const byte *bytes,size_t count){
+    if(count>INT_MAX-v->count)I_Error("Masked texture exceeds allocator capacity");
+    if(v->count+count>v->capacity){
+        size_t capacity=v->capacity?v->capacity:4096;
+        while(capacity<v->count+count){if(capacity>INT_MAX/2){capacity=INT_MAX;break;}capacity*=2;}
+        void *next=realloc(v->data,capacity);if(!next)I_Error("Masked texture: out of memory");v->data=next;v->capacity=capacity;
+    }
+    memcpy(v->data+v->count,bytes,count);v->count+=count;
+}
+byte *R_GetMaskedColumn(int tex,int col){
+    texture_t *t=textures[tex];col%=t->width;if(col<0)col+=t->width;
+    if(!texturemasked[tex]){
+        size_t pixels=(size_t)t->width*t->height;
+        if(pixels>INT_MAX/2)I_Error("Masked texture too large");
+        byte *indexed=malloc(pixels*2);if(!indexed)I_Error("Masked texture: out of memory");
+        R_CopyIndexedTexture(tex,indexed);
+        if(!texturemaskedofs[tex])texturemaskedofs[tex]=Z_Malloc(t->width*sizeof(uint32_t),PU_STATIC,0);
+        texture_posts_t v={0};
+        for(int x=0;x<t->width;x++){
+            texturemaskedofs[tex][x]=(uint32_t)v.count;int previous=-1,y=0;
+            while(y<t->height){
+                while(y<t->height&&!indexed[((size_t)y*t->width+x)*2+1])++y;
+                if(y==t->height)break;
+                while(y>254&&y-previous>254){
+                    byte empty[4]={254,0,0,0};R_PostBytes(&v,empty,4);
+                    previous=previous<254?254:previous+254;
+                }
+                int top=y<=254&&y>previous?y:y-previous;
+                if(top<0||top>254)I_Error("Masked texture: invalid tall post");
+                int length=0;byte samples[254];
+                while(y+length<t->height&&length<254&&indexed[((size_t)(y+length)*t->width+x)*2+1]){
+                    samples[length]=indexed[((size_t)(y+length)*t->width+x)*2];++length;
+                }
+                byte header[3]={(byte)top,(byte)length,0},zero=0;
+                R_PostBytes(&v,header,3);R_PostBytes(&v,samples,(size_t)length);R_PostBytes(&v,&zero,1);
+                previous=y;y+=length;
+            }
+            byte end=255;R_PostBytes(&v,&end,1);
+        }
+        texturemasked[tex]=Z_Malloc((int)v.count,PU_STATIC,&texturemasked[tex]);
+        memcpy(texturemasked[tex],v.data,v.count);free(v.data);free(indexed);Z_ChangeTag(texturemasked[tex],PU_CACHE);
+    }
+    return texturemasked[tex]+texturemaskedofs[tex][col];
+}
+
+/* Integration check uses the independent indexed compositor as an oracle.
+ * Composite columns must match even after their byte offset crosses 64 KiB. */
+void R_ValidateTextureComposites(void)
+{
+    int columns=0,large=0;
+    for(int i=0;i<numtextures;i++){
+        texture_t *t=textures[i];
+        byte *expected=malloc((size_t)t->width*t->height*2);
+        if(!expected)I_Error("Texture validation: out of memory");
+        R_CopyIndexedTexture(i,expected);
+        for(int x=0;x<t->width;x++)if(texturecolumnlump[i][x]<0){
+            byte *column=R_GetColumn(i,x);++columns;
+            if(texturecolumnofs[i][x]>65535)++large;
+            for(int y=0;y<t->height;y++){
+                size_t at=((size_t)y*t->width+x)*2;
+                if(column[y]!=(expected[at+1]?expected[at]:0))
+                    I_Error("Texture validation: %.8s %dx%d pixel %d,%d mismatch %d != %d, offset %u",t->name,t->width,t->height,x,y,column[y],expected[at],texturecolumnofs[i][x]);
+            }
+        }
+        if(!memcmp(t->name,"BTST",4))for(int x=0;x<t->width;x++){
+            byte *column=R_GetMaskedColumn(i,x);int previous=-1;
+            byte *decoded=calloc((size_t)t->height,2);if(!decoded)I_Error("Masked validation allocation");
+            for(byte *post=column;*post!=255;post+=post[1]+4){
+                int top=post[0];if(top<=previous)top+=previous;previous=top;
+                if(top<0||top+post[1]>t->height)I_Error("Masked validation bounds");
+                for(int y=0;y<post[1];y++){decoded[(top+y)*2]=post[3+y];decoded[(top+y)*2+1]=255;}
+            }
+            for(int y=0;y<t->height;y++){
+                size_t at=((size_t)y*t->width+x)*2;
+                if(decoded[y*2+1]!=expected[at+1] || (decoded[y*2+1]&&decoded[y*2]!=expected[at]))
+                    I_Error("Masked texture roundtrip mismatch %.8s %d,%d",t->name,x,y);
+            }
+            free(decoded);
+        }
+        free(expected);
+    }
+    printf("PASS texture composites: %d columns, %d offsets above 64KiB\n",columns,large);
+}
 
 //
 // R_InitTextures
@@ -511,9 +631,13 @@ void R_InitTextures (void)
     // Load the patch names from pnames.lmp.
     name[8] = 0;	
     names = W_CacheLumpName ("PNAMES", PU_STATIC);
+    int namesLength=W_LumpLength(W_GetNumForName("PNAMES"));
+    if (namesLength < 4) I_Error("R_InitTextures: truncated PNAMES");
     nummappatches = LONG ( *((int *)names) );
+    if (nummappatches<0 || nummappatches>(namesLength-4)/8) I_Error("R_InitTextures: invalid PNAMES count");
     name_p = names+4;
-    patchlookup = alloca (nummappatches*sizeof(*patchlookup));
+    patchlookup = malloc ((size_t)nummappatches*sizeof(*patchlookup));
+    if (!patchlookup) I_Error("R_InitTextures: out of memory");
     
     for (i=0 ; i<nummappatches ; i++)
     {
@@ -525,6 +649,7 @@ void R_InitTextures (void)
     // Load the map texture definitions from textures.lmp.
     // The data is contained in one or two lumps,
     //  TEXTURE1 for shareware, plus TEXTURE2 for commercial.
+    if(W_LumpLength(W_GetNumForName("TEXTURE1"))<4)I_Error("R_InitTextures: truncated TEXTURE1");
     maptex = maptex1 = W_CacheLumpName ("TEXTURE1", PU_STATIC);
     numtextures1 = LONG(*maptex);
     maxoff = W_LumpLength (W_GetNumForName ("TEXTURE1"));
@@ -532,6 +657,7 @@ void R_InitTextures (void)
 	
     if (W_CheckNumForName ("TEXTURE2") != -1)
     {
+        if(W_LumpLength(W_GetNumForName("TEXTURE2"))<4)I_Error("R_InitTextures: truncated TEXTURE2");
 	maptex2 = W_CacheLumpName ("TEXTURE2", PU_STATIC);
 	numtextures2 = LONG(*maptex2);
 	maxoff2 = W_LumpLength (W_GetNumForName ("TEXTURE2"));
@@ -542,12 +668,18 @@ void R_InitTextures (void)
 	numtextures2 = 0;
 	maxoff2 = 0;
     }
+    if(numtextures1<0||numtextures2<0||numtextures1>INT_MAX-numtextures2)I_Error("R_InitTextures: texture count overflow");
     numtextures = numtextures1 + numtextures2;
 	
+    if (numtextures1<0 || numtextures1>(maxoff-4)/4 || numtextures2<0 || numtextures2>(maxoff2 ? (maxoff2-4)/4 : 0) ||
+        numtextures1>INT_MAX-numtextures2 || numtextures<1 || numtextures>INT_MAX/(int)sizeof(*textures))
+        I_Error("R_InitTextures: invalid texture directory count");
     textures = Z_Malloc (numtextures*sizeof(*textures), PU_STATIC, 0);
     texturecolumnlump = Z_Malloc (numtextures*sizeof(*texturecolumnlump), PU_STATIC, 0);
     texturecolumnofs = Z_Malloc (numtextures*sizeof(*texturecolumnofs), PU_STATIC, 0);
     texturecomposite = Z_Malloc (numtextures*sizeof(*texturecomposite), PU_STATIC, 0);
+    texturemasked=Z_Malloc(numtextures*sizeof(*texturemasked),PU_STATIC,0);memset(texturemasked,0,numtextures*sizeof(*texturemasked));
+    texturemaskedofs=Z_Malloc(numtextures*sizeof(*texturemaskedofs),PU_STATIC,0);memset(texturemaskedofs,0,numtextures*sizeof(*texturemaskedofs));
     texturecompositesize = Z_Malloc (numtextures*sizeof(*texturecompositesize), PU_STATIC, 0);
     texturewidthmask = Z_Malloc (numtextures*sizeof(*texturewidthmask), PU_STATIC, 0);
     textureheight = Z_Malloc (numtextures*sizeof(*textureheight), PU_STATIC, 0);
@@ -581,10 +713,15 @@ void R_InitTextures (void)
 		
 	offset = LONG(*directory);
 
-	if (offset > maxoff)
+	if (offset < 0 || offset > maxoff - 22)
 	    I_Error ("R_InitTextures: bad texture directory");
 	
 	mtexture = (maptexture_t *) ( (byte *)maptex + offset);
+        if (SHORT(mtexture->width)<1 || SHORT(mtexture->height)<1 ||
+            SHORT(mtexture->patchcount)<1 ||
+            (size_t)SHORT(mtexture->patchcount)*10 > (size_t)(maxoff-offset-22))
+            I_Error("R_InitTextures: invalid texture definition");
+
 
 	texture = textures[i] =
 	    Z_Malloc (sizeof(texture_t)
@@ -603,15 +740,17 @@ void R_InitTextures (void)
 	{
 	    patch->originx = SHORT(mpatch->originx);
 	    patch->originy = SHORT(mpatch->originy);
-	    patch->patch = patchlookup[SHORT(mpatch->patch)];
+	    int patchindex = (uint16_t)SHORT(mpatch->patch);
+            if (patchindex >= nummappatches) I_Error("R_InitTextures: invalid patch index");
+            patch->patch = patchlookup[patchindex];
 	    if (patch->patch == -1)
 	    {
 		I_Error ("R_InitTextures: Missing patch in texture %s",
 			 texture->name);
 	    }
 	}		
-	texturecolumnlump[i] = Z_Malloc (texture->width*2, PU_STATIC,0);
-	texturecolumnofs[i] = Z_Malloc (texture->width*2, PU_STATIC,0);
+	texturecolumnlump[i] = Z_Malloc (texture->width*sizeof(**texturecolumnlump), PU_STATIC,0);
+	texturecolumnofs[i] = Z_Malloc (texture->width*sizeof(**texturecolumnofs), PU_STATIC,0);
 
 	j = 1;
 	while (j*2 <= texture->width)
@@ -623,6 +762,7 @@ void R_InitTextures (void)
 	totalwidth += texture->width;
     }
 
+    free(patchlookup);
     Z_Free (maptex1);
     if (maptex2)
 	Z_Free (maptex2);

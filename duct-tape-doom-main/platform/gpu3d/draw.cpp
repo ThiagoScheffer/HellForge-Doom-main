@@ -101,6 +101,8 @@ void uploadFrame(SDL_GPUCommandBuffer *command,const std::vector<const std::vect
         stream(cursor,vertices.size()-cursor);
     };
     for(const auto *groups:{&batches,&shadowBatches,&decalBatches,&effectBatches,&effectAddBatches,&mirrorBatches})for(const auto &batch:*groups)place(batch.second);
+    for(const auto &sky:transferredSkies)place(sky.second);
+    for(const auto &batch:translucentWorld)place(batch.vertices);
     place(rubbleEmissionVertices);place(mistVertices);place(shaftVertices);place(particleVertices);place(crestVertices);place(heatVertices);place(skyVertices);place(glassVertices);
     for(const auto *vertices:transient)place(*vertices);
     for(auto it=residentVertices.begin();it!=residentVertices.end();){
@@ -247,6 +249,10 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,skyImage,2);
         drawVertices(pass,skyVertices);
     }
+    for(const auto &batch:transferredSkies)if(!batch.second.empty()){
+        SDL_GPUTextureSamplerBinding material[]={{gpu(wallImage(batch.first).texture),linearRepeat},{paletteTexture,nearestClamp}};
+        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,material,2);drawVertices(pass,batch.second);
+    }
     SDL_BindGPUGraphicsPipeline(pass,sky);
     SDL_BindGPUFragmentSamplers(pass,0,skyImage,2);
     SDL_DrawGPUPrimitives(pass,3,1,0,0);
@@ -265,6 +271,8 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         bindSurface(command,pass,batch.first,3);drawVertices(pass,batch.second);
     }
     if(sprites)drawVoxels(command,pass,voxelDraws,world==reflectWorldPipeline);
+    SDL_BindGPUGraphicsPipeline(pass,world==reflectWorldPipeline?reflectTranslucentPipeline:translucentPipeline);bindWorld(pass,reflection);
+    for(const auto &batch:translucentWorld){bindSurface(command,pass,batch.texture,3);drawVertices(pass,batch.vertices);}
     float noBlend[36]={};SDL_PushGPUFragmentUniformData(command,3,noBlend,sizeof(noBlend));
 }
 void drawOverlays(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,const FrameView &view,

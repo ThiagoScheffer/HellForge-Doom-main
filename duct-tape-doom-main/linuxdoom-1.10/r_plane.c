@@ -184,6 +184,8 @@ void R_InitPlanes (void)
 }
 
 
+static fixed_t planeXoffs,planeYoffs;
+
 //
 // R_MapPlane
 //
@@ -234,8 +236,8 @@ R_MapPlane
 	
     length = FixedMul (distance,distscale[x1]);
     angle = (viewangle + xtoviewangle[x1])>>ANGLETOFINESHIFT;
-    ds_xfrac = viewx + FixedMul(finecosine[angle], length);
-    ds_yfrac = -viewy - FixedMul(finesine[angle], length);
+    ds_xfrac = viewx + planeXoffs + FixedMul(finecosine[angle], length);
+    ds_yfrac = -viewy + planeYoffs - FixedMul(finesine[angle], length);
 
     if (fixedcolormap)
 	ds_colormap = fixedcolormap;
@@ -303,7 +305,7 @@ visplane_t*
 R_FindPlane
 ( fixed_t	height,
   int		picnum,
-  int		lightlevel )
+  int		lightlevel, fixed_t xoffs, fixed_t yoffs, int skyline )
 {
     visplane_t*	check;
 	
@@ -317,7 +319,7 @@ R_FindPlane
     {
 	if (height == check->height
 	    && picnum == check->picnum
-	    && lightlevel == check->lightlevel)
+	    && lightlevel == check->lightlevel && xoffs == check->xoffs && yoffs == check->yoffs && skyline == check->skyline)
 	{
 	    break;
 	}
@@ -329,6 +331,7 @@ R_FindPlane
 		
     check = R_NewVisplane (NULL);
 
+    check->xoffs=xoffs;check->yoffs=yoffs;check->skyline=skyline;
     check->height = height;
     check->picnum = picnum;
     check->lightlevel = lightlevel;
@@ -395,6 +398,7 @@ R_CheckPlane
     {
 	visplane_t* next = R_NewVisplane (&pl);
 
+        next->xoffs=pl->xoffs;next->yoffs=pl->yoffs;next->skyline=pl->skyline;
 	next->height = pl->height;
 	next->picnum = pl->picnum;
 	next->lightlevel = pl->lightlevel;
@@ -449,6 +453,8 @@ R_MakeSpans
 // R_DrawPlanes
 // At the end of each frame.
 //
+
+
 void R_DrawPlanes (void)
 {
     visplane_t*		pl;
@@ -473,7 +479,13 @@ void R_DrawPlanes (void)
 	    // Because of this hack, sky is not affected
 	    //  by INVUL inverse mapping.
 	    dc_colormap = colormaps;
-	    dc_texturemid = skytexturemid;
+        int texture=skytexture;angle_t skyangle=viewangle;
+        dc_texturemid = skytexturemid;
+        if(pl->skyline){
+            line_t *l=&lines[abs(pl->skyline)-1];side_t *sd=&sides[l->sidenum[0]];
+            texture=texturetranslation[sd->toptexture];skyangle+=(angle_t)sd->textureoffset;
+            dc_texturemid=sd->rowoffset-28*FRACUNIT;
+        }
 	    for (x=pl->minx ; x <= pl->maxx ; x++)
 	    {
 		dc_yl = pl->top[x];
@@ -481,9 +493,11 @@ void R_DrawPlanes (void)
 
 		if (dc_yl <= dc_yh)
 		{
-		    angle = (viewangle + xtoviewangle[x])>>ANGLETOSKYSHIFT;
+		    angle = (skyangle + xtoviewangle[x])>>ANGLETOSKYSHIFT;
+            if(pl->skyline>0)angle=~angle;
 		    dc_x = x;
-		    dc_source = R_GetColumn(skytexture, angle);
+		    dc_texheight=textureheight[texture]>>FRACBITS;
+		    dc_source = R_GetColumn(texture, angle);
 		    colfunc ();
 		}
 	    }
@@ -495,6 +509,7 @@ void R_DrawPlanes (void)
 				   flattranslation[pl->picnum],
 				   PU_STATIC);
 	
+        planeXoffs=pl->xoffs;planeYoffs=pl->yoffs;
 	planeheight = abs(pl->height-viewz);
 	light = (pl->lightlevel >> LIGHTSEGSHIFT)+extralight;
 

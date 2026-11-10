@@ -332,6 +332,42 @@ void W_Reload (void)
 
 
 
+/* Keep sprite definitions and their dimensions in one namespace, including
+ * SS_START blocks and ordinary replacement lumps named after stock sprites.
+ * Directory order is preserved, so later WAD artwork wins per rotation. */
+static boolean W_IsSpriteMarker(const char *name,const char *marker){
+    return !strncasecmp(name,marker,8)||(toupper(name[0])=='S'&&!strncasecmp(name+1,marker,7));
+}
+static void W_MergeSprites(void){
+    if(reloadname)return; // preserve the development reload directory offsets
+    byte *selected=calloc((size_t)numlumps,1);
+    lumpinfo_t *sprites=malloc((size_t)numlumps*sizeof(*sprites));
+    if(!selected||!sprites)I_Error("Cannot allocate merged sprite directory");
+    boolean inside=false;int count=0,blocks=0;
+    for(int i=0;i<numlumps;i++){
+        if(W_IsSpriteMarker(lumpinfo[i].name,"S_START")){inside=true;++blocks;}
+        else if(W_IsSpriteMarker(lumpinfo[i].name,"S_END"))inside=false;
+        else if(inside)selected[i]=1;
+    }
+    if(!blocks){free(selected);free(sprites);return;}
+    /* A replacement outside a namespace is supported when its full name
+     * already identifies a sprite in a marked block. */
+    for(int i=0;i<numlumps;i++)if(!selected[i]&&lumpinfo[i].size>=8){
+        for(int j=0;j<numlumps;j++)if(selected[j]==1&&!strncasecmp(lumpinfo[i].name,lumpinfo[j].name,8)){
+            selected[i]=2;break;
+        }
+    }
+    int other=0;
+    for(int i=0;i<numlumps;i++){
+        if(selected[i])sprites[count++]=lumpinfo[i];
+        else if(!W_IsSpriteMarker(lumpinfo[i].name,"S_START")&&!W_IsSpriteMarker(lumpinfo[i].name,"S_END"))lumpinfo[other++]=lumpinfo[i];
+    }
+    memset(&lumpinfo[other],0,sizeof(*lumpinfo));memcpy(lumpinfo[other++].name,"S_START",7);
+    memcpy(&lumpinfo[other],sprites,(size_t)count*sizeof(*sprites));other+=count;
+    memset(&lumpinfo[other],0,sizeof(*lumpinfo));memcpy(lumpinfo[other++].name,"S_END",5);
+    numlumps=other;free(selected);free(sprites);
+}
+
 //
 // Flat merging.
 // PWADs add flats between their own F_START/F_END or FF_START/FF_END
@@ -426,6 +462,7 @@ void W_InitMultipleFiles (char** filenames)
     if (!numlumps)
 	I_Error ("W_InitFiles: no files found");
 
+    W_MergeSprites ();
     W_MergeFlats ();
 
     // set up caching

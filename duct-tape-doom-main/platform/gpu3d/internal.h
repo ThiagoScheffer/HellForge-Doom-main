@@ -48,7 +48,7 @@ void updatePaletteLUT(const unsigned *palette);
 
 // pipelines.cpp
 extern SDL_GPUSampleCount sampleCount;
-extern SDL_GPUGraphicsPipeline *opaquePipeline,*skyPipeline,*skySurfacePipeline,*reflectSkySurfacePipeline,*worldPipeline,*shadowPipeline,*decalPipeline,*effectAddPipeline,*particlePipeline,*crestPipeline,*heatPipeline,
+extern SDL_GPUGraphicsPipeline *opaquePipeline,*skyPipeline,*skySurfacePipeline,*reflectSkySurfacePipeline,*worldPipeline,*translucentPipeline,*reflectTranslucentPipeline,*shadowPipeline,*decalPipeline,*effectAddPipeline,*particlePipeline,*crestPipeline,*heatPipeline,
     *weaponPipeline,*weaponAddPipeline,*hudPipeline,*solidPipeline,*mistPipeline,*shaftPipeline,*overlayWeaponPipeline,*overlayWeaponAddPipeline,*overlayHudPipeline,*overlaySolidPipeline,
     *reflectOpaquePipeline,*reflectSkyPipeline,*reflectWorldPipeline,*emissionPipeline,*rubbleEmissionPipeline,*blurPipeline,*presentPipeline,*depthPipeline,*prepassPipeline,*coveragePipeline,*cutoutPipeline,
     *settingsPipeline,*glassPipeline,*reflectPrepassPipeline;

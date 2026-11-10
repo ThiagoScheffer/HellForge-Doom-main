@@ -28,8 +28,11 @@ rcsid[] = "$Id: p_switch.c,v 1.3 1997/01/28 22:08:29 b1 Exp $";
 
 
 #include "i_system.h"
+#include "w_wad.h"
+#include "z_zone.h"
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 #include "g_game.h"
 
@@ -97,7 +100,7 @@ switchlist_t alphSwitchList[] =
     {"\0",		"\0",		0}
 };
 
-int		switchlist[MAXSWITCHES * 2];
+int*		switchlist;
 int		numswitches;
 button_t        buttonlist[MAXBUTTONS];
 
@@ -111,6 +114,25 @@ void P_InitSwitchList(void)
     int		index;
     int		episode;
 	
+    int lump=W_CheckNumForName("SWITCHES");
+    if(lump>=0){
+        int length=W_LumpLength(lump);
+        if(length<20 || length>1024*1024)I_Error("SWITCHES: invalid length");
+        const byte *data=W_CacheLumpNum(lump,PU_STATIC);
+        switchlist=Z_Malloc((length/20*2+1)*sizeof(*switchlist),PU_STATIC,0);numswitches=0;
+        int ended=0;
+        int maximum=gamemode==commercial?3:(gamemode==shareware?1:2);
+        for(int at=0;at+20<=length;at+=20){
+            unsigned version=data[at+18]|(unsigned)data[at+19]<<8;
+            if(!version){ended=1;break;}
+            char first[9],last[9];memcpy(first,data+at,8);first[8]=0;memcpy(last,data+at+9,8);last[8]=0;
+            int a=R_CheckTextureNumForName(first),b=R_CheckTextureNumForName(last);
+            if(version<=maximum && a>=0 && b>=0){switchlist[numswitches*2]=a;switchlist[numswitches*2+1]=b;++numswitches;}
+        }
+        if(!ended)I_Error("SWITCHES: missing terminator");
+        switchlist[numswitches*2]=-1;Z_Free((void*)data);return;
+    }
+    switchlist=Z_Malloc((MAXSWITCHES*2+1)*sizeof(*switchlist),PU_STATIC,0);
     episode = 1;
 
     if (gamemode == registered || gamemode == retail)
@@ -279,6 +301,9 @@ P_UseSpecialLine
   line_t*	line,
   int		side )
 {               
+
+    int boom=P_BoomActivate(line,thing,side,1);
+    if(boom>=0)return boom!=0;
 
     // Err...
     // Use the back sides of VERY SPECIAL lines...

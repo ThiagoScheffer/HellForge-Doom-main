@@ -36,6 +36,8 @@ rcsid[] = "$Id: r_draw.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "w_wad.h"
 
 #include "r_local.h"
+#include "w_wad.h"
+#include "z_zone.h"
 
 // Needs access to LFB (guess what).
 #include "v_video.h"
@@ -89,6 +91,8 @@ int			dc_yl;
 int			dc_yh; 
 fixed_t			dc_iscale; 
 fixed_t			dc_texturemid;
+int dc_texheight=128;
+static int columnTexel(fixed_t frac){int y=frac>>FRACBITS;if(dc_texheight==128)return y&127;if(dc_texheight>0){y%=dc_texheight;if(y<0)y+=dc_texheight;}return y;}
 
 // first pixel in a column (possibly virtual) 
 byte*			dc_source;		
@@ -140,13 +144,41 @@ void R_DrawColumn (void)
     {
 	// Re-map color indices from wall texture column
 	//  using a lighting/special effects LUT.
-	*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+	*dest = dc_colormap[dc_source[columnTexel(frac)]];
 	
 	dest += SCREENWIDTH; 
 	frac += fracstep;
 	
     } while (count--); 
 } 
+/* Boom's default 50% palette blend; an explicit TRANMAP overrides it. */
+static const byte *transMap;
+static void R_TransMap(void){
+    if(transMap)return;
+    int lump=W_CheckNumForName("TRANMAP");
+    if(lump>=0){if(W_LumpLength(lump)!=65536)I_Error("TRANMAP must contain 65536 bytes");transMap=W_CacheLumpNum(lump,PU_STATIC);return;}
+    byte *map=Z_Malloc(65536,PU_STATIC,0);
+    const byte *pal=W_CacheLumpName("PLAYPAL",PU_CACHE);
+    for(int a=0;a<256;a++)for(int b=a;b<256;b++){
+        int r=(pal[a*3]+pal[b*3])/2,g=(pal[a*3+1]+pal[b*3+1])/2,blue=(pal[a*3+2]+pal[b*3+2])/2;
+        int best=0,distance=INT_MAX;
+        for(int c=0;c<256;c++){int dr=pal[c*3]-r,dg=pal[c*3+1]-g,db=pal[c*3+2]-blue,d=dr*dr+dg*dg+db*db;if(d<distance){distance=d;best=c;}}
+        map[a*256+b]=map[b*256+a]=(byte)best;
+    }
+    transMap=map;
+}
+static void R_Translucent(int low){
+    R_TransMap();int x=dc_x<<low,count=dc_yh-dc_yl;if(count<0)return;
+    byte *dest=ylookup[dc_yl]+columnofs[x],*second=low?ylookup[dc_yl]+columnofs[x+1]:NULL;
+    fixed_t frac=dc_texturemid+(dc_yl-centery)*dc_iscale;
+    do{byte color=dc_colormap[dc_source[columnTexel(frac)]];*dest=transMap[*dest*256+color];
+        if(second){*second=transMap[*second*256+color];second+=SCREENWIDTH;}
+        dest+=SCREENWIDTH;frac+=dc_iscale;
+    }while(count--);
+}
+void R_DrawTranslucentColumn(void){R_Translucent(0);}
+void R_DrawTranslucentColumnLow(void){R_Translucent(1);}
+
 
 
 
@@ -245,7 +277,7 @@ void R_DrawColumnLow (void)
     do 
     {
 	// Hack. Does not work corretly.
-	*dest2 = *dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+	*dest2 = *dest = dc_colormap[dc_source[columnTexel(frac)]];
 	dest += SCREENWIDTH;
 	dest2 += SCREENWIDTH;
 	frac += fracstep; 
@@ -440,7 +472,7 @@ void R_DrawTranslatedColumn (void)
 	//  used with PLAY sprites.
 	// Thus the "green" ramp of the player 0 sprite
 	//  is mapped to gray, red, black/indigo. 
-	*dest = dc_colormap[dc_translation[dc_source[frac>>FRACBITS]]];
+	*dest = dc_colormap[dc_translation[dc_source[columnTexel(frac)]]];
 	dest += SCREENWIDTH;
 	
 	frac += fracstep; 

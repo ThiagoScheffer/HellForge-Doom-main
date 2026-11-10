@@ -23,6 +23,7 @@
 
 #ifndef __R_DEFS__
 #define __R_DEFS__
+#define DOOM_BOOM_SECTORS 1
 
 
 // Screenwidth.
@@ -131,6 +132,10 @@ typedef	struct
 
     // thinker_t for reversable actions
     void*	specialdata;
+    void*       floordata; // independent floor movement
+    int heightsec, floorlightsec, ceilinglightsec, skyline;
+    int stairlock;
+    fixed_t floor_xoffs, floor_yoffs, ceiling_xoffs, ceiling_yoffs;
 
     int			linecount;
     struct line_s**	lines;	// [linecount] size
@@ -215,6 +220,7 @@ typedef struct line_s
 
     // thinker_t for reversable actions
     void*	specialdata;		
+    int tranlump; // Boom translucent middle texture property
 } line_t;
 
 
@@ -277,7 +283,7 @@ typedef struct
     fixed_t	bbox[2][4];
 
     // If NF_SUBSECTOR its a subsector.
-    unsigned short children[2];
+    uint32_t children[2];
     
 } node_t;
 
@@ -463,6 +469,8 @@ typedef struct
 typedef struct
 {
   fixed_t		height;
+  fixed_t xoffs,yoffs;
+  int skyline;
   int			picnum;
   int			lightlevel;
   int			minx;

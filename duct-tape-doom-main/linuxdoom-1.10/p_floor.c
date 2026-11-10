@@ -29,6 +29,7 @@ rcsid[] = "$Id: p_floor.c,v 1.4 1997/02/03 16:47:54 b1 Exp $";
 #include "z_zone.h"
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_boom.h"
 
 #include "s_sound.h"
 
@@ -222,7 +223,8 @@ void T_MoveFloor(floormove_t* floor)
     
     if (res == pastdest)
     {
-	floor->sector->specialdata = NULL;
+	floor->sector->floordata = NULL;
+        if(floor->type==boomBuildStairs)P_BoomStairFinished(floor->newspecial);
 
 	if (floor->direction == 1)
 	{
@@ -275,14 +277,14 @@ EV_DoFloor
 	sec = &sectors[secnum];
 		
 	// ALREADY MOVING?  IF SO, KEEP GOING...
-	if (sec->specialdata)
+	if (sec->floordata || (!p_boom_compat && sec->specialdata))
 	    continue;
 	
 	// new floor thinker
 	rtn = 1;
 	floor = Z_Malloc (sizeof(*floor), PU_LEVSPEC, 0);
 	P_AddThinker (&floor->thinker);
-	sec->specialdata = floor;
+	sec->floordata = floor;
 	floor->thinker.function.acp1 = (actionf_p1) T_MoveFloor;
 	floor->type = floortype;
 	floor->crush = false;
@@ -478,14 +480,14 @@ EV_BuildStairs
 	sec = &sectors[secnum];
 		
 	// ALREADY MOVING?  IF SO, KEEP GOING...
-	if (sec->specialdata)
+	if (sec->floordata || (!p_boom_compat && sec->specialdata))
 	    continue;
 	
 	// new floor thinker
 	rtn = 1;
 	floor = Z_Malloc (sizeof(*floor), PU_LEVSPEC, 0);
 	P_AddThinker (&floor->thinker);
-	sec->specialdata = floor;
+	sec->floordata = floor;
 	floor->thinker.function.acp1 = (actionf_p1) T_MoveFloor;
 	floor->direction = 1;
 	floor->sector = sec;
@@ -531,7 +533,7 @@ EV_BuildStairs
 					
 		height += stairsize;
 
-		if (tsec->specialdata)
+		if (tsec->floordata || (!p_boom_compat && tsec->specialdata))
 		    continue;
 					
 		sec = tsec;
@@ -540,7 +542,7 @@ EV_BuildStairs
 
 		P_AddThinker (&floor->thinker);
 
-		sec->specialdata = floor;
+		sec->floordata = floor;
 		floor->thinker.function.acp1 = (actionf_p1) T_MoveFloor;
 		floor->direction = 1;
 		floor->sector = sec;
