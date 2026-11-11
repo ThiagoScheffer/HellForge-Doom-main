@@ -27,6 +27,12 @@ internal static class SettingsBackupTests {
         string root=Path.Combine(Path.GetTempPath(),"Tuin-settings-tests-"+Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try {
+            string cache=Path.Combine(root,"Cache","Maps","MAP01-test");Directory.CreateDirectory(cache);
+            File.WriteAllText(Path.Combine(cache,"light.bake"),"cache");File.WriteAllText(Path.Combine(cache,"pending.tmp"),"partial");
+            File.WriteAllText(Path.Combine(cache,"keep.txt"),"keep");
+            Launcher.ClearCacheFolder(Path.Combine(root,"Cache","Maps"));
+            Check(!File.Exists(Path.Combine(cache,"light.bake"))&&!File.Exists(Path.Combine(cache,"pending.tmp")),"cache action removes generated entries");
+            Check(File.ReadAllText(Path.Combine(cache,"keep.txt"))=="keep","cache action preserves other files");
             // Keep the UI check isolated too: construction can initialize its
             // profile. These paths are overridden only in this test process.
             var fields=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
@@ -69,6 +75,12 @@ internal static class SettingsBackupTests {
                 form.Show();Application.DoEvents();
                 Check(Descendants(form).Any(c=>c.Text=="EXPORT SETTINGS")&&Descendants(form).Any(c=>c.Text=="IMPORT SETTINGS"),"backup controls present");
                 Check(form.Controls.Cast<Control>().All(c=>c.Bottom<=form.ClientSize.Height),"controls fit launcher height");
+                var clear=Descendants(form).Single(c=>c.Text=="CLEAR LIGHTING CACHE");
+                form.Size=form.MinimumSize;Application.DoEvents();
+                Check(clear.Parent.ClientRectangle.Contains(clear.Bounds)&&!clear.Parent.Controls.Cast<Control>().Any(c=>c!=clear&&c.Visible&&c.Bounds.IntersectsWith(clear.Bounds)),"cache control fits minimum launcher size");
+                var launch=typeof(Launcher).GetMethod("SetLaunching",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+                launch.Invoke(form,new object[]{true});Check(!clear.Enabled,"cache clear disabled while launching");launch.Invoke(form,new object[]{false});
+                form.ClientSize=new Size(1150,774);Application.DoEvents();
                 using(var bitmap=new Bitmap(form.Width,form.Height)) { form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save("build/launcher-preview.png"); }
             }
         } finally { Directory.Delete(root,true); }

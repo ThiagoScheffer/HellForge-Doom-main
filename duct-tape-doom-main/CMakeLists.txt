@@ -288,6 +288,8 @@ if(DOOM_BUILD_SDL)
     # The 3D scene, one file per subsystem; scene3d/internal.h holds what they share.
     set(DOOM_SCENE3D_SOURCES
         platform/scene3d/atmosphere.cpp
+        platform/crash_diagnostics.cpp
+        platform/scene3d/bake_cache.cpp
         platform/scene3d/bake_atlas.cpp
         platform/scene3d/bake_indirect.cpp
         platform/scene3d/bake_lights.cpp
@@ -342,6 +344,19 @@ if(DOOM_BUILD_SDL)
     endif()
     # The accelerated 3D renderer: SDL_gpu drives Metal on macOS and Vulkan on
     # Linux and Windows (SDL_GPU_DRIVER=vulkan selects MoltenVK on a Mac).
+    # Cache identity follows the bake implementation, including shared helpers and game profiles.
+    file(GLOB_RECURSE DOOM_BAKE_ID_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/games/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/games/*.h")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${DOOM_BAKE_ID_SOURCES})
+    set(DOOM_BAKE_ID_INPUT "")
+    foreach(source IN LISTS DOOM_BAKE_ID_SOURCES)
+        file(SHA256 "${source}" source_hash)
+        string(APPEND DOOM_BAKE_ID_INPUT "${source_hash}")
+    endforeach()
+    string(SHA256 DOOM_BAKE_CODE_HASH "${DOOM_BAKE_ID_INPUT}")
+    set_source_files_properties(platform/scene3d/bake_cache.cpp PROPERTIES
+        COMPILE_DEFINITIONS "DOOM_BAKE_CODE_HASH=\"${DOOM_BAKE_CODE_HASH}\"")
     function(doom_add_renderer target enabled)
         if(NOT enabled)
             return()
@@ -366,6 +381,12 @@ if(DOOM_BUILD_SDL)
         target_link_libraries(doom PRIVATE ws2_32)
     endif()
     target_compile_definitions(doom PRIVATE DOOM_NATIVE)
+    if(MSVC)
+        enable_language(RC)
+        target_sources(doom PRIVATE platform/engine_version.rc)
+        target_compile_options(doom PRIVATE /Zi)
+        target_link_options(doom PRIVATE /DEBUG:FULL /OPT:REF /OPT:ICF /INCREMENTAL:NO)
+    endif()
     set_target_properties(doom PROPERTIES WIN32_EXECUTABLE TRUE)
     doom_add_renderer(doom ${DOOM_RENDER3D})
     if(APPLE)
@@ -435,6 +456,10 @@ if(DOOM_BUILD_SDL)
         if(DOOM_RENDER3D)
             doom_add_smoke(doom-lan-smoke doom_game ON tests/lan_smoke.c)
             doom_add_smoke(doom-perf-smoke doom_game ON tests/perf_smoke.c)
+            doom_add_smoke(doom-reload-smoke doom_game ON tests/reload_smoke.c)
+            if(WIN32)
+                target_link_libraries(doom-reload-smoke PRIVATE psapi)
+            endif()
             doom_add_smoke(doom-glass-smoke doom_game ON tests/glass_smoke.cpp)
             doom_add_smoke(doom-critical-smoke doom_game ON tests/critical_smoke.cpp)
             add_executable(doom-glass-fracture-tests tests/glass_fracture.cpp)
@@ -498,7 +523,7 @@ if(DOOM_GLSLANG AND DOOM_SPIRV_CROSS)
         DEPENDS ${DOOM_SHADER_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_gpu_shaders.cmake"
         COMMENT "Regenerating platform/gpu_shaders.h")
     add_custom_target(doom-gpu-shaders DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/platform/gpu_shaders.h")
-    foreach(renderer_target doom doom-perf-smoke doom-gpu-smoke)
+    foreach(renderer_target doom doom-perf-smoke doom-reload-smoke doom-gpu-smoke)
         if(TARGET ${renderer_target})
             add_dependencies(${renderer_target} doom-gpu-shaders)
         endif()

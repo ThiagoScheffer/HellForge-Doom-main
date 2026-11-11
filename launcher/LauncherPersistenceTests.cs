@@ -17,7 +17,7 @@ internal static class LauncherPersistenceTests {
             string seed=File.ReadAllText(profile);
             Check(seed.Contains(lowFx?"scale 75":"scale 100"),"starting resolution uses supported F4 values");
             Check(seed.Contains(lowFx?"emissive 0":"emissive 1"),"preset only seeds new graphical defaults");
-            string applied="# F4 applied choices\nscale 100\nemissive 1\nfog 1\ncritical_parts 1\nmonster_feeding 1\nwp_bleed_damage_3 7\n";
+            string applied="# F4 applied choices\nscale 100\nemissive 1\nfog 1\ncritical_parts 1\nmonster_feeding 1\nwp_bleed_damage_3 7\nmap_light_cache 0\n";
             File.WriteAllText(prepared,applied,new UTF8Encoding(false));
             byte[] expected=File.ReadAllBytes(profile);
             foreach(bool nextMode in new[]{lowFx,!lowFx}){

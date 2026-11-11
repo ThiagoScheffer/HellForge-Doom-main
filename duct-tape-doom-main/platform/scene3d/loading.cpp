@@ -47,6 +47,7 @@ void loadingStage(LoadStage stage) {
     if(!pass.show)return;
     uint64_t now=SDL_GetTicksNS();
     endStage(now);
+    fprintf(stderr,"3D loading stage: %s\n",stageNames[(int)stage]);fflush(stderr);
     pass.stage=(int)stage;pass.part=0;pass.loop=0;pass.loopPart=0;pass.stageStart=now;
     if(stage==LoadStage::Map)pass.level=true;
     loadingTick();

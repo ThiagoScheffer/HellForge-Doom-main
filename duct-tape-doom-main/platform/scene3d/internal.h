@@ -58,6 +58,7 @@ int P_PicAnimationNext(boolean istexture,int pic,int *next);
 #include "../painted_tiles.h"
 #include "../surface_lighting.h"
 #include "../baked_lighting.h"
+#include "bake_cache.h"
 #include "../weapon_lighting.h"
 #include "../sprite_eyes.h"
 #include "../sprite_eyes_stock.h"

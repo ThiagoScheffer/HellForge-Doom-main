@@ -118,7 +118,13 @@ void bakeSun() {
     const float direction[3]={std::cos(yaw)*std::cos(elevation),std::sin(yaw)*std::cos(elevation),std::sin(elevation)};
     float sunLength=std::hypot(direction[0],direction[1]),sunX=direction[0]/sunLength,sunY=direction[1]/sunLength;
     sunAzimuth[0]=sunX;sunAzimuth[1]=sunY;
+    for(int c=0;c<3;++c)sunDirection[c]=direction[c];
+    sunLevel=levelMood().sun?level:0;
     std::atomic<size_t> lit{0};
+    BakeCache cache("sun",{cacheChannel(contactCells,2,(size_t)mapWidth*mapHeight),
+        cacheWallChannel(wallBakeCells,atlasHeight,3,1)});
+    if(!cache.restore()) {
+
     parallelFor(mapHeight,[&](int y) {
         for(int x=0;x<mapWidth;++x) {
             size_t i=(size_t)y*mapWidth+x;
@@ -129,6 +135,8 @@ void bakeSun() {
         }
     });
     parallelFor((int)bakeOrder.size(),[&](int n) {sunStrip(bakeMap,bakeStrips[bakeOrder[n]],direction);});
+    cache.store();
+    }
     contactTexture=gpuCreateTexture(GpuFormat::RGBA8,mapWidth,mapHeight,contactCells.data(),mapWidth*4);
     if(!contactTexture)I_Error((char*)"Could not allocate surface maps");
     uploadWallBake();

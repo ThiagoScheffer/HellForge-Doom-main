@@ -1,3 +1,4 @@
+#include "../level_lifecycle.h"
 extern "C" {
 #include "i_lan.h"
 }
@@ -138,6 +139,8 @@ static void acceleratedView(player_t *player) {
     }
 }
 void applySettings() {
+    R_BeforeLevelReset=stopRelight;
+    if(!settings.accelerated)stopRelight();
     fitGame(settings);
     p_breakablewalls=settings.breakableWalls&&!netgame;
     p_throughwalls=settings.throughWalls;
@@ -237,6 +240,12 @@ void sceneInit(SDL_Window *window) {
     int paletteOption=M_CheckParm((char*)"-palette");
     if(paletteOption&&paletteOption+1<myargc)settings.palette=atoi(myargv[paletteOption+1])!=0;
 }
+static void clearLevelGeometry() {
+    vertexSections.clear();batches.clear();shadowBatches.clear();mirrorBatches.clear();
+    decalBatches.clear();effectBatches.clear();effectAddBatches.clear();particleVertices.clear();
+    mistVertices.clear();skyVertices.clear();shaftVertices.clear();heatVertices.clear();
+    translucentWorld.clear();transferredSkies.clear();rubbleEmissionVertices.clear();
+}
 void sceneShutdown() {
     P_WeakpointImpact=nullptr;P_WeakpointBleedVisual=nullptr;P_WeakpointBulletLocate=nullptr;P_WeakpointConfigureExtras(0,0);
     P_WeakpointConfigureFeeding(0);
@@ -248,11 +257,9 @@ void sceneShutdown() {
     for(auto &texture:keyHandTextures)texture.reset();keyHandVisible=keyWeaponDrop=0;
     toastyTexture.reset();toastyVisible=0;romeroTexture.reset();romeroAge=-1;
     stopRelight();
-    R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
+    R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
-    vertexSections.clear();batches.clear();shadowBatches.clear();decalBatches.clear();effectBatches.clear();effectAddBatches.clear();mirrorBatches.clear();particleVertices.clear();
-    mistVertices.clear();skyVertices.clear();shaftVertices.clear();heatVertices.clear();
-    translucentWorld.clear();transferredSkies.clear();
+    clearLevelGeometry();
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
     rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
@@ -261,16 +268,19 @@ void sceneShutdown() {
 // A new level, or the first after shutdown: each part forgets the last
 // level, then the map and what is built from it at level load.
 static void startLevel() {
+    fprintf(stderr,"3D reload: begin level %u\n",r_levelserial);fflush(stderr);
     loadingStage(LoadStage::Map);
     stopRelight();
-    vertexSections.clear();batches.clear();shadowBatches.clear();mirrorBatches.clear();clearSurfaceLights();shotLightsShutdown();
+    clearLevelGeometry();clearSurfaceLights();shotLightsShutdown();
     bakeAtlasNewLevel();sunNewLevel();lightBakeNewLevel();clearStaticGrid();indirectNewLevel();
     // No image from a previous level owns a permanent GPU allocation.
     // Active textures are uploaded lazily by the new map's preparation.
+    glassLightShutdown(); // Drops Image pointers before their owners are reclaimed.
+    bodyMotionShutdown(); // Includes wound/classification caches keyed by Image*.
+    bakeMap={};
     images.clear();
     oldThings.clear();oldHeights.clear();tickTime=0;
     resetWeaponPositions();
-    bodyMotionShutdown();
     buildMap();
     prepareFalls();
     buildCaustics();

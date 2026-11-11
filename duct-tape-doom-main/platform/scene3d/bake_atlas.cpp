@@ -1,6 +1,8 @@
 /* Layout of the light bakes: the wall strip atlas and the map-space floor
    and ceiling layers, and their upload. */
 #include "internal.h"
+#include <mutex>
+#include <exception>
 
 namespace doom3d {
 std::vector<BakeStrip> bakeStrips;
@@ -96,13 +98,22 @@ void layoutBake() {
 // keeps the screen drawn with the progress and a worker takes its place.
 void parallelFor(int count,const std::function<void(int)> &work,unsigned threads) {
     std::atomic<int> next{0},done{0};
-    auto run=[&] {for(int n;(n=next++)<count;) {work(n);++done;}};
+    std::atomic<bool> failed{false};std::mutex mutex;std::exception_ptr error;
+    auto run=[&] {
+        try {for(int n;!failed&&(n=next++)<count;) {work(n);++done;}}
+        catch(...) {std::lock_guard<std::mutex> lock(mutex);if(!error)error=std::current_exception();failed=true;}
+    };
     bool loading=loadingOnThisThread();
-    std::vector<std::thread> workers;
-    for(unsigned n=loading?0:1;n<std::clamp(std::thread::hardware_concurrency(),1u,std::max(1u,threads));++n)workers.emplace_back(run);
-    if(loading)while(done<count) {loadingTick((float)done/std::max(1,count));SDL_Delay(2);}
-    else run();
+    std::vector<std::thread> workers;workers.reserve(std::max(1u,threads));
+    // Thread exhaustion is recoverable: the caller finishes the remaining work.
+    for(unsigned n=loading?0:1;n<std::clamp(std::thread::hardware_concurrency(),1u,std::max(1u,threads));++n)
+        try {workers.emplace_back(run);}catch(const std::system_error&){break;}
+    try {
+        if(loading&&!workers.empty())while(done<count&&!failed) {loadingTick((float)done/std::max(1,count));SDL_Delay(2);}
+        else run();
+    } catch(...) {std::lock_guard<std::mutex> lock(mutex);if(!error)error=std::current_exception();failed=true;}
     for(auto &worker:workers)worker.join();
+    if(error)std::rethrow_exception(error);
 }
 void uploadWallBake() {
     wallBakeTexture=gpuCreateTexture(GpuFormat::RGBA8,atlasStride,atlasHeight,wallBakeCells.data(),atlasStride*4);

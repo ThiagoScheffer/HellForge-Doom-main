@@ -81,6 +81,7 @@ void updateFlashlightTint(Uniforms &camera) {
         float length=std::sqrt(dot(direction,direction));for(float &c:direction)c/=length;
         float nearest=900,nearestSurface=900;Vec reflected={};Bounce hit={};
         for(const auto &batch:batches) {
+            if(batch.second.empty())continue;
             const auto &image=images.at(batch.first);const auto &vertices=batch.second;
             for(size_t i=0;i+2<vertices.size();i+=3) {
                 const auto &a=vertices[i],&b=vertices[i+1],&c=vertices[i+2];

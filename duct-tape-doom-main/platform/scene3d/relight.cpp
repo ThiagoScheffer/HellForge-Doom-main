@@ -14,6 +14,7 @@ namespace doom3d {
 // One re-bake runs at a time; changes meanwhile wait for the next.
 struct Relight {
     std::thread worker;
+    std::exception_ptr error;
     std::unique_ptr<FrameWorkers> pool;
     std::atomic<bool> done{false};
     bool running=false,lights=false,only=false,grid=false,sun=false;
@@ -154,7 +155,12 @@ static void startRelight() {
     // pool rather than creating half the logical CPUs' worth of threads for
     // every bake phase, competing with rendering while a door moves.
     if(!job.pool)job.pool=std::make_unique<FrameWorkers>(std::clamp(std::thread::hardware_concurrency()/4,1u,4u));
+    job.error=nullptr;
     job.worker=std::thread([&] {
+        try {
+#ifdef DOOM_TEST_DRIVER
+        if(M_CheckParm((char*)"-holdrelight"))SDL_Delay(100);
+#endif
         int y0=std::min(job.lightBounds[1],job.sunBounds[1]),y1=std::max(job.lightBounds[3],job.sunBounds[3]);
         const int *sb=job.sunBounds;
         job.pool->each(y1-y0+1,[&](int row) {
@@ -177,6 +183,7 @@ static void startRelight() {
             job.gridResults[n]=staticCellAt(job.map,(int)(i%staticWidth),(int)(i/staticWidth));
         });
         if(job.lights&&!job.gone.empty())measureLoss(job);
+        } catch(...) {job.error=std::current_exception();}
         job.done=true;
     });
 }
@@ -184,7 +191,8 @@ void finishRelight(bool apply) {
     Relight &job=relight;
     if(!job.running)return;
     job.worker.join();job.running=false;
-    if(!apply)return;
+    if(!apply){job.error=nullptr;return;}
+    if(job.error)std::rethrow_exception(job.error);
     const int *lb=job.lightBounds,*sb=job.sunBounds;
     if(job.lights&&lb[2]>=0) {
         int w=lb[2]-lb[0]+1,h=lb[3]-lb[1]+1;
@@ -229,5 +237,13 @@ void relightMovingSectors() {
     if(!relight.running&&(!relightPending.empty()||!brokenPending.empty()))startRelight();
 }
 // Waits for any re-bake in flight and drops what it would apply.
-void stopRelight() {finishRelight(false);relightPending.clear();brokenPending.clear();}
+void stopRelight() {
+    if(relight.running){fprintf(stderr,"3D reload: joining active relight worker.\n");fflush(stderr);}
+    finishRelight(false);relightPending.clear();brokenPending.clear();
+    relight.map={};relight.gridList.clear();relight.gridResults.clear();
+}
 } // namespace doom3d
+
+#ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestRelightRunning() {return doom3d::relight.running&&!doom3d::relight.done;}
+#endif

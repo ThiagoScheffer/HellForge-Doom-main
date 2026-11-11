@@ -507,7 +507,7 @@ internal sealed class Launcher : Form {
     private readonly Font listMono=new Font("Consolas",9f);
     private Surface libraryCard,modsCard,footer;
     private ParallaxHero hero;
-    private ModernButton scan,play,lan,browseGame,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import;
+    private ModernButton scan,play,lan,browseGame,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache;
     private bool scanning,launching,gameRunning;
     private CancellationTokenSource scanCancellation;
 
@@ -660,6 +660,7 @@ internal sealed class Launcher : Form {
         status.Text="Ready to launch";status.Font=new Font("Segoe UI",9f);
         status.ForeColor=Palette.Subtle;status.AutoEllipsis=true;status.BackColor=Color.Transparent;
         footer.Controls.Add(status);
+        clearCache=CreateButton("CLEAR LIGHTING CACHE",ClearLightingCache,quiet:true);footer.Controls.Add(clearCache);
         export=CreateButton("EXPORT SETTINGS",ExportSettings,quiet:true);footer.Controls.Add(export);
         import=CreateButton("IMPORT SETTINGS",ImportSettings,quiet:true);footer.Controls.Add(import);
         lowFx.Text="LOW-FX DEFAULTS";lowFx.Checked=true;lowFx.AutoSize=false;
@@ -672,7 +673,8 @@ internal sealed class Launcher : Form {
     }
     void LayoutFooter() {
         if(footer==null)return;int w=footer.ClientSize.Width;
-        status.SetBounds(18,7,Math.Max(260,w-490),22);
+        status.SetBounds(18,7,282,22);
+        clearCache.SetBounds(318,5,180,25);
         export.SetBounds(18,38,138,30);import.SetBounds(166,38,138,30);
         lowFx.SetBounds(318,40,Math.Max(150,w-720),25);
         lan.SetBounds(w-380,14,142,50);play.SetBounds(w-226,14,208,50);
@@ -757,6 +759,28 @@ internal sealed class Launcher : Form {
         try {Directory.CreateDirectory(Data.Home);CurrentSettings().Save(settings);}
         catch(Exception e){if(!IsDisposed)status.Text="Settings not saved: "+e.Message;}
     }
+    void ClearLightingCache() {
+        if(gameRunning||launching)return;
+        try {
+            string folder=Path.GetFullPath(Path.Combine(Data.Home,"Cache","Maps"));
+            // Delete only generated entries, never follow links out of the cache.
+            ClearCacheFolder(folder);
+            status.Text="Lighting cache cleared. Maps bake again on next load.";
+        } catch(Exception e) {MessageBox.Show(this,e.Message,"Cannot clear lighting cache",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+    }
+    internal static void ClearCacheFolder(string folder) {
+        if(!Directory.Exists(folder))return;
+        if((File.GetAttributes(folder)&FileAttributes.ReparsePoint)!=0)throw new IOException("The lighting cache folder is a link.");
+        foreach(string file in Directory.GetFiles(folder)) {
+            if((File.GetAttributes(file)&FileAttributes.ReparsePoint)!=0)continue;
+            if(file.EndsWith(".bake",StringComparison.OrdinalIgnoreCase)||file.EndsWith(".tmp",StringComparison.OrdinalIgnoreCase))File.Delete(file);
+        }
+        foreach(string child in Directory.GetDirectories(folder)) {
+            if((File.GetAttributes(child)&FileAttributes.ReparsePoint)!=0)continue;
+            ClearCacheFolder(child);
+            if(!Directory.EnumerateFileSystemEntries(child).Any())Directory.Delete(child);
+        }
+    }
     void ExportSettings() {
         using(var dialog=new SaveFileDialog {Title="Export settings backup",Filter="Settings backup (*.zip)|*.zip",DefaultExt="zip",FileName="Tuin-Doom-settings-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".zip"}) {
             if(dialog.ShowDialog(this)!=DialogResult.OK)return;
@@ -783,7 +807,7 @@ internal sealed class Launcher : Form {
     }
     void SetLaunching(bool value) {
         launching=value;
-        foreach(Control control in new Control[]{games,mods,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,lowFx,lan,play})
+        foreach(Control control in new Control[]{games,mods,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,lowFx,lan,play})
             control.Enabled=!value;
         if(!value){scan.Enabled=!scanning;scanFolder.Enabled=!scanning;removeMod.Enabled=upMod.Enabled=downMod.Enabled=mods.SelectedIndex>=0;}
     }
@@ -818,10 +842,14 @@ internal sealed class Launcher : Form {
             Save();status.Text="Launching game…";
             var start=new ProcessStartInfo(engine,args){WorkingDirectory=Data.Home,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
             start.EnvironmentVariables["TUIN_SCREENSHOTS"]=Data.Screenshots;
+            start.EnvironmentVariables["TUIN_MAP_CACHE"]=Path.Combine(Data.Home,"Cache","Maps");
+            string crashFolder=Path.Combine(Data.Home,"crashes");Directory.CreateDirectory(crashFolder);
+            start.EnvironmentVariables["TUIN_CRASH_DIR"]=crashFolder;
             start.EnvironmentVariables["TUIN_LAN_SIGNATURE"]=signature;
             try{start.EnvironmentVariables["TUIN_LAN_ADDRESSES"]=String.Join(" / ",System.Net.Dns.GetHostAddresses(System.Net.Dns.GetHostName()).Where(a=>a.AddressFamily==System.Net.Sockets.AddressFamily.InterNetwork).Select(a=>a.ToString()));}catch(System.Net.Sockets.SocketException){}
             string logPath=Path.Combine(Data.Home,"last-game.log");
             using(var writer=new StreamWriter(new FileStream(logPath,FileMode.Create,FileAccess.Write,FileShare.Read,8192))) {
+                writer.AutoFlush=true;writer.WriteLine("Launcher build "+Data.BuildVersion+"; engine "+engine);
                 var writeLock=new object();
                 using(var process=new Process {StartInfo=start}) {
                     process.OutputDataReceived+=(s,e)=>{if(e.Data!=null)lock(writeLock)writer.WriteLine(e.Data);};
@@ -831,7 +859,7 @@ internal sealed class Launcher : Form {
                     gameRunning=true;enteredGameMode=true;
                     hero.EnterGameMode();Hide(); // Zero animation; embedded artwork is disposed.
                     int exitCode=await Task.Run(()=>{process.WaitForExit();return process.ExitCode;});
-                    lock(writeLock)writer.Flush();
+                    lock(writeLock){writer.WriteLine("Engine exit: "+exitCode+" (0x"+unchecked((uint)exitCode).ToString("X8")+")");writer.Flush();}
                     if(!IsDisposed&&!Disposing)status.Text=exitCode==0?"Game closed. Ready to play again.":"Game exited with code "+exitCode+". See last-game.log.";
                 }
             }

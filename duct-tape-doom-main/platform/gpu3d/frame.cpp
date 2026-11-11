@@ -1,3 +1,5 @@
+#include <stdexcept>
+#include <string>
 extern "C" {extern int r_photoactive,r_photodof,r_photostyle;extern float r_photofocus;}
 extern "C" int Menu_BrandOpen(void);
 extern "C" float I_PhotoFlash(void);
@@ -8,6 +10,7 @@ extern "C" float I_PhotoFlash(void);
 extern "C" int Arcade_PodiumRect(float*);
 extern "C" int Arcade_MenuOpen(void);
 extern "C" int director_view_active;
+extern "C" {extern unsigned r_levelserial;}
 namespace doom3d {extern GpuTextureRef arcadeRankTexture;}
 
 namespace gpu3d {
@@ -239,6 +242,11 @@ static void drawMistDepth(SDL_GPUCommandBuffer *render,const FrameView &view,con
     SDL_EndGPURenderPass(pass);
 }
 // The world, its shadows, decals, particles and heat haze.
+static const Image &batchImage(int key,const char *group) {
+    auto found=images.find(key);
+    if(found==images.end())throw std::runtime_error(std::string("Missing image ")+std::to_string(key)+" in nonempty "+group+" batch after level "+std::to_string(r_levelserial));
+    return found->second;
+}
 static void drawScene(SDL_GPUCommandBuffer *render,SDL_GPURenderPass *pass,const FrameView &view,const Uniforms &camera) {
     setView(pass,view.worldX,view.worldY,view.worldW,view.worldH);
     // Only fully covered textures use early depth writes. Cutouts and
@@ -252,14 +260,14 @@ static void drawScene(SDL_GPUCommandBuffer *render,SDL_GPURenderPass *pass,const
               coveragePipeline,cutoutPipeline);
     // The completed world depth hides shadows behind walls and enemies.
     SDL_BindGPUGraphicsPipeline(pass,shadowPipeline);
-    for(const auto &batch:shadowBatches) {bindImage(pass,images.at(-1-batch.first).texture,linearClamp);drawVertices(pass,batch.second);}
+    for(const auto &batch:shadowBatches) {if(batch.second.empty())continue;bindImage(pass,batchImage(-1-batch.first,"shadow").texture,linearClamp);drawVertices(pass,batch.second);}
     SDL_BindGPUGraphicsPipeline(pass,decalPipeline);
-    for(const auto &batch:decalBatches) {bindImage(pass,images.at(-1-batch.first).texture,linearClamp);drawVertices(pass,batch.second);}
+    for(const auto &batch:decalBatches) {if(batch.second.empty())continue;bindImage(pass,batchImage(-1-batch.first,"decal").texture,linearClamp);drawVertices(pass,batch.second);}
     SDL_BindGPUGraphicsPipeline(pass,particlePipeline);drawVertices(pass,particleVertices);
     SDL_BindGPUGraphicsPipeline(pass,decalPipeline);
-    for(const auto &batch:effectBatches) {bindImage(pass,images.at(-1-batch.first).texture,linearClamp);drawVertices(pass,batch.second);}
+    for(const auto &batch:effectBatches) {if(batch.second.empty())continue;bindImage(pass,batchImage(-1-batch.first,"effect").texture,linearClamp);drawVertices(pass,batch.second);}
     SDL_BindGPUGraphicsPipeline(pass,effectAddPipeline);
-    for(const auto &batch:effectAddBatches) {bindImage(pass,images.at(-1-batch.first).texture,linearClamp);drawVertices(pass,batch.second);}
+    for(const auto &batch:effectAddBatches) {if(batch.second.empty())continue;bindImage(pass,batchImage(-1-batch.first,"additive effect").texture,linearClamp);drawVertices(pass,batch.second);}
     SDL_BindGPUGraphicsPipeline(pass,crestPipeline);drawVertices(pass,crestVertices);
     // Window glass over everything behind it, shards included; it writes no depth.
     if(!glassVertices.empty()) {
@@ -526,6 +534,10 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     char renderer[64];snprintf(renderer,sizeof(renderer),"%s 3D",SDL_GetGPUDeviceDriver(device));
     if(renderer[0])renderer[0]=(char)toupper((unsigned char)renderer[0]);
     updateTitle(w,h,renderer);
+    static unsigned presentedLevel=~0u;
+    if(worldPending&&presentedLevel!=r_levelserial) {
+        presentedLevel=r_levelserial;fprintf(stderr,"3D reload: first frame submitted for level %u; %zu cached images.\n",r_levelserial,images.size());fflush(stderr);
+    }
     if(trace) {
         stage(4);auto end=SDL_GetTicksNS();
         double outside=previousEnd?(begin-previousEnd)/1e6:0,elapsed=(end-begin)/1e6;

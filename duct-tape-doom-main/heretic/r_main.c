@@ -20,6 +20,7 @@ unsigned	r_levelserial;
 // DERP: the accelerated renderer's hooks (r_local.h); null for the classic one.
 void (*R_AcceleratedView)(player_t *player);
 void (*R_BeforeTic)(void);
+void (*R_BeforeLevelReset)(void);
 void (*R_MuzzleFlash)(mobj_t *source, int weapon, int projectile);
 void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z);
 void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);

@@ -37,3 +37,13 @@ above. These add generated format/action tests and an isolated per-map loading,
 classic-frame and save/load check. See
 [the compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md) for commands and
 the distinction between smoke coverage and campaign completion.
+
+Reload stability and persistent map-lighting cache checks use only original Doom II:
+
+```powershell
+cmake --build build --config Release --target doom doom-reload-smoke --parallel 8
+python duct-tape-doom-main/tests/reload_cache.py --iwad test-references/DOOM2.WAD --engine build/Release/doom-reload-smoke.exe --out build/reload-release-verification --cycles 10
+ctest --test-dir build -C Release -E "^bigmap-" --output-on-failure
+```
+
+Keep `build/Release/doom.pdb` with the matching engine build for crash analysis. See [reload/cache details](docs/changes/RELOAD-LIGHTING-CACHE.md).

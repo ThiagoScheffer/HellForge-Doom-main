@@ -92,6 +92,7 @@ struct Settings {
     int retroReflections=1; // Eighth resolution, palette colors, stepped wobble.
     int spriteFilter=0; // 0: crisp, 1: bilinear.
     int sun=1; // Sun shadows baked at level load from the sky texture.
+    int mapLightCache=1; // Persistent numeric lighting bakes; no live effects.
     int bakedLights=1; // Static lights baked at level load; nearby dynamic copies add flicker and detail.
     int windowLight=1; // Openings to the sky light the rooms beside them like big soft lamps, in the bake.
     float windowStrength=1; // How brightly window light shines in (0.5-2).

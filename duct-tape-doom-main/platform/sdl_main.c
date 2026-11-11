@@ -444,6 +444,11 @@ int main(int argc, char **argv)
     if (!has_config) { args[count++] = "-config"; args[count++] = (char *)Game_ConfigFile(); }
     myargc = count;
     myargv = args;
+#ifdef DOOM_RENDER3D
+    extern void I_RunEngine(void (*entry)(void));
+    I_RunEngine(D_DoomMain);
+#else
     D_DoomMain();
+#endif
     return 0;
 }

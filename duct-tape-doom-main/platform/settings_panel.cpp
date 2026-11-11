@@ -326,7 +326,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 slider("fluid_shade_blue","Shadow blue",&s.fluidShadeBlue,0,255,1,"Custom glove shadow color.",[](const Settings&d){return d.fluidGloves==7;})}}}},
         {"Lighting",{
             {"Baked at level load",{
-                check("baked_lights","Baked static lights",&s.bakedLights,
+                check("map_light_cache","Cache map lighting",&s.mapLightCache,"Reuse baked lighting from disk when map, resources, settings and static world state match. Live effects remain dynamic. Cache is limited to 1 GiB."),
+                  check("baked_lights","Baked static lights",&s.bakedLights,
                     "Torches, lamps and glowing textures light the whole level, baked at level load; nearby ones still flicker."),
                 check("window_light","Window light",&s.windowLight,
                     "Windows, open doorways and holes in the ceiling let the outdoor light in: they light the rooms beside them "

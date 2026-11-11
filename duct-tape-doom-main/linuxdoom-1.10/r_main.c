@@ -54,6 +54,7 @@ int r_modernhud=0;
 int			viewangleoffset;
 void (*R_AcceleratedView)(player_t *player);
 void (*R_BeforeTic)(void);
+void (*R_BeforeLevelReset)(void);
 void (*R_MuzzleFlash)(mobj_t *source, int weapon, int projectile);
 void (*R_WeaponAttack)(player_t *player);
 void (*R_SawHit)(player_t *player,mobj_t *victim);

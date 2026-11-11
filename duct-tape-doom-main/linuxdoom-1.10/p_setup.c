@@ -1,3 +1,4 @@
+#include "../platform/level_lifecycle.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -847,6 +848,8 @@ P_SetupLevel
   int		playermask,
   skill_t	skill)
 {
+    if(R_BeforeLevelReset)R_BeforeLevelReset(); // Join workers before any level-owned memory changes.
+
     int		i;
     char	lumpname[9];
     int		lumpnum;

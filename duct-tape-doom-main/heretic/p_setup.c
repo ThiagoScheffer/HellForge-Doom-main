@@ -1,3 +1,4 @@
+#include "../platform/level_lifecycle.h"
 // Heretic source code, Copyright Activision 1996-1998 (Raven Software).
 // Released under the GNU General Public License; see THIRD_PARTY.md.
 
@@ -524,6 +525,8 @@ void P_GroupLines (void)
 
 void P_SetupLevel (int episode, int map, int playermask, skill_t skill)
 {
+    if(R_BeforeLevelReset)R_BeforeLevelReset(); // Join workers before any level-owned memory changes.
+
 	int i;
 	int parm;
 	char	lumpname[9];

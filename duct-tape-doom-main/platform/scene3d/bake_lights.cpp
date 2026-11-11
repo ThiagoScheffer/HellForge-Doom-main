@@ -588,8 +588,13 @@ void bakeLights() {
         wallDirectionCells.assign((size_t)atlasWidth*atlasHeight*4,0);
         flatDirectionCells.assign((size_t)mapWidth*mapHeight*2*4,0);
     } else {wallDirectionCells.clear();flatDirectionCells.clear();}
+    BakeCache cache("lights",{cacheChannel(flatLightCells,0,(size_t)mapWidth*mapHeight*2,3),
+        cacheWallChannel(wallBakeCells,atlasHeight,0,3),cacheField(wallDirectionCells),cacheField(flatDirectionCells)});
+    if(!cache.restore()) {
     parallelFor(mapHeight,[&](int y) {for(int x=0;x<mapWidth;++x)lightCell(bakeMap,(size_t)y*mapWidth+x,directed);});
     parallelFor((int)bakeOrder.size(),[&](int n) {lightStrip(bakeMap,bakeStrips[bakeOrder[n]],directed);});
+    cache.store();
+    }
     uploadFlatLight();
     uploadWallBake();
     wallDirectionTexture=nullptr;flatDirectionTexture=nullptr;
