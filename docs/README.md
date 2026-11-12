@@ -4,6 +4,8 @@ This index separates current fork behavior from historical release evidence.
 
 ## Current feature and behavior documents
 
+- [Load last save after death](changes/DEATH-SAVE-RECOVERY.md)
+
 - [HELLFORGE launcher theme and repaint fix](changes/HELLFORGE-LAUNCHER-THEME.md)
 
 - [Enhanced monster combat](changes/ENHANCED-MONSTER-COMBAT.md)

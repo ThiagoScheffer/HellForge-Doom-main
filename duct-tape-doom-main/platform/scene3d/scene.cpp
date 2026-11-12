@@ -22,6 +22,7 @@ extern "C" int Menu_BrandOpen(void);
 extern "C" { int Arcade_PodiumRect(float*); extern int arcade_podium_hires; extern unsigned arcade_rank_pixels[SCREENWIDTH*SCREENHEIGHT]; }
 #include "../mod_soundbank.h"
 extern "C" int p_fluidfastpistol,p_boostchaingun;
+extern "C" int g_death_load_last_save;
 extern "C" int sv_chain_collapses,sv_hanging_fragments,sv_collapse_size;
 extern "C" int p_player_surface_damage,p_monster_surface_damage,p_breakablewalls,p_throughwalls,p_breachdoors,p_wall_damage,p_deeperdig;
 extern "C" {
@@ -161,6 +162,7 @@ void applySettings() {
     I_SetNearMissSounds(settings.nearMissSounds);
     p_fluidfastpistol=settings.fluidFastPistol;
     p_boostchaingun=settings.boostChaingun;
+    g_death_load_last_save=settings.deathLoadLastSave;
     p_noticecombat=settings.combatNotices;
     if(gameWindow&&bool(SDL_GetWindowFlags(gameWindow)&SDL_WINDOW_FULLSCREEN)!=bool(settings.fullscreen))
         SDL_SetWindowFullscreen(gameWindow,settings.fullscreen!=0);

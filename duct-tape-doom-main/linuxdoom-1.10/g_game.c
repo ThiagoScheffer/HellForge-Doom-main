@@ -1239,6 +1239,31 @@ extern boolean setsizeneeded;
 void R_ExecuteSetViewSize (void);
 
 char	savename[256];
+int g_death_load_last_save=0;
+static char lastRecoverySave[256];
+
+boolean G_TryDeathLoadLastSave(void)
+{
+    FILE *file;
+    char header[SAVESTRINGSIZE+16],version[16];
+    size_t count;
+    if (!g_death_load_last_save || netgame || demoplayback || demorecording ||
+        arcade_active || !lastRecoverySave[0])
+        return false;
+    file=fopen(lastRecoverySave,"rb");
+    if (!file) return false;
+    count=fread(header,1,sizeof(header),file);
+    fclose(file);
+    memset(version,0,sizeof(version));
+    snprintf(version,sizeof(version),"native %i-%zu",VERSION,sizeof(void*)*CHAR_BIT);
+    if (count!=sizeof(header) ||
+        memcmp(header+SAVESTRINGSIZE,version,strlen(version)+1))
+        return false;
+    G_LoadGame(lastRecoverySave);
+    // A held Use must not activate a door immediately after restoration.
+    gamekeydown[key_use]=false;
+    return true;
+}
 
 void G_LoadGame (char* name)
 {
@@ -1312,6 +1337,7 @@ void G_DoLoadGame (void)
     if (setsizeneeded)
 	R_ExecuteSetViewSize ();
 
+    snprintf(lastRecoverySave,sizeof(lastRecoverySave),"%s",savename);
     // draw the pattern into the back screen
     R_FillBackScreen ();
 }
@@ -1384,6 +1410,7 @@ void G_DoSaveGame (void)
     if ((size_t)length > capacity)
 	I_Error ("Savegame buffer overrun");
     boolean written = M_WriteFile (name, savebuffer, length);
+    if (written) snprintf(lastRecoverySave,sizeof(lastRecoverySave),"%s",name);
     free(savebuffer);
     savebuffer = NULL;
     gameaction = ga_nothing;

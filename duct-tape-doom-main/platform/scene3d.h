@@ -182,6 +182,7 @@ struct Settings {
     int weaponLighting=1; // The weapon's painted sheen and light come out at load; lights around the player relight it.
     int fluidGloves=0; int fluidBareHands=1; int fluidFastPistol=1;
     int combatNotices=1;
+    int deathLoadLastSave=0;
     int fluidWeapons=1,fluidSounds=1,fluidMonsters=1;
     int fluidRocketFire=1;
     int fluidFiringSmoke=1,fluidReloadSmoke=1,fluidHotSmoke=1,fluidSmokeBio=0,fluidIndoorSmoke=0;

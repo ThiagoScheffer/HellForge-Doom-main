@@ -123,6 +123,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("retro","Retro scanlines",&s.retro,"Dark lines between the rows of the picture, like an old CRT monitor."),
                 check("palette","Doom palette colors",&s.palette,"Quantize the final lighting and fog to the current WAD palette.")}}}},
         {"Gameplay",{
+            {"Save recovery",{
+                check("death_load_last_save","Load last save on death",&s.deathLoadLastSave,"After dying, press Use to load the last save successfully written or loaded this session. If no usable save is available, restart the map normally. Single player only; disabled in demos and Arcade.")}},
             {"Combat and arenas",{
                 check("boost_chaingun","Enhanced chaingun",&s.boostChaingun,"50% faster chaingun fire. Backpack bullet capacity increases from 400 to 600; without a backpack it stays 200. Bullets are shared with the pistol. Turning off restores the normal cap and clips excess bullets. Works with classic and Fluid weapons; disabled in Arcade, demos and multiplayer."),
                 check("monster_recovery","Stuck monster recovery",&s.monsterRecovery,"Helps monsters after repeated failed movement. Tries small escape steps first. Trapped lockdown enemies can teleport to safe explored ground; ordinary monsters require invalid footing and a nearby visible safe spot. Disabled in Arcade, demos and multiplayer."),

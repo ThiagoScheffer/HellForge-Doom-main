@@ -21,7 +21,8 @@ extern void I_RunEngine(void (*entry)(void));
 extern int I_TestBakeCacheStorage(void);
 extern int I_TestRelightRunning(void);
 extern void I_TestNativeCrash(void);
-static int storageMode,crashMode;
+static int storageMode,crashMode,autoLoadMode;
+extern int g_death_load_last_save;
 static int stage,begin,initialSerial,frames,cycles,goal=10,saveMode;
 static void effects(void) {
     mobj_t *mo=players[0].mo;
@@ -48,7 +49,10 @@ void I_TestFrame(void) {
         if(cycles==0)I_Render3DScreenshotTo("initial.png");
         if(storageMode){if(!I_TestBakeCacheStorage())exit(5);I_Quit();}
         effects();begin=gametic;stage=2;
-        if(saveMode&&cycles==0)G_SaveGame(7,"RELOAD REGRESSION");
+        if((saveMode||autoLoadMode)&&cycles==0){
+            players[0].armorpoints=77;
+            G_SaveGame(7,"RELOAD REGRESSION");
+        }
     }
     if(stage==2&&gametic>begin+35) {
         if(saveMode) {
@@ -56,6 +60,20 @@ void I_TestFrame(void) {
             for(int i=0;i<numlines;++i)if(lines[i].special==1&&lines[i].backsector){EV_VerticalDoor(&lines[i],players[0].mo);break;}
             stage=6;
         } else {
+            if(autoLoadMode){
+                int enabled=g_death_load_last_save;
+                if(!enabled){fprintf(stderr,"AUTOLOAD FAIL option not applied\n");exit(8);}
+                g_death_load_last_save=0;
+                if(G_TryDeathLoadLastSave())exit(9);
+                g_death_load_last_save=enabled;
+                netgame=true;if(G_TryDeathLoadLastSave())exit(9);netgame=false;
+                demoplayback=true;if(G_TryDeathLoadLastSave())exit(9);demoplayback=false;
+                demorecording=true;if(G_TryDeathLoadLastSave())exit(9);demorecording=false;
+                if(rename("doomsav7.dsg","recovery-hidden.dsg")!=0)exit(9);
+                if(G_TryDeathLoadLastSave())exit(9);
+                if(rename("recovery-hidden.dsg","doomsav7.dsg")!=0)exit(9);
+                players[0].armorpoints=0;
+            }
             players[0].cheats&=~CF_GODMODE;players[0].powers[pw_invulnerability]=0;
             P_DamageMobj(players[0].mo,NULL,NULL,10000);stage=3;
         }
@@ -75,6 +93,9 @@ void I_TestFrame(void) {
         event_t key={ev_keyup,key_use,0,0};D_PostEvent(&key);stage=5;begin=gametic;
     }
     if(stage==5&&gametic>begin+15) {
+        if(autoLoadMode && (players[0].armorpoints!=77 || players[0].playerstate!=PST_LIVE)){
+            fprintf(stderr,"AUTOLOAD FAIL save was not restored\n");exit(7);
+        }
         if(cycles==0)I_Render3DScreenshotTo("reloaded.png");
         ++cycles;fprintf(stderr,"RELOAD CYCLE %s %d/%d\n",saveMode?"save":"restart",cycles,goal);
 
@@ -84,6 +105,7 @@ void I_TestFrame(void) {
 }
 int main(int argc,char **argv) {
     if(argc<5)return 2;
+    autoLoadMode=!strcmp(argv[3],"autoload");
     crashMode=!strcmp(argv[3],"crash");storageMode=!strcmp(argv[3],"storage");saveMode=!strcmp(argv[3],"save");goal=atoi(argv[4]);if(goal<1||goal>50)return 2;
     char *args[128]={argv[0],"-iwad",argv[1],"-warp","1","-skill","1","-graphics",argv[2],
         "-config","reload-doom.cfg","-nosound","-nomusic","-width","960","-height","540"};

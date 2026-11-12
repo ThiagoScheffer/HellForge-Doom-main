@@ -34,6 +34,7 @@ rcsid[] = "$Id: p_user.c,v 1.3 1997/01/28 22:08:29 b1 Exp $";
 #include "d_event.h"
 
 #include "p_local.h"
+#include "g_game.h"
 
 #include "doomstat.h"
 
@@ -350,7 +351,11 @@ void P_DeathThink (player_t* player)
 	
 
     if (player->cmd.buttons & BT_USE)
-	player->playerstate = PST_REBORN;
+    {
+        if (player == &players[consoleplayer] && G_TryDeathLoadLastSave())
+            return;
+        player->playerstate = PST_REBORN;
+    }
 }
 
 

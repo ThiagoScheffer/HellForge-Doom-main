@@ -2,13 +2,58 @@
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
-keeps classic gameplay compatibility while adding a modern native renderer,
-destruction, lighting, Fluid Weapons/FluidMonsters support, diagnostics, and
-single-player combat presentation features.
+extends that foundation with sprite-aware combat, monster survival behavior,
+larger-map support, persistent settings, and faster recovery after death.
+The renderer, destruction systems, and bundled-mod integrations are described
+below with their upstream credits.
 
-**[Build instructions](BUILDING.md)** · **[Documentation index](docs/README.md)** · **[Change history](docs/changes)**
+**Windows x64 · C / C++ / C# · SDL3 · Vulkan**
+
+[Build instructions](BUILDING.md) · [Documentation](docs/README.md) · [Change history](docs/changes)
 
 ![HELLFORGE launcher artwork](launcher/hero.png)
+
+## What's new in HELLFORGE
+
+From pixel-level hit detection to save recovery: these are the gameplay and
+engine improvements highlighted in this fork. Each feature links to its behavior,
+configuration, and verification notes.
+
+| Feature | What players get | Engineering highlights |
+| :--- | :--- | :--- |
+| 🎯 **[Sprite-based headshots](docs/changes/CRITICAL-PARTS.md)** | 2× human headshots, per-pellet hits, and shots through transparent sprite gaps. | Uses the displayed frame, rotation, mirroring, and silhouette; shares impact coordinates with attached wounds. |
+| 👁️ **[Monster weak points](docs/changes/ENHANCED-MONSTER-COMBAT.md)** | Heads, eyes, faces, brains, and mechanical legs have distinct combat rules. Weapon choice matters. | Monster profiles, conservative region classification, projectile provenance, and damage multipliers that do not stack. |
+| 💥 **[Impact feedback & frenzy](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md)** | Metal-leg sparks, headshot confirmation, and close super-shotgun hits that can provoke infighting. | Confirmed-impact events, per-discharge bookkeeping, bounded particles, and preserved attacker attribution. |
+| 🩸 **[Progressive bleeding & survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)** | Three bleeding tiers; wounded Pinkies and Cacodemons can seek food and recover health. | Timed actor statuses, bounded food searches, collision-aware approaches, lifecycle cleanup, and versioned save extensions. |
+| 🗺️ **[Large-WAD compatibility](docs/changes/BIG-WAD-COMPATIBILITY.md)** | Larger textures and maps can load beyond original engine limits. | 32-bit texture offsets, uncompressed XNOD support, checked allocations, blockmap rebuilding, and configurable zone memory. |
+| ⚙️ **[Settings that stay saved](docs/changes/F4-SETTINGS-PERSISTENCE.md)** | Applied F4 choices survive quitting, Low-FX launches, and settings export/import. | A comment-tolerant config reader and same-directory temporary writes that preserve the previous file on failure. |
+| ↩️ **[Use-to-load after death](docs/changes/DEATH-SAVE-RECOVERY.md)** | Press Use after dying to return to the last save written or loaded in the current session. | An optional death-flow hook into the normal loader, with ordinary map restart when no usable save is available. |
+
+**Start with F4.** Human critical parts, enhanced weak points, weapon
+vulnerabilities, injuries, bleeding, feeding, frenzy, and death-save recovery
+are optional and default off. Sprite combat additions are restricted to
+single-player sprite rendering; multiplayer, demos, and voxel targets retain
+their documented exclusions.
+
+> **Current behavior:** the survival-AI update supersedes the original flat
+> bleeding and amber world-impact effects. It adds progressive bleeding,
+> blood-colored headshot bursts, headshot sound, and optional feeding.
+> The earlier feedback report remains linked as implementation history.
+
+### Engineering and verification
+
+The feature reports document native gameplay tests, collision and wound
+regressions, isolated settings profiles, and save/load checks. Examples include
+**121 detectable human head views with seven safe fallbacks**, **23 large-WAD
+maps passing historical loading checks**, and **three live death/Use cycles
+restoring saved player state**. These results belong to the builds and test
+conditions recorded in their linked reports; loading coverage does not imply
+full campaign or performance certification.
+
+**Explore:** [Combat matrix](docs/changes/ENHANCED-MONSTER-COMBAT.md#implemented-matrix)
+· [Survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)
+· [Build and test instructions](BUILDING.md)
+· [Documentation index](docs/README.md)
 
 ## Download and play
 
@@ -20,11 +65,16 @@ single-player combat presentation features.
 Commercial IWADs are not included. Windows x64, a Vulkan-capable graphics
 driver, and .NET Framework 4.5+ are required for the supplied launcher.
 
-The launcher stores this fork's profile, backups, crash logs, screenshots, and
-lighting cache under `%LOCALAPPDATA%\\DOOM-HellforgeLauncher`; game graphics
-settings use `%APPDATA%\\Local Games\\DOOM Hellforge`.
+The launcher stores extracted resources, backups, crash logs, and its lighting
+cache under `%LOCALAPPDATA%\DOOM-HellforgeLauncher`. Game settings and saves
+use `%APPDATA%\Local Games\DOOM Hellforge`; screenshots are saved beside the
+launcher in `Screenshots`.
 
-## Current features
+## Renderer, bundled content, and additional features
+
+HELLFORGE builds on the DERP renderer and the Tuin-Doom-Enhanced fork. This
+broader feature set includes inherited systems and integrations as well as
+the extensions highlighted above.
 
 ### Renderer, lighting, and world presentation
 
