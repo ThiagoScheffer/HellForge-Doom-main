@@ -324,14 +324,21 @@ internal static class GraphicsPerformance {
 }
 
 internal static class Palette {
-    internal static readonly Color Background=Color.FromArgb(9,15,13);
-    internal static readonly Color Card=Color.FromArgb(18,27,23);
-    internal static readonly Color Input=Color.FromArgb(11,19,16);
-    internal static readonly Color Border=Color.FromArgb(41,58,47);
-    internal static readonly Color Text=Color.FromArgb(231,240,232);
-    internal static readonly Color Subtle=Color.FromArgb(137,162,143);
-    internal static readonly Color Accent=Color.FromArgb(169,237,107);
-    internal static readonly Color AccentDark=Color.FromArgb(25,46,30);
+    internal static readonly Color Background=Color.FromArgb(18,14,13);
+    internal static readonly Color Card=Color.FromArgb(33,25,23);
+    internal static readonly Color Input=Color.FromArgb(23,18,17);
+    internal static readonly Color Border=Color.FromArgb(101,66,53);
+    internal static readonly Color Text=Color.FromArgb(243,232,222);
+    internal static readonly Color Subtle=Color.FromArgb(190,169,155);
+    internal static readonly Color Accent=Color.FromArgb(255,138,54);
+    internal static readonly Color AccentHover=Color.FromArgb(255,177,90);
+    internal static readonly Color AccentDark=Color.FromArgb(66,37,27);
+    internal static readonly Color Hover=Color.FromArgb(85,48,32);
+    internal static readonly Color QuietHover=Color.FromArgb(57,37,29);
+    internal static readonly Color Disabled=Color.FromArgb(43,34,30);
+    internal static readonly Color Selection=Color.FromArgb(83,44,29);
+    internal static readonly Color Separator=Color.FromArgb(59,40,32);
+    internal static readonly Color HeroShade=Background;
 }
 
 internal sealed class Surface : Panel {
@@ -348,6 +355,7 @@ internal sealed class Surface : Panel {
 
 internal sealed class ModernButton : Button {
     private bool hovered;
+    private Control backgroundParent;
     internal bool Primary {get;set;}
     internal bool Quiet {get;set;}
     internal ModernButton(string text) {
@@ -366,22 +374,44 @@ internal sealed class ModernButton : Button {
         p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.Left,r.Bottom-d,d,d,90,90);
         p.CloseFigure();return p;
     }
+    // OnPaint owns the entire surface, including the pixels outside the curve.
+    protected override void OnPaintBackground(PaintEventArgs e) {}
     protected override void OnPaint(PaintEventArgs e) {
-        var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var g=e.Graphics;
+        Color backdrop=Palette.Background;
+        for(Control parent=Parent;parent!=null;parent=parent.Parent)
+            if(parent.BackColor.A==255){backdrop=parent.BackColor;break;}
+        using(var clear=new SolidBrush(backdrop))g.FillRectangle(clear,ClientRectangle);
+        if(Width<4||Height<4)return;
+        g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         var r=new Rectangle(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3));
-        Color bg=Primary?(hovered?Color.FromArgb(197,249,143):Palette.Accent):
-            Quiet?(hovered?Color.FromArgb(32,53,39):Palette.Card):
-            (hovered?Color.FromArgb(39,63,45):Palette.AccentDark);
-        Color fg=Primary?Palette.Background:Enabled?Palette.Text:Palette.Subtle;
-        if(!Enabled)bg=Color.FromArgb(27,36,30);
+        Color bg=Primary?(hovered?Palette.AccentHover:Palette.Accent):
+            Quiet?(hovered?Palette.QuietHover:Palette.Card):
+            (hovered?Palette.Hover:Palette.AccentDark);
+        Color fg=!Enabled?Palette.Subtle:Primary?Palette.Background:Palette.Text;
+        if(!Enabled)bg=Palette.Disabled;
         using(var shape=Round(r,9))
         using(var fill=new SolidBrush(bg))
         using(var line=new Pen(Primary?bg:Palette.Border)) {
             g.FillPath(fill,shape);g.DrawPath(line,shape);
         }
-        TextRenderer.DrawText(g,Text,Font,r,fg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
-        if(Focused && ShowFocusCues)using(var pen=new Pen(Palette.Accent))g.DrawRectangle(pen,4,4,Width-9,Height-9);
+        TextRenderer.DrawText(g,Text,Font,r,fg,bg,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
+        if(Focused && ShowFocusCues && Width>9 && Height>9)
+            ControlPaint.DrawFocusRectangle(g,new Rectangle(4,4,Width-9,Height-9),Primary?Palette.Background:Palette.AccentHover,bg);
     }
+    protected override void OnParentChanged(EventArgs e) {
+        if(backgroundParent!=null)backgroundParent.BackColorChanged-=ParentBackgroundChanged;
+        base.OnParentChanged(e);
+        backgroundParent=Parent;
+        if(backgroundParent!=null)backgroundParent.BackColorChanged+=ParentBackgroundChanged;
+        Invalidate();
+    }
+    void ParentBackgroundChanged(object sender,EventArgs e){Invalidate();}
+    protected override void Dispose(bool disposing) {
+        if(disposing && backgroundParent!=null)backgroundParent.BackColorChanged-=ParentBackgroundChanged;
+        base.Dispose(disposing);
+    }
+    protected override void OnChangeUICues(UICuesEventArgs e){base.OnChangeUICues(e);Invalidate();}
     protected override void OnMouseEnter(EventArgs e){hovered=true;Invalidate();base.OnMouseEnter(e);}
     protected override void OnMouseLeave(EventArgs e){hovered=false;Invalidate();base.OnMouseLeave(e);}
     protected override void OnEnabledChanged(EventArgs e){Invalidate();base.OnEnabledChanged(e);}
@@ -420,10 +450,10 @@ internal sealed class ParallaxHero : Control {
         overlay=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
         using(var g=Graphics.FromImage(overlay)) {
             using(var brush=new System.Drawing.Drawing2D.LinearGradientBrush(
-                new Rectangle(0,0,Width,Height),Color.FromArgb(252,7,17,12),Color.FromArgb(44,7,17,12),0f))
+                new Rectangle(0,0,Width,Height),Color.FromArgb(252,Palette.HeroShade),Color.FromArgb(44,Palette.HeroShade),0f))
                 g.FillRectangle(brush,0,0,Width,Height);
             using(var brush=new System.Drawing.Drawing2D.LinearGradientBrush(
-                new Rectangle(0,0,Width,Height),Color.FromArgb(0,7,17,12),Color.FromArgb(136,7,17,12),90f))
+                new Rectangle(0,0,Width,Height),Color.FromArgb(0,Palette.HeroShade),Color.FromArgb(136,Palette.AccentDark),90f))
                 g.FillRectangle(brush,0,0,Width,Height);
         }
     }
@@ -641,8 +671,8 @@ internal sealed class Launcher : Form {
         if(e.Index<0)return;
         bool selected=(e.State&DrawItemState.Selected)==DrawItemState.Selected;
         var g=e.Graphics;
-        using(var fill=new SolidBrush(selected?Color.FromArgb(35,66,41):Palette.Input))g.FillRectangle(fill,e.Bounds);
-        using(var line=new Pen(Color.FromArgb(31,47,38)))g.DrawLine(line,e.Bounds.Left,e.Bounds.Bottom-1,e.Bounds.Right,e.Bounds.Bottom-1);
+        using(var fill=new SolidBrush(selected?Palette.Selection:Palette.Input))g.FillRectangle(fill,e.Bounds);
+        using(var line=new Pen(Palette.Separator))g.DrawLine(line,e.Bounds.Left,e.Bounds.Bottom-1,e.Bounds.Right,e.Bounds.Bottom-1);
         string path=(string)mods.Items[e.Index];
         string number=(e.Index+1).ToString("00");
         TextRenderer.DrawText(g,number,listMono,new Rectangle(e.Bounds.Left+10,e.Bounds.Top+2,32,e.Bounds.Height-2),
@@ -784,7 +814,7 @@ internal sealed class Launcher : Form {
         }
     }
     void ExportSettings() {
-        using(var dialog=new SaveFileDialog {Title="Export settings backup",Filter="Settings backup (*.zip)|*.zip",DefaultExt="zip",FileName="Tuin-Doom-settings-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".zip"}) {
+        using(var dialog=new SaveFileDialog {Title="Export settings backup",Filter="Settings backup (*.zip)|*.zip",DefaultExt="zip",FileName="HellForge-Doom-settings-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".zip"}) {
             if(dialog.ShowDialog(this)!=DialogResult.OK)return;
             try{SettingsBackup.Export(dialog.FileName,CurrentSettings(),Data.Profile);status.Text="Settings backup exported.";}
             catch(Exception e){MessageBox.Show(this,e.Message,"Cannot export settings",MessageBoxButtons.OK,MessageBoxIcon.Error);}

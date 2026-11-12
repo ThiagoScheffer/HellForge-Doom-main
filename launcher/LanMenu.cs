@@ -43,11 +43,11 @@ internal sealed class LanMenu : Form {
     static async Task Send(TcpClient c,string s){var b=Encoding.UTF8.GetBytes(s+"\n");await c.GetStream().WriteAsync(b,0,b.Length);}
     static async Task<T> Deadline<T>(Task<T> task,int seconds){if(await Task.WhenAny(task,Task.Delay(seconds*1000))!=task)throw new IOException("Connection timed out. Check the host address and allow the game on your private network in Windows Firewall.");return await task;}
     Label LabelAt(string text,int x,int y,int w){var l=new Label{Text=text,Left=x,Top=y,Width=w,Height=24,ForeColor=ForeColor};Controls.Add(l);return l;}
-    Button ButtonAt(string text,int x,int y,int w,Action action){var b=new Button{Text=text,Left=x,Top=y,Width=w,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(42,57,44),ForeColor=ForeColor};b.Click+=(s,e)=>action();Controls.Add(b);return b;}
+    Button ButtonAt(string text,int x,int y,int w,Action action){var b=new ModernButton(text){Left=x,Top=y,Width=w,Height=34};b.Click+=(s,e)=>action();Controls.Add(b);return b;}
     internal LanMenu(string game,string[] files,string fingerprint){
         signature=fingerprint;maps=MapNames(game,files);
         Text="DOOM: HELLFORGE / LAN Multiplayer";ClientSize=new Size(760,590);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;
-        BackColor=Color.FromArgb(17,24,21);ForeColor=Color.FromArgb(227,235,224);Font=new Font("Segoe UI",10);
+        BackColor=Palette.Background;ForeColor=Palette.Text;Font=new Font("Segoe UI",10);
         LabelAt("LAN MULTIPLAYER  /  2–4 PLAYERS",22,16,700).Font=new Font(Font,FontStyle.Bold);
         LabelAt("Player name",22,53,125);nickname.SetBounds(150,50,220,28);nickname.Text=Environment.UserName;nickname.MaxLength=20;Controls.Add(nickname);
         LabelAt("HOST A GAME",22,97,300);
@@ -57,7 +57,7 @@ internal sealed class LanMenu : Form {
         skill.Items.AddRange(new[]{"I'm too young to die","Hey, not too rough","Hurt me plenty","Ultra-Violence","Nightmare!"});skill.SelectedIndex=3;
         host=ButtonAt("Host game",587,122,150,BeginHost);
         LabelAt("FIND / JOIN A GAME",22,171,400);refresh=ButtonAt("Find LAN games",552,164,185,Discover);
-        rooms.SetBounds(22,202,715,100);rooms.BackColor=Color.FromArgb(29,38,32);rooms.ForeColor=ForeColor;Controls.Add(rooms);rooms.SelectedIndexChanged+=(s,e)=>{var r=rooms.SelectedItem as Room;if(r!=null)address.Text=r.Address;};
+        rooms.SetBounds(22,202,715,100);rooms.BackColor=Palette.Input;rooms.ForeColor=ForeColor;Controls.Add(rooms);rooms.SelectedIndexChanged+=(s,e)=>{var r=rooms.SelectedItem as Room;if(r!=null)address.Text=r.Address;};
         address.SetBounds(22,313,510,28);address.Text="";Controls.Add(address);join=ButtonAt("Join selected / IP",552,309,185,BeginJoin);
         LabelAt("Enter the host's IPv4 address if discovery is unavailable.",22,346,715);
         people.SetBounds(22,378,510,75);people.BackColor=rooms.BackColor;people.ForeColor=ForeColor;Controls.Add(people);

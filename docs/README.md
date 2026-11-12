@@ -4,6 +4,8 @@ This index separates current fork behavior from historical release evidence.
 
 ## Current feature and behavior documents
 
+- [HELLFORGE launcher theme and repaint fix](changes/HELLFORGE-LAUNCHER-THEME.md)
+
 - [Enhanced monster combat](changes/ENHANCED-MONSTER-COMBAT.md)
 - [Monster feedback, bleeding, and survival AI](changes/MONSTER-SURVIVAL-AI.md)
 - [Reload stability and persistent lighting cache](changes/RELOAD-LIGHTING-CACHE.md)
