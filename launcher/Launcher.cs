@@ -16,9 +16,11 @@ using System.Xml;
 using System.Runtime.InteropServices;
 
 internal static class Data {
-    internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DERPSolidMapsLauncher");
+    internal const string ProductName = "DOOM: HELLFORGE";
+    internal const string ProductShortName = "DOOM-Hellforge";
+    internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOOM-HellforgeLauncher");
     internal static readonly string Screenshots = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Screenshots");
-    internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DERP Solid Maps");
+    internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DOOM Hellforge");
     internal static string BuildVersion {
         get {
             var assembly=Assembly.GetExecutingAssembly();
@@ -464,8 +466,8 @@ internal sealed class ParallaxHero : Control {
         using(var muted=new SolidBrush(Palette.Subtle)) {
             g.FillRectangle(accent,33,32,34,3);
             g.DrawString("THE MODERN CLASSIC DOOM EXPERIENCE",eyebrow,accent,33,48);
-            g.DrawString("TUIN DOOM",heading,pale,29,75);
-            g.DrawString("ENHANCED",heading,pale,29,125);
+            g.DrawString("DOOM:",heading,pale,29,75);
+            g.DrawString("HELLFORGE",heading,pale,29,125);
             g.DrawString("SOLID GEOMETRY   /   DESTRUCTION BUILD",subtitle,muted,33,197);
             if(Width>790) {
                 var size=g.MeasureString(versionMark,mono);
@@ -513,7 +515,7 @@ internal sealed class Launcher : Form {
 
     [STAThread] static void Main() {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-        Application.ThreadException+=(s,e)=>MessageBox.Show(e.Exception.Message,"Tuin Doom Enhanced",MessageBoxButtons.OK,MessageBoxIcon.Error);
+        Application.ThreadException+=(s,e)=>MessageBox.Show(e.Exception.Message,Data.ProductName,MessageBoxButtons.OK,MessageBoxIcon.Error);
         Application.Run(new Launcher());
     }
     static Label TextLabel(string text,Font font,Color color) {
@@ -525,7 +527,7 @@ internal sealed class Launcher : Form {
     static void StyleCard(Surface card,Control parent) {card.Dock=DockStyle.Fill;parent.Controls.Add(card);}
 
     public Launcher() {
-        Text="Tuin Doom Enhanced  •  "+Data.BuildVersion.Split('|')[0].Trim();
+        Text=Data.ProductName+"  •  "+Data.BuildVersion.Split('|')[0].Trim();
         ClientSize=new Size(1150,774);MinimumSize=new Size(940,710);
         StartPosition=FormStartPosition.CenterScreen;AutoScaleMode=AutoScaleMode.Dpi;
         Font=new Font("Segoe UI",9.5f);BackColor=Palette.Background;ForeColor=Palette.Text;
@@ -841,9 +843,12 @@ internal sealed class Launcher : Form {
             args+=" -graphics "+Data.Quote(graphics);
             Save();status.Text="Launching game…";
             var start=new ProcessStartInfo(engine,args){WorkingDirectory=Data.Home,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            start.EnvironmentVariables["HELLFORGE_SCREENSHOTS"]=Data.Screenshots;
+            start.EnvironmentVariables["HELLFORGE_MAP_CACHE"]=Path.Combine(Data.Home,"Cache","Maps");
             start.EnvironmentVariables["TUIN_SCREENSHOTS"]=Data.Screenshots;
             start.EnvironmentVariables["TUIN_MAP_CACHE"]=Path.Combine(Data.Home,"Cache","Maps");
             string crashFolder=Path.Combine(Data.Home,"crashes");Directory.CreateDirectory(crashFolder);
+            start.EnvironmentVariables["HELLFORGE_CRASH_DIR"]=crashFolder;
             start.EnvironmentVariables["TUIN_CRASH_DIR"]=crashFolder;
             start.EnvironmentVariables["TUIN_LAN_SIGNATURE"]=signature;
             try{start.EnvironmentVariables["TUIN_LAN_ADDRESSES"]=String.Join(" / ",System.Net.Dns.GetHostAddresses(System.Net.Dns.GetHostName()).Where(a=>a.AddressFamily==System.Net.Sockets.AddressFamily.InterNetwork).Select(a=>a.ToString()));}catch(System.Net.Sockets.SocketException){}

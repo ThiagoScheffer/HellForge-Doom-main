@@ -46,7 +46,7 @@ internal sealed class LanMenu : Form {
     Button ButtonAt(string text,int x,int y,int w,Action action){var b=new Button{Text=text,Left=x,Top=y,Width=w,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(42,57,44),ForeColor=ForeColor};b.Click+=(s,e)=>action();Controls.Add(b);return b;}
     internal LanMenu(string game,string[] files,string fingerprint){
         signature=fingerprint;maps=MapNames(game,files);
-        Text="Tuin-Doom-Enhanced / LAN Multiplayer";ClientSize=new Size(760,590);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;
+        Text="DOOM: HELLFORGE / LAN Multiplayer";ClientSize=new Size(760,590);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;
         BackColor=Color.FromArgb(17,24,21);ForeColor=Color.FromArgb(227,235,224);Font=new Font("Segoe UI",10);
         LabelAt("LAN MULTIPLAYER  /  2–4 PLAYERS",22,16,700).Font=new Font(Font,FontStyle.Bold);
         LabelAt("Player name",22,53,125);nickname.SetBounds(150,50,220,28);nickname.Text=Environment.UserName;nickname.MaxLength=20;Controls.Add(nickname);

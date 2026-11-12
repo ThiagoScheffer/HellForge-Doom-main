@@ -8,11 +8,11 @@ From the repository root, run:
 powershell -ExecutionPolicy Bypass -File launcher/build.ps1
 ```
 
-The resulting launcher is `dist/Tuin-Doom-Enhanced.exe`. The script embeds the engine, launcher image, graphics defaults, crater material and the three mod archives. Vendored dependency sources are in `dependencies/`. No commercial IWAD is supplied.
+The resulting launcher is `dist/DOOM-Hellforge.exe`. The script embeds the engine, launcher image, graphics defaults, crater material and the three mod archives. Vendored dependency sources are in `dependencies/`. No commercial IWAD is supplied.
 
 Set the four-part release version in `launcher/VERSION` before building. The script embeds that version, a UTC build timestamp and the engine SHA-256 prefix into the executable. To rebuild only the launcher using the existing `build/Release/doom.exe`, run `powershell -ExecutionPolicy Bypass -File launcher/build.ps1 -LauncherOnly`.
 
-If the normal output executable is running, add `-OutputPath dist/Tuin-Doom-Enhanced-updated.exe` to build a separate copy. Settings backup regression tests can be compiled and run from the repository root after building:
+If the normal output executable is running, add `-OutputPath dist/DOOM-Hellforge-updated.exe` to build a separate copy. Settings backup regression tests can be compiled and run from the repository root after building:
 
 ```powershell
 & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /main:SettingsBackupTests /out:build\SettingsBackupTests.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Xml.Linq.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /resource:launcher\hero.png,hero.png launcher\Launcher.cs launcher\LanMenu.cs launcher\SettingsBackupTests.cs build\LauncherVersion.cs

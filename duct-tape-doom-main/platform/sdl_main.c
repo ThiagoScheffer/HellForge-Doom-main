@@ -379,9 +379,9 @@ int main(int argc, char **argv)
     for(int i=1;i<argc;++i)if(!strcmp(argv[i],"-solidmaps"))solid_maps=1;
     char *preferences = SDL_GetPrefPath("Local Games",
 #ifdef DOOM_TEST_REAL_STARTUP
-        "DERP Solid Maps Validation"
+        "DOOM Hellforge Validation"
 #else
-        solid_maps?"DERP Solid Maps":"DERP Destruction Prototype"
+        solid_maps?"DOOM Hellforge":"DOOM Hellforge Prototype"
 #endif
     );
     if (!preferences)

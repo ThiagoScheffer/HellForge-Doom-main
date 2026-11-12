@@ -1,5 +1,14 @@
 # Combat feedback and monster survival AI
 
+```yaml
+project: DOOM: HELLFORGE
+build: 2026.11.12.1
+updated_utc: 2026-11-11T17:52:02Z
+status: active
+tests: MONSTER-SURVIVAL-AI-TESTS.md
+index: ../README.md
+```
+
 Build **2026.11.10.0**, 10 November 2026. Incremental extension of [the existing anatomical combat matrix](ENHANCED-MONSTER-COMBAT.md) and [the previous feedback/status release](MONSTER-FEEDBACK-AND-STATUSES.md).
 
 ## Controls and compatibility

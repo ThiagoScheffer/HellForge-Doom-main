@@ -31,8 +31,9 @@ template<class T> void values(uint64_t &h,const std::vector<T> &v) {
 }
 std::string hex(uint64_t h) {char b[17];snprintf(b,sizeof(b),"%016llx",(unsigned long long)h);return b;}
 fs::path root() {
+    if(const char *p=SDL_getenv("HELLFORGE_MAP_CACHE"))return fs::u8path(p);
     if(const char *p=SDL_getenv("TUIN_MAP_CACHE"))return fs::u8path(p);
-    char *p=SDL_GetPrefPath(nullptr,"DERPSolidMapsLauncher");
+    char *p=SDL_GetPrefPath(nullptr,"DOOM-HellforgeLauncher");
     if(!p)return {};
     fs::path result=fs::u8path(p)/"Cache"/"Maps";SDL_free(p);return result;
 }

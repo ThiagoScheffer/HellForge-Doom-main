@@ -2039,7 +2039,7 @@ void M_Drawer (void)
     if (currentMenu->routine)
 	currentMenu->routine();         // call Draw routine
     
-    if(currentMenu==&MainDef)menu_brand();
+    // if(currentMenu==&MainDef)menu_brand();
 
     // DRAW MENU
     x = currentMenu->x;

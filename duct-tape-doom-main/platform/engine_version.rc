@@ -9,9 +9,9 @@ BEGIN
  BEGIN
   BLOCK "040904b0"
   BEGIN
-   VALUE "FileDescription", "Tuin Doom Enhanced Engine\0"
+   VALUE "FileDescription", DOOM_PRODUCT_ENGINE_NAME "\0"
    VALUE "FileVersion", DOOM_ENGINE_VERSION "\0"
-   VALUE "ProductName", "Tuin Doom Enhanced\0"
+   VALUE "ProductName", DOOM_PRODUCT_NAME "\0"
    VALUE "ProductVersion", DOOM_ENGINE_VERSION "\0"
   END
  END

@@ -1,5 +1,14 @@
 # Large WAD compatibility — 2026.11.10.2
 
+```yaml
+project: DOOM: HELLFORGE
+build: 2026.11.12.1
+updated_utc: 2026-11-11T17:52:02Z
+status: active
+tests: ../../build
+index: ../README.md
+```
+
 This release removes loading limits encountered in the unmodified
 `test-references/Sunder 2512.wad`. The fixes are selected by file formats and map
 features, not by the WAD's filename. Monster-performance changes are deferred.

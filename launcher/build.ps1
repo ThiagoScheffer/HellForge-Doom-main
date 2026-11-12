@@ -12,7 +12,7 @@ if ($LASTEXITCODE) { throw 'Configure failed' }
 if ($LASTEXITCODE) { throw 'Engine build failed' }
 }
 New-Item -ItemType Directory -Force "$root\dist" | Out-Null
-if (-not $OutputPath) { $OutputPath = "$root\dist\Tuin-Doom-Enhanced.exe" }
+if (-not $OutputPath) { $OutputPath = "$root\dist\DOOM-Hellforge.exe" }
 New-Item -ItemType Directory -Force "$root\build" | Out-Null
 $version = (Get-Content "$PSScriptRoot\VERSION" -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'launcher/VERSION must contain a four-part numeric version.' }

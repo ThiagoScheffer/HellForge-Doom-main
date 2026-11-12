@@ -1,6 +1,15 @@
 # F4 settings persistence fix
 
-Build **2026.11.10.1**, 10 November 2026. [Updated launcher](../../dist/Tuin-Doom-Enhanced-settings-fix.exe). Native engine SHA-256: `36fbda162953fbb4b11c9e072c3ccdb85a142c3ed68b15ca2f71ccd2dd496280`.
+```yaml
+project: DOOM: HELLFORGE
+build: 2026.11.12.1
+updated_utc: 2026-11-11T17:52:02Z
+status: active
+tests: ../../build/reload-launcher-persistence.log
+index: ../README.md
+```
+
+Historical fix first validated in build **2026.11.10.1**, 10 November 2026. The current fork artifact is [DOOM-Hellforge.exe](../../dist/DOOM-Hellforge.exe); the original historical binary is not redistributed.
 
 ## What was wrong
 

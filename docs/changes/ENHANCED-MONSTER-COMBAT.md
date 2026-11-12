@@ -1,5 +1,14 @@
 # Enhanced monster combat
 
+```yaml
+project: DOOM: HELLFORGE
+build: 2026.11.12.1
+updated_utc: 2026-11-11T17:52:02Z
+status: active
+tests: ENHANCED-MONSTER-COMBAT-TESTS.md
+index: ../README.md
+```
+
 The three new **F4 > Combat** switches default off and operate independently of **Critical parts**, which retains the existing four human headshot profiles:
 
 | Switch | Config key | Behavior |

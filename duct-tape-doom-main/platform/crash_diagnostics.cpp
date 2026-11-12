@@ -40,7 +40,7 @@ void terminated() {
 #ifdef _WIN32
     report(nullptr);
     if(!GetEnvironmentVariableA("TUIN_CRASH_NO_DIALOG",nullptr,0))
-        MessageBoxW(nullptr,L"The engine encountered an unexpected error. See last-game.log and the crash dump for details.",L"Tuin Doom Enhanced",MB_OK|MB_ICONERROR);
+        MessageBoxW(nullptr,L"The engine encountered an unexpected error. See last-game.log and the crash dump for details.",L"DOOM: HELLFORGE",MB_OK|MB_ICONERROR);
     TerminateProcess(GetCurrentProcess(),0xc0000409);
 #endif
     fflush(stderr);std::_Exit(EXIT_FAILURE);
@@ -50,7 +50,8 @@ struct Install {
         setvbuf(stderr,nullptr,_IONBF,0);
         fprintf(stderr,"Engine build %s; native diagnostics enabled.\n",DOOM_ENGINE_VERSION);
 #ifdef _WIN32
-        DWORD length=GetEnvironmentVariableW(L"TUIN_CRASH_DIR",dumpFolder,MAX_PATH);
+        DWORD length=GetEnvironmentVariableW(L"HELLFORGE_CRASH_DIR",dumpFolder,MAX_PATH);
+        if(!length||length>=MAX_PATH)length=GetEnvironmentVariableW(L"TUIN_CRASH_DIR",dumpFolder,MAX_PATH);
         if(!length||length>=MAX_PATH)GetCurrentDirectoryW(MAX_PATH,dumpFolder);
         SetUnhandledExceptionFilter(report);
 #endif

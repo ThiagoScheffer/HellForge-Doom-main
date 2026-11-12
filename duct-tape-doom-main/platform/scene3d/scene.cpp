@@ -708,7 +708,8 @@ bool renderCheckDue() {
     return due;
 }
 void saveScreenshot(const void *bgra,int width,int height,int stride) {
-    const char *folder=SDL_getenv("TUIN_SCREENSHOTS");
+    const char *folder=SDL_getenv("HELLFORGE_SCREENSHOTS");
+    if(!folder||!*folder)folder=SDL_getenv("TUIN_SCREENSHOTS");
     if(!folder||!*folder)folder="Screenshots";
     SDL_CreateDirectory(folder);
     char path[4096];snprintf(path,sizeof(path),"%s/%s-%llu.png",folder,Game_Title(),(unsigned long long)SDL_GetTicksNS());

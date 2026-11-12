@@ -1,4 +1,13 @@
-# Reload stability and persistent lighting cache ? 2026.11.11.1
+# Reload stability and persistent lighting cache ? HELLFORGE 2026.11.12.1
+
+```yaml
+project: DOOM: HELLFORGE
+build: 2026.11.12.1
+updated_utc: 2026-11-11T17:52:02Z
+status: active
+tests: ../../build/reload-release-verification/results.json
+index: ../README.md
+```
 
 ## Reload failure
 
@@ -12,11 +21,11 @@ Bake workers propagate exceptions after joining. Background relight errors propa
 
 - **F4 ? Lighting ? Cache map lighting** (`map_light_cache 1`) defaults on. Apply/close persists the setting through the existing F4 workflow.
 - **Clear lighting cache** in the launcher removes generated cache entries and interrupted temporary files. It is disabled during game launch/play and preserves unrelated files and linked directories.
-- Launcher cache root: `%LOCALAPPDATA%/DERPSolidMapsLauncher/Cache/Maps/`.
+- Launcher cache root: `%LOCALAPPDATA%/DOOM-HellforgeLauncher/Cache/Maps/`.
 - Entries: `<MAP01-or-E1M1>-<resource-content-hash>/<stage>-<input-hash>.bake`.
-- Native launches can set `TUIN_MAP_CACHE` to a separate root. Otherwise SDL's per-user `DERPSolidMapsLauncher` preference folder is used. `-nobakecache` bypasses reads/writes without changing the persisted setting.
+- Native launches can set `HELLFORGE_MAP_CACHE` (or legacy `TUIN_MAP_CACHE`) to a separate root. Otherwise SDL's per-user `DOOM-HellforgeLauncher` preference folder is used. `-nobakecache` bypasses reads/writes without changing the persisted setting.
 - Completed entries use least-recently-used eviction at **1 GiB**. A stage exceeding **64 MiB** of uncompressed numeric output bypasses caching to bound temporary memory. Oversized maps still bake normally.
-- Launcher crash dumps are under `%LOCALAPPDATA%/DERPSolidMapsLauncher/crashes/`. Settings backups exclude caches and dumps.
+- Launcher crash dumps are under `%LOCALAPPDATA%/DOOM-HellforgeLauncher/crashes/`. Settings backups exclude caches and dumps.
 
 ## What is reused
 
@@ -70,4 +79,4 @@ Warm restart preparation improved from 884 to 697 ms (about **21%**); save-load 
 
 Process memory was sampled every 100 ms. Image counts remained bounded rather than accumulating per reload. Private memory varied with GPU/CPU allocator reuse: warm-cache peaks were about 7?55 MiB above the corresponding uncached peaks; the largest cold-cache peak was about 62 MiB above the uncached save run. Cache buffers trade temporary memory for faster repeated loads. No unbounded per-reload growth was observed in these runs; dedicated GPU allocation bytes were not measured.
 
-Evidence: `build/reload-release-verification/results.json`, `summary.json`, per-run `engine.log`, `memory.json`, `initial.png` and `reloaded.png`; existing-test log `build/reload-existing-tests-release.log`. Symbols and matching hashes: `dist/symbols/2026.11.11.1/`. Release hashes: `build/reload-release-manifest.json`.
+Evidence: `build/reload-release-verification/results.json`, `summary.json`, per-run `engine.log`, `memory.json`, `initial.png` and `reloaded.png`; existing-test log `build/reload-existing-tests-release.log`. Symbols and matching hashes: `dist/symbols/2026.11.12.1/` when packaged. Release hashes: `build/reload-release-manifest.json`.
