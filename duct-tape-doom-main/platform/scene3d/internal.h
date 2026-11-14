@@ -350,6 +350,8 @@ extern CombatFeedbackStats combatFeedbackStats;
 void combatHeadBlood(const wp_damage_event_t&);
 void combatImpact(const wp_damage_event_t*);
 void combatBleed(mobj_t*);
+void combatElemental(mobj_t*,int);
+Image &charredImage(Image&,int,int&);
 int cosmeticBulletLocate(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*);
 extern float headshotUntil;
 extern unsigned headshotLevel;

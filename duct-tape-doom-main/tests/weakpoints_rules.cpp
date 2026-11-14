@@ -23,7 +23,7 @@ static void link(mobj_t *m) {
     m->thinker.prev=thinkercap.prev;m->thinker.next=&thinkercap;thinkercap.prev->next=&m->thinker;thinkercap.prev=&m->thinker;
 }
 static void reset(int type=MT_TROOP) {
-    P_WeakpointClear();P_WeakpointConfigureEyes(0);P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);
+    P_WeakpointClear();P_CombatConfigure(0,0);P_CombatCompatible=nullptr;P_CombatStagger=nullptr;P_CombatDonor=nullptr;P_WeakpointConfigureEyes(0);P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);
     P_WeakpointFoodPath=nullptr;P_WeakpointFoodMove=nullptr;P_WeakpointFoodAnimate=nullptr;P_WeakpointFoodWake=nullptr;P_WeakpointFoodConsume=nullptr;P_WeakpointPainVoice=nullptr;
     for(auto &p:players)p={};wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
     source={};target={};info={};player={};source.player=&player;
@@ -262,8 +262,9 @@ static void bleedingAndFrenzy() {
 }
 #include "survival_rules.inc"
 #include "eye_injury_rules.inc"
+#include "elemental_rules.inc"
 int main() {
-    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();
+    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();elementalRules();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");
     P_WeakpointReadBalance("wp_heavy_head",900);check(p_wp_balance.heavyHead==190,"out-of-range tuning is ignored");

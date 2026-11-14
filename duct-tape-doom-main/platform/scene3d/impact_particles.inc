@@ -147,6 +147,11 @@ static void drawImpactParticles(const Uniforms &camera) {
                     quad(particleVertices,vertex(face[0]),vertex(face[1]),vertex(face[2]),vertex(face[3]));
                 }
             }
+        }else if(p.kind>=5){
+            float fade=std::clamp(1-t/p.life,0.f,1.f),size=p.size*(p.kind==6?1+t:fade);
+            auto v=[&](float u,float h){Vertex o={x+camera.right[0]*u*size,y+camera.right[1]*u*size,z+h*size,0,0,fade,0};
+                o.red=p.color[0];o.green=p.color[1];o.blue=p.color[2];return o;};
+            quad(particleVertices,v(-.5f,0),v(.5f,0),v(.25f,1),v(-.25f,1));
         }else if(p.kind==2){
             int tic=int(t*TICRATE),frame=tic<2?0:tic<5?1:tic<9?2:tic<13?3:4;
             float cs=std::cos(p.spin),sn=std::sin(p.spin),light=std::max(.25f,lighting(&sectors[p.sector]));
@@ -168,4 +173,22 @@ static void drawImpactParticles(const Uniforms &camera) {
             }
         }
     }
+}
+// Cosmetic elemental effects reuse the shared 512-particle and flash budgets.
+void combatElemental(mobj_t *actor,int kind) {
+    if(!actor||!actor->subsector||!P_WeakpointActive())return;
+    // First-person feedback uses the ordinary damage flash and fatal pain sound;
+    // never attach persistent flames to the camera/player actor.
+    if(actor->player)return;
+    static int tic=-1,budget=0,lights=0;
+    if(tic!=leveltime){tic=leveltime;budget=lights=0;}
+    if(leveltime%3||budget>=32||impactParticles.size()>=512)return;
+    auto *viewer=players[displayplayer].mo;
+    if(!viewer||std::hypot(units(actor->x-viewer->x),units(actor->y-viewer->y))>1200)return;
+    float x=units(actor->x)+randomRange(-8,8),y=units(actor->y)+randomRange(-8,8);
+    float z=units(actor->z)+randomRange(2,std::max(4.f,units(actor->height)*.8f));
+    std::array<float,3> color=kind==2?std::array<float,3>{.15f,.45f,1.f}:kind==3?std::array<float,3>{1.f,.08f,.04f}:std::array<float,3>{1.f,.45f,.08f};
+    impactParticle(x,y,z,randomRange(-7,7),randomRange(-7,7),randomRange(14,32),.45f,kind==2?1.4f:3,5,color);++budget;
+    if(kind!=2&&budget<32&&impactParticles.size()<512){impactParticle(x,y,z,0,0,18,.7f,5,6,{.18f,.16f,.15f});++budget;}
+    if(lights<4){sparkFlash(x,y,z,kind==3?72:48,.35f,color);++lights;}
 }

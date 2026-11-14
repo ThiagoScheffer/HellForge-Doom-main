@@ -151,7 +151,7 @@ void combatBleed(mobj_t *actor) {
     int cadence=tier==3?3:tier==2?4:5;
     checkSprayLevel();BloodSourceScope bloodSource(actor);
     if(leveltime%cadence==0&&(moving||tier>=2)&&budget<96) {
-        int count=moving?tier:tier==3?2:1;
+        int count=(moving?tier:tier==3?2:1)+(actor->type==MT_FATSO?2:0);
         for(int i=0;i<count&&budget<96;++i){
             if(settings.bloodSpray)throwDrop(x+randomRange(-3,3),y+randomRange(-3,3),units(actor->z)+std::min(24.f,units(actor->height)*.45f),
                 -dx*8+randomRange(-10,10),-dy*8+randomRange(-10,10),-15,1.1f+(tier-1)*.3f,randomRange(3,6)*tier,BLOOD_SPECK);

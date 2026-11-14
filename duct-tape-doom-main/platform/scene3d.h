@@ -164,6 +164,7 @@ struct Settings {
     int gunImpacts=1;
     int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
     int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
+    int elementalCombatFX=0,advancedMonsterReactions=0;
     int eyeInjuries=0;
     int monsterBleeding=0,headshotFrenzy=0,monsterMetalSparks=1,headshotFeedback=2,headshotSound=1,monsterFeeding=0;
     int breakableWalls=1;
@@ -344,7 +345,7 @@ SurfaceBinding surfaceBinding(int key);
 std::vector<SpriteDraw> weaponDraws(const Uniforms &camera);
 std::vector<Vertex> crosshairVertices(float worldW,float worldH);
 void screenQuad(std::vector<Vertex> &out,float x,float y,float w,float h,float u0,float v0,float u1,float v1,float light=1,unsigned mode=MODE_SCREEN);
-// 32³ nearest-palette lookup, BGRA, indexed (b*32+g)*32+r.
+// 32Â³ nearest-palette lookup, BGRA, indexed (b*32+g)*32+r.
 std::vector<unsigned> paletteLUTColors(const unsigned *palette);
 bool renderCheckDue();
 void saveScreenshot(const void *bgra,int width,int height,int stride);

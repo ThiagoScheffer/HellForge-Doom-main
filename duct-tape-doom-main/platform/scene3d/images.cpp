@@ -438,6 +438,22 @@ Image &playerColourImage(Image &source,int sourceKey,int color,int &key,const by
     auto normals=voxelNormals?std::vector<byte>():spriteNormals(source.width,source.height,pixels.data());
     return images.emplace(key,upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,voxelNormals?voxelNormals:normals.data())).first->second;
 }
+// Immutable derived artwork, selected per actor. Original pixels and alpha stay intact.
+Image &charredImage(Image &source,int sourceKey,int &key) {
+    key=-400000000+sourceKey;
+    auto found=images.find(key);if(found!=images.end())return found->second;
+    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    byte lut[256];
+    for(int c=0;c<256;++c){
+        int grey=(palette[c*3]*30+palette[c*3+1]*59+palette[c*3+2]*11)*23/10000;
+        int best=0,distance=INT_MAX;
+        for(int n=0;n<256;++n){int d=0;for(int k=0;k<3;++k){int v=palette[n*3+k]-grey;d+=v*v;}if(d<distance){distance=d;best=n;}}
+        lut[c]=(byte)best;
+    }
+    auto pixels=source.pixels;for(size_t i=0;i+1<pixels.size();i+=2)pixels[i]=lut[pixels[i]];
+    auto normals=spriteNormals(source.width,source.height,pixels.data());
+    return images.emplace(key,upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,normals.data())).first->second;
+}
 const std::array<float,3> &averageColor(Image &image) {
     if(image.averaged)return image.average;
     const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);

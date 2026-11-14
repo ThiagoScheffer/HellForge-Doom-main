@@ -2,13 +2,15 @@
 
 ```yaml
 project: DOOM: HELLFORGE
-build: 2026.11.14.1
-updated_utc: 2026-11-13T19:16:57Z
+build: 2026.11.14.3
+updated_utc: 2026-11-14T10:02:57Z
 status: active
 evidence_build: 2026.11.12.1
 tests: MONSTER-SURVIVAL-AI-TESTS.md
 index: ../README.md
 ```
+
+Current extension: [Elemental combat and advanced reactions](ELEMENTAL-COMBAT.md), build **2026.11.14.3**. Baron and Arch-vile now join progressive bleeding; the linked report supersedes older eligibility lists below. Existing damage multipliers remain unchanged.
 
 Build **2026.11.10.0**, 10 November 2026. Incremental extension of [the existing anatomical combat matrix](ENHANCED-MONSTER-COMBAT.md) and [the previous feedback/status release](MONSTER-FEEDBACK-AND-STATUSES.md).
 
@@ -20,11 +22,11 @@ All additions retain single-player, sprite-only eligibility. Voxel-rendered acto
 
 ## Stronger metal impact and headshot feedback
 
-Arachnotron and Spider Mastermind confirmed metal-leg contacts now emit brighter, larger, faster orange door-track particles and a small local flash. A bullet emits **14 sparks**; each qualifying shotgun pellet can emit **8**, capped at **32 per target/discharge**, **128 per game tic** and the existing global **512-debris** limit. Lifetime is **0.15–0.35 seconds**, with **1.75×** default size. Directions include outward, lateral and downward scatter. Door sparks keep their original tuning.
+Arachnotron and Spider Mastermind confirmed metal-leg contacts now emit brighter, larger, faster orange door-track particles and a small local flash. A bullet emits **14 sparks**; each qualifying shotgun pellet can emit **8**, capped at **32 per target/discharge**, **128 per game tic** and the existing global **512-debris** limit. Lifetime is **0.15â€“0.35 seconds**, with **1.75Ã—** default size. Directions include outward, lateral and downward scatter. Door sparks keep their original tuning.
 
 Sparks can make one short precomputed bounce against valid ordinary sector floors/walls. Floor bounces require matching landing-floor geometry. Arbitrary solid-world meshes retain the ballistic spark effect without an inferred ricochet. Brain hits, unknown regions, splash, misses and unlocalized projectile contacts do not spark. These effects do not grant armor or change damage, alpha collision or penetration.
 
-A confirmed head hit receiving an enabled anatomical bonus now uses a **blood-colored burst**, approximately **1.75×** the previous effect, through the existing blood renderer. Monster palette tint is preserved: Knight/Baron green, other eligible head profiles red unless their established palette says otherwise. Lethal hits use the captured pre-death intersection. HUD HS text remains amber, lasts **350 ms**, and works with the crosshair disabled.
+A confirmed head hit receiving an enabled anatomical bonus now uses a **blood-colored burst**, approximately **1.75Ã—** the previous effect, through the existing blood renderer. Monster palette tint is preserved: Knight/Baron green, other eligible head profiles red unless their established palette says otherwise. Lethal hits use the captured pre-death intersection. HUD HS text remains amber, lasts **350 ms**, and works with the crosshair disabled.
 
 The new headshot confirmation is an **original, procedurally synthesized 120 ms sample**, integrated into the existing sound bank/mixer. It honors SFX volume and mute, preserves ordinary monster sounds, and requests at most one confirmation per discharge. Eye, face, brain, unknown and cosmetic-only contacts cannot trigger it. The standalone sound toggle works independently of blood visibility, but Feedback Off silences it.
 
@@ -36,9 +38,9 @@ Eligibility remains **Imp, Hell Knight, Mancubus and Pinky**, from confirmed pla
 
 | Tier | Damage each second | Duration after successful application | Walking reduction | Additional attack opportunities |
 |---|---:|---:|---:|---:|
-| 1 — Wounded | 2 HP | 6 s | 20% | None |
-| 2 — Heavy bleeding | 3 HP | 8 s | 20% | Approximately 15% |
-| 3 — Hemorrhage | 4 HP | 10 s | 20% | Approximately 25% |
+| 1 â€” Wounded | 2 HP | 6 s | 20% | None |
+| 2 â€” Heavy bleeding | 3 HP | 8 s | 20% | Approximately 15% |
+| 3 â€” Hemorrhage | 4 HP | 10 s | 20% | Approximately 25% |
 
 The first successful application starts tier one. Successful later discharges raise severity by one, capped at tier three. Severity can increase at most once per monster per discharge, even when many pellets activate bleeding. All ordinary per-hit activation rolls are preserved. A successful application refreshes that tier's duration and never postpones the next damage tick.
 
@@ -58,8 +60,8 @@ Tier two emits heavier droplets and occasional pain vocals; tier three adds more
 | Cacodemon | No | Yes | No | Yes |
 | Hell Knight, Mancubus | Yes | No | No | Yes |
 | Revenant, Arch-vile, Pain Elemental | No | No | No | Yes |
-| Baron, Cyberdemon, Spider Mastermind | No | No | No | No — bosses |
-| Arachnotron | No | No | No | No — mechanical |
+| Baron, Cyberdemon, Spider Mastermind | No | No | No | No â€” bosses |
+| Arachnotron | No | No | No | No â€” mechanical |
 | Lost Soul, decorative bodies | No | No | No | No |
 
 A living Pinky or Cacodemon may start feeding at **=30%** of `spawnhealth`, if a valid food source is accessible and no visible living player is within **128 units**. Reachable, grounded, settled biological corpses are preferred; otherwise it selects the nearest eligible living prey within **384 units**. Ties use stable actor order. Search intervals are **35 tics**; work is limited to four new searches per tic, 256 thinker visits and eight route candidates per search.
@@ -78,20 +80,20 @@ All balance values below use the existing validated `wp_` graphics-config reader
 
 | Key | Default | Accepted range |
 |---|---:|---:|
-| wp_bleed_chance | 30 | 0–100 |
-| wp_bleed_damage / wp_bleed_duration / wp_bleed_slow | 2 / 210 / 20 | 1–100 / 35–3500 / 0–90 |
-| wp_bleed_damage_2 / wp_bleed_damage_3 | 3 / 4 | 1–100 |
-| wp_bleed_duration_2 / wp_bleed_duration_3 | 280 / 350 | 35–3500 |
-| wp_bleed_attack_2 / wp_bleed_attack_3 | 15 / 25 | 0–50 |
-| wp_bleed_voice_2 / wp_bleed_voice_3 | 105 / 70 | 35–3500 |
-| wp_feed_start / wp_feed_stop | 30 / 60 | 1–50 / 51–100 percent |
-| wp_feed_radius / wp_feed_bite | 384 / 16 | 64–1024 / 1–100 |
-| wp_feed_live_heal / wp_feed_corpse_heal | 5 / 10 | 1–20 / 1–25 percent |
-| wp_feed_search / wp_feed_pursuit / wp_feed_cooldown | 35 / 105 / 175 | 7–350 / 35–350 / 35–3500 |
-| wp_feed_threat | 128 | 0–256; 0 disables proximity veto |
-| wp_metal_sparks_bullet / wp_metal_sparks_pellet / wp_metal_sparks_cap | 14 / 8 / 32 | 1–32 / 1–16 / 1–64 |
-| wp_metal_spark_scale / wp_head_blood_scale | 175 / 175 | 100–300 percent |
-| wp_head_wall_reach / wp_head_wall_marks | 64 / 3 | 1–96 / 0–3 |
+| wp_bleed_chance | 30 | 0â€“100 |
+| wp_bleed_damage / wp_bleed_duration / wp_bleed_slow | 2 / 210 / 20 | 1â€“100 / 35â€“3500 / 0â€“90 |
+| wp_bleed_damage_2 / wp_bleed_damage_3 | 3 / 4 | 1â€“100 |
+| wp_bleed_duration_2 / wp_bleed_duration_3 | 280 / 350 | 35â€“3500 |
+| wp_bleed_attack_2 / wp_bleed_attack_3 | 15 / 25 | 0â€“50 |
+| wp_bleed_voice_2 / wp_bleed_voice_3 | 105 / 70 | 35â€“3500 |
+| wp_feed_start / wp_feed_stop | 30 / 60 | 1â€“50 / 51â€“100 percent |
+| wp_feed_radius / wp_feed_bite | 384 / 16 | 64â€“1024 / 1â€“100 |
+| wp_feed_live_heal / wp_feed_corpse_heal | 5 / 10 | 1â€“20 / 1â€“25 percent |
+| wp_feed_search / wp_feed_pursuit / wp_feed_cooldown | 35 / 105 / 175 | 7â€“350 / 35â€“350 / 35â€“3500 |
+| wp_feed_threat | 128 | 0â€“256; 0 disables proximity veto |
+| wp_metal_sparks_bullet / wp_metal_sparks_pellet / wp_metal_sparks_cap | 14 / 8 / 32 | 1â€“32 / 1â€“16 / 1â€“64 |
+| wp_metal_spark_scale / wp_head_blood_scale | 175 / 175 | 100â€“300 percent |
+| wp_head_wall_reach / wp_head_wall_marks | 64 / 3 | 1â€“96 / 0â€“3 |
 
 The shared trailer writes **version 3, 136-byte records**, preserving the existing boundary marker and v1/v2 prefixes. It reads v1 (60-byte), v2 (84-byte) and legacy saves without a trailer. Old flat bleeds become tier one. New state includes tier, discharge identifier, next tick/expiry, original actor/player attribution, vocal/opportunity bookkeeping, feeding phase/target/previous target/timers and no-double-recovery corpse metadata. Actor references use serialized thinker indices and player attribution has a bounded player-slot fallback. The native serialized actor layout is unchanged.
 

@@ -201,6 +201,8 @@ void applySettings() {
     P_WeakpointConfigure(settings.accelerated&&settings.enhancedWeakPoints,settings.accelerated&&settings.weaponVulnerabilities,settings.accelerated&&settings.localizedInjuries);
     P_WeakpointConfigureExtras(settings.accelerated&&settings.monsterBleeding,settings.accelerated&&settings.headshotFrenzy);
     P_WeakpointConfigureEyes(settings.accelerated&&settings.eyeInjuries);
+    P_CombatConfigure(settings.accelerated&&settings.elementalCombatFX,settings.accelerated&&settings.advancedMonsterReactions);
+    P_CombatVisual=settings.accelerated?combatElemental:nullptr;
     P_WeakpointConfigureFeeding(settings.accelerated&&settings.monsterFeeding);
     P_WeakpointImpact=settings.accelerated?combatImpact:nullptr;
     P_WeakpointBleedVisual=settings.accelerated?combatBleed:nullptr;
@@ -262,6 +264,7 @@ void sceneShutdown() {
     P_WeakpointImpact=nullptr;P_WeakpointBleedVisual=nullptr;P_WeakpointBulletLocate=nullptr;P_WeakpointConfigureExtras(0,0);
     P_WeakpointConfigureFeeding(0);
     P_WeakpointConfigureEyes(0);
+    P_CombatConfigure(0,0);P_CombatVisual=nullptr;
     P_WeakpointLocate=nullptr;P_WeakpointTargetAllowed=nullptr;P_WeakpointConfigure(0,0,0);
     P_CriticalBegin=nullptr;P_CriticalThing=nullptr;p_critical_trace=0;
     prepareCriticalSurface=nullptr;criticalVoxelModel=nullptr;
@@ -771,10 +774,10 @@ void updateTitle(int width,int height,const char *renderer) {
     if(now-titleTime>1000000000) {
         fps=frameCount*1e9/(now-titleTime);frameMs=1000.f/std::max(fps,1.f);peakFrameMs=framePeak;framePeak=0;
         frameCount=0;titleTime=now;
-        char rate[32]="";if(settings.fps)snprintf(rate,sizeof(rate)," · %.0f fps",fps);
-        char title[256];snprintf(title,sizeof(title),"%s · %s · %dx%d%s%s · F4: graphics · F7: screenshot · Esc: menu",
+        char rate[32]="";if(settings.fps)snprintf(rate,sizeof(rate)," Ã‚Â· %.0f fps",fps);
+        char title[256];snprintf(title,sizeof(title),"%s Ã‚Â· %s Ã‚Â· %dx%d%s%s Ã‚Â· F4: graphics Ã‚Â· F7: screenshot Ã‚Â· Esc: menu",
             Game_Title(),settings.accelerated?renderer:"Classic",width,height,rate,
-            Game_HasEffect(GAME_EFFECT_FLASHLIGHT)?" · F: flashlight":"");
+            Game_HasEffect(GAME_EFFECT_FLASHLIGHT)?" Ã‚Â· F: flashlight":"");
         SDL_SetWindowTitle(gameWindow,title);
     }
 }

@@ -2,13 +2,15 @@
 
 ```yaml
 project: DOOM: HELLFORGE
-build: 2026.11.14.2
-updated_utc: 2026-11-14T08:14:27Z
+build: 2026.11.14.3
+updated_utc: 2026-11-14T10:02:57Z
 status: active
 evidence_build: 2026.11.12.1
 tests: ENHANCED-MONSTER-COMBAT-TESTS.md
 index: ../README.md
 ```
+
+Current extension: [Elemental combat and advanced reactions](ELEMENTAL-COMBAT.md), build **2026.11.14.3**. Baron and Arch-vile now join progressive bleeding; the linked report supersedes older eligibility lists below. Existing damage multipliers remain unchanged.
 
 The three new **F4 > Combat** switches default off and operate independently of **Critical parts**, which retains the existing four human headshot profiles:
 
@@ -43,7 +45,7 @@ Heavy monsters surviving a critical head hit below 10% of their configured spawn
 
 A confirmed mechanical rocket-leg hit has a 30% chance of immobilizing for 35 tics (one second), followed by a 175-tic cooldown. Gravity, attack states, death and boss processing continue. Disabling a corresponding rule cancels its pending injuries.
 
-## Eye injuries — build 2026.11.14.2
+## Eye injuries â€” build 2026.11.14.2
 
 An additional **Eye Injuries** switch defaults off and requires Enhanced Monster Weak Points. See [eye-injury behavior, tuning and focused verification](EYE-INJURIES.md).
 
@@ -86,7 +88,7 @@ These integer keys are saved alongside the existing graphics options. Damage val
 | `wp_leg_duration`, `wp_leg_cooldown` | 35, 175 |
 | `wp_shotgun_range`, `wp_ssg_range`, `wp_shotgun_quota`, `wp_ssg_quota`, `wp_face_majority_percent` | 96, 128, 3, 7, 50 |
 
-Damage percentages accept 100â€“800; chances and low-health threshold 0â€“100; aim 0â€“30 degrees; durations 1â€“350; cooldowns 1â€“3500; ranges 1â€“1024; quotas 1â€“7/1â€“20; required majority 1â€“100.
+Damage percentages accept 100Ã¢â‚¬â€œ800; chances and low-health threshold 0Ã¢â‚¬â€œ100; aim 0Ã¢â‚¬â€œ30 degrees; durations 1Ã¢â‚¬â€œ350; cooldowns 1Ã¢â‚¬â€œ3500; ranges 1Ã¢â‚¬â€œ1024; quotas 1Ã¢â‚¬â€œ7/1Ã¢â‚¬â€œ20; required majority 1Ã¢â‚¬â€œ100.
 
 ## Verification and limitations
 

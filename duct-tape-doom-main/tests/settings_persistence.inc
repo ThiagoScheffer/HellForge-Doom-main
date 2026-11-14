@@ -7,7 +7,16 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-eye-default"){
+    if(settingsCase=="--settings-elemental-write"){
+        check(!settings.elementalCombatFX&&!settings.advancedMonsterReactions,"new elemental controls default off");
+        settings.elementalCombatFX=settings.advancedMonsterReactions=1;settings.accelerated=1;applySettings();
+        check(p_wp_elemental&&p_wp_reactions,"both controls reach gameplay");
+        check(I_TestSaveSettings(graphicsConfig),"normal writer persists new controls");
+    }else if(settingsCase=="--settings-elemental-read"){
+        check(settings.elementalCombatFX&&settings.advancedMonsterReactions,"new controls survive separate-process restart");
+        settings.accelerated=1;applySettings();check(p_wp_elemental&&p_wp_reactions,"restored controls reach runtime");
+        settings.elementalCombatFX=settings.advancedMonsterReactions=0;applySettings();check(!p_wp_elemental&&!p_wp_reactions,"disable applies immediately");
+    }else if(settingsCase=="--settings-eye-default"){
         check(!settings.eyeInjuries&&!p_wp_eyes,"eye injuries default off");
     }else if(settingsCase=="--settings-eye-write"){
         check(!settings.eyeInjuries,"fresh eye setting starts off");

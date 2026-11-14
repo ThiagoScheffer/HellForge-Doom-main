@@ -16,6 +16,8 @@ extern float SV_DoorRenderZ(float fraction);
 
 namespace doom3d
 {
+static float floorOverhang(const mobj_t*,int,const Image&);
+
     bool customGunPuff(const mobj_t *puff);
     void quad(std::vector<Vertex> &out, Vertex a, Vertex b, Vertex c, Vertex d)
     {
@@ -846,7 +848,7 @@ namespace doom3d
             int lump = firstspritelump + sf.lump[seen], spriteKey = -1 - lump;
             int bloodTint = thing->type == MT_BLOOD ? (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT : 0;
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
-            Image &image = thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
+            Image &image = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
             float left = -(float)image.left, right = left + image.width, top = z + image.top, bottom = top - image.height;
             if ((thing->flags & MF_COUNTKILL) && thing->health > 0)
             {
@@ -892,6 +894,7 @@ namespace doom3d
                     batch[n].blue = pulse[2];
                     batch[n].statics = packedStatics;
                     batch[n].lampTint = tint;
+                    if(ragdoll&&P_CombatCharred(thing)){batch[n].light*=.22f;batch[n].red=batch[n].green=batch[n].blue=0;batch[n].lampTint=0xFF383838u;}
                     if (grounded)
                     {
                         batch[n].mode |= MODE_GROUNDED;

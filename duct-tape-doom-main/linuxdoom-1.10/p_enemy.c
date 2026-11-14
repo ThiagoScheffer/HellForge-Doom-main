@@ -1500,6 +1500,7 @@ void A_VileAttack (mobj_t* actor)
 	return;
 
     S_StartSound (actor, sfx_barexp);
+    P_CombatFireBegin(actor,actor->tracer);
     P_DamageMobj (actor->target, actor, actor, 20);
     actor->target->momz = 1000*FRACUNIT/actor->target->info->mass;
 	
@@ -1507,13 +1508,13 @@ void A_VileAttack (mobj_t* actor)
 
     fire = actor->tracer;
 
-    if (!fire)
-	return;
+    if (!fire){P_CombatFireEnd();return;}
 		
     // move the fire between the vile and the player
     fire->x = actor->target->x - FixedMul (24*FRACUNIT, finecosine[an]);
     fire->y = actor->target->y - FixedMul (24*FRACUNIT, finesine[an]);	
     P_RadiusAttack (fire, actor, 70 );
+    P_CombatFireEnd();
 }
 
 
@@ -2202,6 +2203,7 @@ void A_PlayerScream (mobj_t* mo)
 	sound = sfx_pdiehi;
     }
     
+    if(P_CombatVisualKind(mo)==1)sound=sfx_plpain; // Shared Doom pain asset; no missing custom sound.
     S_StartSound (mo, sound);
 }
 
@@ -2246,7 +2248,81 @@ static void P_FoodAnimate(mobj_t *actor) {
 }
 static void P_FoodWake(mobj_t *actor){if(actor->state==&states[actor->info->spawnstate]&&actor->info->seestate!=S_NULL)P_SetMobjState(actor,(statenum_t)actor->info->seestate);}
 static void P_FoodVoice(mobj_t *actor){if(actor->info->painsound)S_StartSound(actor,actor->info->painsound);}
+// Bounded local siphon query. No actor pointer survives the current query/tic.
+static mobj_t *siphonActor,*siphonBest;
+static int siphonCorpse,siphonVisited,siphonSight;
+static double siphonNearest;
+static int P_CombatCompatibleNative(mobj_t *m){
+    if(!m||!m->info||!m->state)return 0;
+    statenum_t state=m->info->missilestate;
+    for(int i=0;i<40&&state!=S_NULL&&state!=m->info->seestate;++i){
+        if(m->state==&states[state])return 0;state=states[state].nextstate;
+    }
+    if(m->type==MT_VILE){
+        state=m->info->painstate;
+        for(int i=0;i<8&&state!=S_NULL&&state!=m->info->seestate;++i){if(m->state==&states[state])return 0;state=states[state].nextstate;}
+    }
+    if(m->type==MT_VILE&&(m->state>=&states[S_VILE_HEAL1]&&m->state<=&states[S_VILE_HEAL3]))return 0;
+    return 1;
+}
+static void P_CombatStaggerNative(mobj_t *m){
+    if(!m->info->painstate)return;
+    P_SetMobjState(m,m->info->painstate);m->tics=11; // 11 + native 3-tic second pain frame = 0.4 seconds.
+}
+static mobj_t *siphonReserveBody;
+static int siphonReserved,siphonReserveVisits;
+static boolean PIT_SiphonReserved(mobj_t *v){
+    if(++siphonReserveVisits>64){siphonReserved=1;return false;}
+    if(v->type==MT_VILE&&v->health>0&&(v->target==siphonReserveBody||P_AproxDistance(v->x-siphonReserveBody->x,v->y-siphonReserveBody->y)<96*FRACUNIT)){siphonReserved=1;return false;}
+    return true;
+}
+static int P_SiphonStockDeath(mobj_t *m){
+    statenum_t state=m->info->deathstate;
+    for(int i=0;i<64&&state!=S_NULL;++i){
+        actionf_p1 action=states[state].action.acp1;
+        if(action&&action!=(actionf_p1)A_Scream&&action!=(actionf_p1)A_XScream&&action!=(actionf_p1)A_Fall)return 0;
+        if(states[state].tics==-1)return 1;
+        state=states[state].nextstate;
+    }
+    return 0;
+}
+static boolean PIT_Siphon(mobj_t *m){
+    if(++siphonVisited>128)return false;
+    if(m==siphonActor||m->player||!m->info||(m->flags&(MF_ARENA|MF_ARENAOLD)))return true;
+    // Explicit whitelist excludes bosses, mechanics and DeHackEd custom actions.
+    if(m->type!=MT_POSSESSED&&m->type!=MT_SHOTGUY&&m->type!=MT_CHAINGUY&&m->type!=MT_TROOP&&m->type!=MT_SERGEANT)return true;
+    if(m->health>0){if(siphonCorpse||!(m->flags&MF_SHOOTABLE))return true;}
+    else if(!siphonCorpse||!P_WeakpointFoodEligible(m,1))return true;
+    if(P_WeakpointTargetAllowed&&!P_WeakpointTargetAllowed(m))return true;
+    if(!P_SiphonStockDeath(m))return true;
+    double dx=((double)m->x-siphonActor->x)/FRACUNIT,dy=((double)m->y-siphonActor->y)/FRACUNIT,d=dx*dx+dy*dy;
+    if(d>=siphonNearest||siphonSight>=16)return true;
+    if(siphonCorpse){
+        // Reserve bodies in the normal resurrection reach; resurrection wins.
+        double reach=((double)siphonActor->radius+m->radius)/FRACUNIT+32;
+        if(d<=reach*reach)return true;
+        // Unknown competition fails safely; use bounded local BLOCKMAP guards.
+        siphonReserveBody=m;siphonReserved=0;siphonReserveVisits=0;
+        int xl=(int)(((int64_t)m->x-96LL*FRACUNIT-bmaporgx)>>MAPBLOCKSHIFT),xh=(int)(((int64_t)m->x+96LL*FRACUNIT-bmaporgx)>>MAPBLOCKSHIFT);
+        int yl=(int)(((int64_t)m->y-96LL*FRACUNIT-bmaporgy)>>MAPBLOCKSHIFT),yh=(int)(((int64_t)m->y+96LL*FRACUNIT-bmaporgy)>>MAPBLOCKSHIFT);
+        for(int x=xl;x<=xh&&!siphonReserved;++x)for(int y=yl;y<=yh&&!siphonReserved;++y)P_BlockThingsIterator(x,y,PIT_SiphonReserved);
+        if(siphonReserved)return true;
+    }
+    ++siphonSight;if(P_CheckSight(siphonActor,m)){siphonNearest=d;siphonBest=m;}return true;
+}
+static mobj_t *P_CombatDonorNative(mobj_t *actor,int corpse){
+    int xl,xh,yl,yh,x,y;
+    siphonActor=actor;siphonCorpse=corpse;siphonBest=NULL;siphonVisited=siphonSight=0;siphonNearest=192.*192.+1;
+    xl=(int)(((int64_t)actor->x-192LL*FRACUNIT-bmaporgx)>>MAPBLOCKSHIFT);
+    xh=(int)(((int64_t)actor->x+192LL*FRACUNIT-bmaporgx)>>MAPBLOCKSHIFT);
+    yl=(int)(((int64_t)actor->y-192LL*FRACUNIT-bmaporgy)>>MAPBLOCKSHIFT);
+    yh=(int)(((int64_t)actor->y+192LL*FRACUNIT-bmaporgy)>>MAPBLOCKSHIFT);
+    for(x=xl;x<=xh&&siphonVisited<=128;++x)for(y=yl;y<=yh&&siphonVisited<=128;++y)P_BlockThingsIterator(x,y,PIT_Siphon);
+    return siphonBest;
+}
+
 void P_WeakpointInitFeedingHooks(void) {
+    P_CombatCompatible=P_CombatCompatibleNative;P_CombatStagger=P_CombatStaggerNative;P_CombatDonor=P_CombatDonorNative;
     P_WeakpointFoodPath=P_FoodPath;P_WeakpointFoodMove=P_FoodMove;P_WeakpointFoodAnimate=P_FoodAnimate;
     P_WeakpointFoodWake=P_FoodWake;P_WeakpointFoodConsume=P_RemoveMobj;P_WeakpointPainVoice=P_FoodVoice;
 }

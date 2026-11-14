@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE documentation
 
-Current build: **2026.11.14.2**. See [Eye injuries](changes/EYE-INJURIES.md) for the latest update and the
+Current build: **2026.11.14.3**. See [Elemental combat](changes/ELEMENTAL-COMBAT.md) for the latest update and the
 [main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
 features, defaults, build identity and focused verification.
 
@@ -10,6 +10,8 @@ coverage limits. Their source is now included in the main integration; old
 statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
+
+- [Elemental combat, charred corpses and advanced injury reactions](changes/ELEMENTAL-COMBAT.md)
 
 - [Eye injuries: blindness, corpse recovery and Spider rage](changes/EYE-INJURIES.md)
 

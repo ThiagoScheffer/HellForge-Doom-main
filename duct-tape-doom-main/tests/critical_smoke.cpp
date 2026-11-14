@@ -23,6 +23,7 @@ static bool visualFeedback=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
 static bool eyeMode=false;
+static bool elementalMode=false,visualElemental=false;
 static bool visualEyes=false;
 static std::string visualCapture;
 static int checks=0;
@@ -229,11 +230,15 @@ static void visualFrame() {
 }
 #include "settings_persistence.inc"
 #include "eye_injury_smoke.inc"
+#include "elemental_smoke.inc"
+#include "elemental_visual.inc"
 #include "eye_injury_visual.inc"
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
     if(!settingsCase.empty()){settingsPersistenceFrame();return;}
     if(eyeMode){eyeIntegration();I_Quit();return;}
+    if(elementalMode){elementalIntegration();I_Quit();return;}
+    if(visualElemental){elementalVisualFrame();return;}
     if(visualEyes){eyeVisualFrame();return;}
     if(visualSurvival){survivalVisualFrame();return;}
     if(visualFeedback){feedbackVisualFrame();return;}
@@ -246,7 +251,9 @@ int main(int argc,char **argv) {
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
     visualEyes=argc==5&&!std::strcmp(argv[4],"--visual-eye-injuries");
-    visual=visualEyes||visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visualElemental=argc==5&&!std::strcmp(argv[4],"--visual-elemental");
+    visual=visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
     std::string config=output+"/doom.cfg",graphics=output+"/graphics.cfg";

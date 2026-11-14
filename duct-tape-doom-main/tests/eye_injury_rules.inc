@@ -29,7 +29,7 @@ static void eyeInjuryRules() {
     check(!P_WeakpointBlindFireDue(&target),"blind fire waits its interval");leveltime+=70;
     check(P_WeakpointBlindFireDue(&target)&&!P_WeakpointBlindFireDue(&target),"one blind attack opportunity per 70 tics");
     angle_t yaw;fixed_t slope;P_WeakpointBlindAim(&target,&yaw,&slope);check(std::abs((double)slope/FRACUNIT)<=.269,"random blind pitch bounded to fifteen degrees");
-    std::vector<unsigned char> save(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());check(save[0]==4,"eye state uses save extension v4");
+    std::vector<unsigned char> save(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());check(save[0]==5,"eye state uses backward-compatible save extension v5");
     P_WeakpointClear();P_WeakpointLoad(save.data(),save.size());check(P_WeakpointBlind(&target),"blindness and next fire time survive actor-index load");
     P_WeakpointConfigureEyes(0);P_WeakpointLoad(save.data(),save.size());check(!P_WeakpointBlind(&target),"disabled eye feature cannot restore pending blindness");
     // v3 prefix remains loadable and cannot invent an eye status.

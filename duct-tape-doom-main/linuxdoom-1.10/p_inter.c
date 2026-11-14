@@ -841,6 +841,7 @@ P_DamageMobj
     player_t*	player;
     fixed_t	thrust;
     int		temp;
+    int elementKind,previousBurn;
 	
     if(lan_session&&!deathmatch&&!lan_friendlyfire&&source&&source!=target&&source->player&&target->player)return;
 
@@ -958,14 +959,18 @@ P_DamageMobj
     if(damage>0)Arcade_Impact(inflictor,source,target);
     Arcade_Damage(source,target,damage);
     if(damage>0)P_PhotoEvent(2,target);
+    elementKind=P_CombatDamageKind(inflictor,source);
+    previousBurn=P_CombatVisualKind(target);
     target->health -= damage;	
     if (target->health <= 0)
     {
 	P_NoticeKill(source,target,inflictor);
 	P_KillMobj (source, target);
+        P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
 	return;
     }
 
+    P_CombatConfirmed(target,source,elementKind,damage,-1);
     if(p_wp_bleed_damage)return;
     if(damage>0)P_WeakpointFeedingHurt(target);
 
