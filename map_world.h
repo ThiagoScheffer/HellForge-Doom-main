@@ -28,6 +28,7 @@ public:
  bool save(std::ostream&)const;
  bool load(std::istream&);
  const std::map<TileKey,WorldTile>& tiles()const{return cache;}
+ bool floorShielded(int sector)const{return source.floorShielded(sector);}
  size_t cutCount()const{return cuts.size();}
  bool staticCut(size_t i)const{return i<cuts.size()&&cuts[i].sector<0;}
  bool cutNear(size_t i,Vec p,float radius)const{return i<cuts.size()&&length(center(cuts[i])-p)<radius;}

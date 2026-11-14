@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE documentation
 
-Current build: **2026.11.15.3**. See [Speedrun position/layout](changes/SPEEDRUN-LAYOUT.md), [HUD background opacity](changes/HUD-BACKGROUND-OPACITY.md) and [Elemental Damage 2.0 and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md) for the latest update and the
+Current build: **2026.11.15.5**. See [large platform protection](changes/LARGE-PLATFORM-SHIELD.md), [E1M8 exit and screen-edge fixes](changes/E1M8-AND-SPEEDRUN-FIXES.md), [Speedrun position/layout](changes/SPEEDRUN-LAYOUT.md), [HUD background opacity](changes/HUD-BACKGROUND-OPACITY.md) and [Elemental Damage 2.0 and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md) for the latest update and the
 [main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
 features, defaults, build identity and focused verification.
 

@@ -167,11 +167,11 @@ inline SpeedrunPanel speedrunPanel(const char lines[8][48],const int visible[8])
     const bool horizontal=settings.speedrunLayout==1;
     for(int i=0;i<8;++i)if(visible[i]){
         int width=std::min((int)std::strlen(lines[i]),horizontal?47:27)*4;
-        if(!horizontal){out.cells[out.count++]={i,0,row++*8};continue;}
+        if(!horizontal){extent=std::max(extent,width);out.cells[out.count++]={i,0,row++*8};continue;}
         if(cursor&&cursor+width>SCREENWIDTH-6){cursor=0;++row;}
         out.cells[out.count++]={i,cursor,row*8};extent=std::max(extent,cursor+width);cursor+=width+8;
     }
-    out.width=horizontal?std::clamp(extent+6,12,SCREENWIDTH):115;
+    out.width=std::clamp(extent+6,12,SCREENWIDTH);
     out.height=(horizontal?(out.count>1?row+1:1):row)*8+6;
     int x=(settings.speedrunAnchor&1)?SCREENWIDTH-out.width:8;
     int y=settings.speedrunAnchor>=2?158-out.height:settings.hudLayout==2?98:56;
@@ -181,7 +181,7 @@ inline SpeedrunPanel speedrunPanel(const char lines[8][48],const int visible[8])
     out.x=std::clamp(x,3,SCREENWIDTH-out.width+3);
     out.y=std::clamp(y,3,SCREENHEIGHT-out.height+3);return out;
 }
-inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false){
+inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false,bool localPanel=false){
     if((!settings.speedrunHUD&&!settings.combatMessages)||!worldPending||menuactive||automapactive||Arcade_MenuOpen()||!P_WeakpointActive())return;
     const unsigned background=fixed?0xd0141010u:hudBackdrop(0x141010,settings.speedrunBackgroundOpacity);
     auto box=[&](int x,int y,int w,int h){if(!(background>>24))return;for(int yy=std::max(0,y);yy<std::min(SCREENHEIGHT,y+h);++yy)for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)out[yy*SCREENWIDTH+xx]=background;};
@@ -212,7 +212,7 @@ inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false){
         }
         int visible[]={1,settings.speedrunAttempts,settings.speedrunDeaths,settings.speedrunStreak,settings.speedrunAttemptTime,settings.speedrunRuntime,settings.speedrunDealt,settings.speedrunTaken};
         const auto &values=settings.speedrunLayout==1?compact:lines;
-        auto panel=speedrunPanel(values,visible);box(panel.x-3,panel.y-3,panel.width,panel.height);
+        auto panel=speedrunPanel(values,visible);if(localPanel){speedrunPanelWidth=panel.width;speedrunPanelHeight=panel.height;panel.x=panel.y=3;}box(panel.x-3,panel.y-3,panel.width,panel.height);
         for(int i=0;i<panel.count;++i){const auto &cell=panel.cells[i];char clipped[48];
             std::snprintf(clipped,settings.speedrunLayout==1?sizeof(clipped):28,"%s",values[cell.line]);
             text(clipped,panel.x+cell.x,panel.y+cell.y,cell.line?0xfff3e8deu:0xffffb15au);

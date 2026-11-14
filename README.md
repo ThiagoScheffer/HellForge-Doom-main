@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE
 
-**Current build: 2026.11.15.3** | [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Current build: 2026.11.15.5** | [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It

@@ -1,4 +1,5 @@
 #include "map_source.h"
+#include "duct-tape-doom-main/platform/large_platform_shield.h"
 #include <iostream>
 #include <stdexcept>
 using namespace lab;
@@ -59,6 +60,22 @@ int main(){try{
  auto lava=box(3,-64,-64,64,64,32,128);lava.breakFloor=false;
  source.reset({lava});
  check(!source.damageAllowed({0,0,32})&&source.damageAllowed({0,0,8}),"Liquid protection made its supporting wall indestructible");
+ check(floorMoverSpecial(62)&&floorMoverSpecial(0x6006)&&floorMoverSpecial(0x3406),"Floor actions must be recognized");
+ check(!floorMoverSpecial(26)&&!floorMoverSpecial(242)&&!floorMoverSpecial(0x4000),"Doors, height transfers and ceilings are not floor movers");
+ check(largePlatformFootprint(box(0,0,0,1024,1024,0,128)),"Large footprint threshold");
+ check(!largePlatformFootprint(box(0,0,0,512,512,0,128)),"Small platform must not receive the shield");
+ auto platform=box(10,-512,-512,512,512,64,192);platform.shieldFloor=true;
+ auto neighbor=box(11,512,-512,640,512,0,192);
+ source.reset({platform,neighbor});
+ check(!source.damageAllowed({0,0,64},10,0),"Large platform top must reject damage");
+ check(!source.damageAllowed({510,0,32},10,0),"Large platform moving side must reject damage");
+ check(!source.damageAllowed({510,0,32},-1,0),"Static blast overlap must not cut a shielded platform");
+ check(source.damageAllowed({0,0,196},10,1),"Platform protection must not shield its ceiling");
+ check(source.damageAllowed({600,0,-4},11,0),"Nearby ordinary floor must remain damageable");
+ source.heights(10,32,192);
+ check(!source.damageAllowed({0,0,28},10,0),"Shield must follow the moving floor");
+ platform.shieldFloor=false;source.reset({platform});
+ check(source.damageAllowed({0,0,60},10,0),"Small or ordinary platforms retain damage");
  std::cout<<"PASS map source: shared linedefs, exact tile edges, negative coordinates, floor/ceiling, door/lift heights, holes, concave sectors, bounded allocation.\n";
  return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

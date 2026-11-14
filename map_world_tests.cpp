@@ -30,6 +30,21 @@ static void seams(MapWorld& world){
  }
 }
 int main(){try{
+ {auto platform=room(10,-128,128);platform.floor=64;platform.ceiling=192;platform.movingFloor=true;
+  auto ordinary=room(11,128,256);MapSource original;original.reset({platform,ordinary});
+  MapWorld damaged;damaged.reset(original);
+  check(damaged.blast({0,0,62},8,10,0,64),"Old save fixture must damage its moving floor");
+  check(damaged.blast({192,0,-2},8,11,0,0),"Ordinary floor fixture must remain damageable");
+  std::ostringstream journal(std::ios::binary);check(damaged.save(journal),"Platform fixture save");
+  platform.shieldFloor=true;MapSource protectedSource;protectedSource.reset({platform,ordinary});
+  MapWorld shielded;shielded.reset(protectedSource);
+  check(!shielded.blast({0,0,62},8,10,0,64)&&shielded.cutCount()==0,"Protected floor must not allocate a cut");
+  std::istringstream oldSave(journal.str(),std::ios::binary);check(shielded.load(oldSave),"Older damage journal must still load");
+  check(shielded.cutCount()==1,"Loading must remove only protected floor damage");
+  check(shielded.sample({0,0,62})>0&&shielded.sample({192,0,-2})<0,"Protected geometry repairs while ordinary damage survives");
+  shielded.heights(10,32,192);check(shielded.sample({0,0,30})>0,"Floor shield remains intact after movement");
+ }
+
  {MapWorld round;round.reset(source());round.blast({64,0,64},4);
   float reference=round.sample({64,3,64});
   for(int i=0;i<16;++i){float a=i*6.2831853f/16;

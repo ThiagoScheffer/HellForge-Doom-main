@@ -149,7 +149,7 @@ void uploadFrame(SDL_GPUCommandBuffer *command,const std::vector<const std::vect
         SDL_UploadToGPUTexture(copy,&source,&target,true);
     };
     image(imageOffset,paletteTexture,256,1);
-    image(imageOffset+1024,hudTexture,SCREENWIDTH,SCREENHEIGHT*2);
+    image(imageOffset+1024,hudTexture,SCREENWIDTH,SCREENHEIGHT*3);
     if(panelBytes)image(imageOffset+1024+hudBytes,settingsTexture,DOOM_SETTINGS_WIDTH,DOOM_SETTINGS_HEIGHT);
     SDL_EndGPUCopyPass(copy);
     if(M_CheckParm((char*)"-profileuploads")&&gametic%10==0){size_t kept=0;for(const auto& entry:residentVertices)kept+=entry.second.count*sizeof(Vertex);printf("UPLOAD tic %d dynamic %u changed %u resident %zu batches %zu\n",gametic,bytes,residentBytes,kept,pending.size());}

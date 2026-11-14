@@ -1,4 +1,6 @@
 #include "monster_profile.h"
+#include "large_platform_shield.h"
+#include <set>
 #include "monster_wake_audit.h"
 #include "../../scene.h"
 #include "../../map_source.h"
@@ -9,6 +11,9 @@
 #include <algorithm>
 extern "C" {
 #include "doomstat.h"
+#include "doomdata.h"
+#include "m_swap.h"
+#include "z_zone.h"
 #include "p_local.h"
 #include "r_state.h"
 #include "m_argv.h"
@@ -51,6 +56,22 @@ static bool sectorMoves(int s,int plane){
 // are not boundaries of a solid.
 static lab::MapSource readMapSource(){
  std::vector<lab::MapRegion> regions;
+ std::set<int> floorTags,manualFloors;
+ // Read immutable line specials: saved one-shot switches may already be spent.
+ char mapName[9];if(gamemode==commercial)snprintf(mapName,sizeof(mapName),"MAP%02d",gamemap);
+ else snprintf(mapName,sizeof(mapName),"E%dM%d",gameepisode,gamemap);
+ int mapLump=W_CheckNumForName(mapName);
+ const maplinedef_t *original=nullptr;
+ if(mapLump>=0&&mapLump+ML_LINEDEFS<numlumps&&W_LumpLength(mapLump+ML_LINEDEFS)==numlines*(int)sizeof(maplinedef_t))
+  original=(const maplinedef_t*)W_CacheLumpNum(mapLump+ML_LINEDEFS,PU_CACHE);
+ for(int i=0;i<numlines;++i){
+  unsigned action=original?(unsigned short)SHORT(original[i].special):(unsigned short)lines[i].special;
+  if(!lab::floorMoverSpecial(action))continue;
+  if(action>=0x3000&&(action&7)>=6){if(lines[i].backsector)manualFloors.insert(int(lines[i].backsector-sectors));}
+  else if(lines[i].tag)floorTags.insert(lines[i].tag);
+ }
+ if(gamemode==commercial&&gamemap==7){floorTags.insert(666);floorTags.insert(667);}
+ if(gamemode!=commercial&&gamemap==8&&(gameepisode==1||gameepisode==4))floorTags.insert(666);
  for(int s=0;s<numsectors;++s){
   auto& sector=sectors[s];lab::MapRegion region;
   region.sector=s;region.floor=unit(sector.floorheight);region.ceiling=unit(sector.ceilingheight);
@@ -61,6 +82,8 @@ static lab::MapSource readMapSource(){
    region.edges.push_back({{unit(line->v1->x),unit(line->v1->y),0},
     {unit(line->v2->x),unit(line->v2->y),0},int(line-lines)});
   }
+  region.shieldFloor=lab::largePlatformFootprint(region)&&
+   (floorTags.count(sector.tag)||manualFloors.count(s)||sector.floordata);
   regions.push_back(std::move(region));
  }
  lab::MapSource result;result.reset(std::move(regions));return result;
@@ -331,6 +354,7 @@ static void impact(float *point,int owner,float radius,float depth=0){
   float shieldReach=radius*std::max(1.f,stretch)+std::abs(depth>0?-depth*gain:radius*.4f*gain);
   if(P_DoorShieldVolume(origin.x*FRACUNIT,origin.y*FRACUNIT,origin.z*FRACUNIT,shieldReach))return;
   mapWorld.solidOwner(origin+inward*.5f,sector,plane,anchor);
+  if(sector>=0&&plane==0&&mapWorld.floorShielded(sector))return;
   if(sector>=0&&plane==1&&P_DoorShieldImpact(sector,point[0]*FRACUNIT,point[1]*FRACUNIT,point[2]*FRACUNIT))return;
   if(sector>=0&&std::abs(point[5])>.8f&&!P_GlobalDigSolidFlat(sector,plane))return;
   if(sector>=0&&!sectorMoves(sector,plane))sector=-1;

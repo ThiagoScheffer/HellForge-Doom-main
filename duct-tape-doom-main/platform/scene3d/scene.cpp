@@ -43,7 +43,10 @@ int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 #include "../../linuxdoom-1.10/p_swarm.h"
 }
 #include "../settings_panel.h"
-namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
+namespace doom3d {
+int speedrunPanelWidth=0,speedrunPanelHeight=0;
+int criticalThing(mobj_t*,critical_hit_t*);
+}
 
 namespace doom3d {
 GpuTextureRef arcadePodiumTexture;
@@ -661,9 +664,10 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
         if(!arcadeRankTexture)arcadeRankTexture=gpuCreateTexture(GpuFormat::RGBA8,SCREENWIDTH,SCREENHEIGHT,ranks.data(),SCREENWIDTH*4);
         else gpuUpdateTexture(arcadeRankTexture,GpuFormat::RGBA8,{{0,0,SCREENWIDTH,SCREENHEIGHT}},ranks.data(),SCREENWIDTH*4);
     }
-    std::vector<unsigned> modern(SCREENWIDTH*SCREENHEIGHT,0);
+    std::vector<unsigned> modern(SCREENWIDTH*SCREENHEIGHT,0),speedrun(SCREENWIDTH*SCREENHEIGHT,0);
+    speedrunPanelWidth=speedrunPanelHeight=0;
     if((r_photoactive||director_watch||director_demo&&demoplayback)&&!menuactive){if(!r_photoactive)std::fill(overlay.begin(),overlay.end(),0);}
-    else {modernHud(modern);combatWidgets(overlay);combatWidgets(overlay,true);}
+    else {modernHud(modern);combatWidgets(speedrun,false,true);combatWidgets(overlay,true);}
     directorMarkers(overlay);
     if(!r_photoactive&&!(director_demo&&demoplayback)){
     keyNotice(overlay);
@@ -700,6 +704,7 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
         }
     }
     overlay.insert(overlay.end(),modern.begin(),modern.end());
+    overlay.insert(overlay.end(),speedrun.begin(),speedrun.end());
     return overlay;
 }
 // Current sector light and heights for seam blending and contact shading;

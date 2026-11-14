@@ -25,7 +25,7 @@ static bool visualSurvival=false;
 static bool solidMode=false;
 static bool eyeMode=false;
 static bool elementalMode=false,visualElemental=false,elemental2Mode=false,visualElemental2=false;
-static bool visualEyes=false;
+static bool visualEyes=false,e1m8Mode=false,e1m8Exit=false,e1m8Snap=false;
 static std::string visualCapture;
 static int checks=0;
 static void check(bool ok,const char *message) {
@@ -236,8 +236,10 @@ static void visualFrame() {
 #include "elemental2_smoke.inc"
 #include "elemental2_visual.inc"
 #include "eye_injury_visual.inc"
+#include "e1m8_regression.inc"
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(e1m8Mode){e1m8Frame();return;}
     if(!settingsCase.empty()){settingsPersistenceFrame();return;}
     if(eyeMode){eyeIntegration();I_Quit();return;}
     if(elemental2Mode){elemental2Integration();I_Quit();return;}
@@ -259,13 +261,15 @@ int main(int argc,char **argv) {
     visualElemental=argc==5&&!std::strcmp(argv[4],"--visual-elemental");
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
-    visual=visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
     std::string config=output+"/doom.cfg",graphics=output+"/graphics.cfg";
     FILE *f=nullptr;
-    if(settingsCase.empty()) {
+    if(e1m8Mode){std::ifstream input(argv[2],std::ios::binary);std::ofstream copy(graphics,std::ios::binary);copy<<input.rdbuf();}
+    else if(settingsCase.empty()) {
     f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);std::fclose(f);
     if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
@@ -275,6 +279,7 @@ int main(int argc,char **argv) {
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
         "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":visual?"1":"4"};
+    if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
     if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}

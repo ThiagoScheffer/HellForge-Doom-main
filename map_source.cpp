@@ -18,13 +18,18 @@ bool MapSource::solidOwner(Vec p,int& sector,int& plane,float& anchor)const{
  }
  return false;
 }
+bool MapSource::floorShielded(int sector)const{
+ for(const auto& r:regions)if(r.map.sector==sector)return r.map.shieldFloor;
+ return false;
+}
 bool MapSource::damageAllowed(Vec p,int sector,int plane)const{
  bool owned=sector<0;
  for(const auto& r:regions){
-  if(r.map.sector!=sector&&r.map.breakFloor&&r.map.breakCeiling&&
+  if(!r.map.shieldFloor&&r.map.sector!=sector&&r.map.breakFloor&&r.map.breakCeiling&&
      (sector>=0||(!r.map.movingFloor&&!r.map.movingCeiling)))continue;
   if(p.x<r.lo.x||p.x>r.hi.x||p.y<r.lo.y||p.y>r.hi.y)continue;
   if(horizontal(r,p.x,p.y)>.001f)continue;
+  if(r.map.shieldFloor&&p.z<=r.map.floor+.02f)return false;
   if(sector<0&&((r.map.movingFloor&&p.z<=r.map.floor)||(r.map.movingCeiling&&p.z>=r.map.ceiling)))return false;
   if(r.map.sector==sector){
    owned=plane?p.z>=r.map.ceiling-.02f:p.z<=r.map.floor+.02f;

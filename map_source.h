@@ -9,6 +9,7 @@ struct MapRegion {
  float floor=0,ceiling=0;
  bool breakFloor=true,breakCeiling=true;
  bool movingFloor=false,movingCeiling=false;
+ bool shieldFloor=false; // Map-derived protection; not serialized.
  std::vector<MapEdge> edges;
 };
 // Immutable XY topology plus current sector heights. Tiles use absolute grid
@@ -27,6 +28,7 @@ public:
  std::vector<MapRegion> topology()const;
  bool solidOwner(Vec point,int& sector,int& plane,float& anchor)const;
  bool damageAllowed(Vec point,int sector=-1,int plane=0)const;
+ bool floorShielded(int sector)const;
  bool bounds(int sector,Vec& lo,Vec& hi)const;
 private:
  struct Region {

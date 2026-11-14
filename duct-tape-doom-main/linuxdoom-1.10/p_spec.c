@@ -30,6 +30,7 @@ static const char
 rcsid[] = "$Id: p_spec.c,v 1.6 1997/02/03 22:45:12 b1 Exp $";
 
 #include "p_notices.h"
+extern int SV_Active(void);
 #include <stdlib.h>
 
 #include "doomdef.h"
@@ -1028,8 +1029,14 @@ void P_PlayerInSpecialSector (player_t* player)
     sector = player->mo->subsector->sector;
 
     // Falling, not all the way down yet?
-    if (player->mo->z != sector->floorheight)
-	return;	
+    if (player->mo->z != sector->floorheight){
+        // Solid support is reconstructed from float geometry and may settle
+        // a fraction of a map unit from the native sector plane. Require
+        // actual grounded contact close to that plane, not a raised surface.
+        mobj_t *mo=player->mo;
+        if(!SV_Active()||mo->momz!=0||llabs((int64_t)mo->z-mo->floorz)>FRACUNIT/64||
+           llabs((int64_t)mo->floorz-sector->floorheight)>FRACUNIT/64)return;
+    }
 
     if((unsigned short)sector->special>=32){
         unsigned flags=(unsigned short)sector->special;

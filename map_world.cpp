@@ -171,6 +171,7 @@ bool MapWorld::blast(Vec c,float r,int sector,int plane,float anchor,Vec capOrig
  // The brush centre may already be beyond a thin door. Ownership and
  // protected surfaces are checked per sample, not at the brush centre.
  if(!std::isfinite(capDepth)||!std::isfinite(maxDepth)||maxDepth<=0||maxDepth>4096||!std::isfinite(stretch)||stretch<.01f||stretch>5)return false;
+ if(sector>=0&&plane==0&&source.floorShielded(sector))return false;
  // Reapplying an identical brush must not deepen a smoothed join.
  for(const auto& old:cuts)if(old.radius==r&&old.sector==sector&&old.plane==plane&&old.anchor==anchor&&
      old.capDepth==capDepth&&old.maxDepth==maxDepth&&old.stretch==stretch&&
@@ -356,6 +357,8 @@ bool MapWorld::load(std::istream& in){
     !std::isfinite(c.capNormal.x)||!std::isfinite(c.capNormal.y)||!std::isfinite(c.capNormal.z)||
     !std::isfinite(c.stretch)||c.stretch<.01f||c.stretch>5)return false;
  }
+ // Old saves retain their format; discard only cuts now owned by shielded floors.
+ next.erase(std::remove_if(next.begin(),next.end(),[&](const MapCut& c){return c.sector>=0&&c.plane==0&&source.floorShielded(c.sector);}),next.end());
  cuts=std::move(next);cache.clear();
  for(const auto& cut:cuts){
   Vec c=center(cut);float reach=cut.radius*std::max(1.f,cut.stretch)*1.06f+MapSource::step*2;

@@ -332,6 +332,7 @@ FrameView prepareFrame(int width,int height);
 using LoadingShow=void(*)(const char *title,const char *stage,float fraction);
 bool loadPending();
 void runLoading(int width,int height,LoadingShow show);
+extern int speedrunPanelWidth,speedrunPanelHeight;
 std::vector<unsigned> hudPixels(const unsigned *pixels);
 extern GpuTextureRef keyHandTextures[6];
 extern float keyHandAspect[6],keyHandVisible,keyWeaponDrop;
