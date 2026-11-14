@@ -10,6 +10,9 @@ inline const char *hudGlyph(char c){
         "010101111101101","110101110101110","111100100100111","110101101101110","111100110100111","111100110100100","111100101101111","101101111101101","111010010010111","001001001101111","101101110101101","100100100100111","101111111101101","110101101101101","111101101101111","111101111100100","111101101111001","110101110101101","111100111001111","111010010010010","101101101101111","101101101101010","101101111111101","101101010101101","101101010010010","111001010100111","000000111000000","001001010100100","000010000010000","000000000000010","000000000010100"};
     const char *found=strchr(alphabet,c);return found?glyphs[found-alphabet]:nullptr;
 }
+inline unsigned hudBackdrop(unsigned color,float percent){
+    return (color&0x00ffffffu)|((unsigned)std::lround(std::clamp(percent,0.f,100.f)*2.55f)<<24);
+}
 inline void modernHud(std::vector<unsigned>& out) {
     if(!worldPending||menuactive||automapactive||Arcade_MenuOpen())return;
     std::vector<unsigned> hud(SCREENWIDTH*SCREENHEIGHT,0);
@@ -32,13 +35,13 @@ inline void modernHud(std::vector<unsigned>& out) {
             if(at+1<img.pixels.size()&&img.pixels[at+1]){const byte* rgb=palette+img.pixels[at]*3;rect(x+xx,y+yy,1,1,(unsigned(img.pixels[at+1])<<24)|(unsigned(gammatable[usegamma][rgb[0]])<<16)|(unsigned(gammatable[usegamma][rgb[1]])<<8)|gammatable[usegamma][rgb[2]]);}}
     };
     const bool tactical=settings.hudStyle==2;
-    const unsigned white=0xffedf3f3,muted=0xff9aafb7,red=p.health<=25?0xffff5d4c:0xffeead72,blue=0xff6ed6dc,back=0xc0142028;
+    const unsigned white=0xffedf3f3,muted=0xff9aafb7,red=p.health<=25?0xffff5d4c:0xffeead72,blue=0xff6ed6dc,back=hudBackdrop(0x142028,settings.hudBackgroundOpacity);
     int hx=12,ax=tactical?76:88;
     if(settings.hudFace==1){hx=52;ax=tactical?100:98;}
     rect(hx-4,164,tactical?42:40,31,back);rect(ax-4,164,40,31,back);rect(252,164,60,31,back);
     text("HEALTH",hx,167,1,muted);text(std::to_string(std::max(0,p.health)),hx,176,2,red);
     text("ARMOR",ax,167,1,muted);text(std::to_string(std::max(0,p.armorpoints)),ax,176,2,blue);
-    auto bar=[&](int x,int value,unsigned color){rect(x,190,32,2,0xff344650);rect(x,190,std::clamp(value,0,100)*32/100,2,color);if(value>100)rect(x,193,std::min(value-100,100)*32/100,1,color);};
+    auto bar=[&](int x,int value,unsigned color){rect(x,190,32,2,hudBackdrop(0x344650,settings.hudBackgroundOpacity));rect(x,190,std::clamp(value,0,100)*32/100,2,color);if(value>100)rect(x,193,std::min(value-100,100)*32/100,1,color);};
     bar(hx,p.health,red);bar(ax,p.armorpoints,blue);
     int ammo=weaponinfo[p.readyweapon].ammo;
     text("AMMO",256,167,1,muted);
@@ -124,7 +127,7 @@ inline void modernHud(std::vector<unsigned>& out) {
     // Rasterize lettering after layout, at whole pixel sizes. Scaling the
     // panels must never erase strokes from numbers or small labels.
     for(int yy=1;yy<25;++yy)for(int xx=222;xx<315;++xx){
-        out[yy*SCREENWIDTH+xx]=0xb010141a;
+        out[yy*SCREENWIDTH+xx]=hudBackdrop(0x10141a,settings.hudBackgroundOpacity);
     }
     for(const auto& label:labels){
         int group=label.x<136?0:label.x<202?1:2;
@@ -156,7 +159,8 @@ inline void modernHud(std::vector<unsigned>& out) {
 }
 inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false){
     if((!settings.speedrunHUD&&!settings.combatMessages)||!worldPending||menuactive||automapactive||Arcade_MenuOpen()||!P_WeakpointActive())return;
-    auto box=[&](int x,int y,int w,int h){for(int yy=std::max(0,y);yy<std::min(SCREENHEIGHT,y+h);++yy)for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)out[yy*SCREENWIDTH+xx]=0xd0141010u;};
+    const unsigned background=fixed?0xd0141010u:hudBackdrop(0x141010,settings.speedrunBackgroundOpacity);
+    auto box=[&](int x,int y,int w,int h){if(!(background>>24))return;for(int yy=std::max(0,y);yy<std::min(SCREENHEIGHT,y+h);++yy)for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)out[yy*SCREENWIDTH+xx]=background;};
     auto text=[&](const char *value,int x,int y,unsigned color){for(int n=0;value[n]&&n<76;++n,x+=4)if(const char *bits=hudGlyph(value[n]))for(int row=0;row<5;++row)for(int col=0;col<3;++col)if(bits[row*3+col]=='1'&&x+col>=0&&x+col<SCREENWIDTH&&y+row>=0&&y+row<SCREENHEIGHT)out[(y+row)*SCREENWIDTH+x+col]=color;};
     if(settings.speedrunHUD&&!fixed){
         static combat_stats_t previous{};static bool valid=false;static char lines[8][48]{};

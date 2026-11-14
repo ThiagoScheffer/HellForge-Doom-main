@@ -64,7 +64,7 @@ struct Settings {
     int nearMissSounds=1;
     int fullscreen=0;
     int hudStyle=0,hudFace=1,hudLayout=0;
-    float hudScale=100;
+    float hudScale=100,hudBackgroundOpacity=75,speedrunBackgroundOpacity=80;
     int accelerated=1, widescreen=1, crosshair=1, look=1, retro=0, fps=1, scale=100;
     int invertLook=0; // Mouse look: moving the mouse forward tilts the view down.
     int classicAim=0; // With mouse look: bullets autoaim at a monster in front as in DOOM, following the view only with none.

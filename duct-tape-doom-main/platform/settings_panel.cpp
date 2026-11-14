@@ -101,6 +101,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"View",{
                 choice("hud_style","HUD style",&s.hudStyle,{"Classic","Modern compact","Modern tactical"},{0,1,2},"Modern layouts show health, armor, ammo and keys over the full view.",[](const Settings &d){return d.accelerated!=0;}),
                 choice("hud_face","Modern HUD face",&s.hudFace,{"Hidden","Left","Center"},{0,1,2},"Doomguy's face keeps its live damage, firing and pickup expressions.",[](const Settings &d){return d.accelerated&&d.hudStyle!=0;}),
+                slider("hud_background_opacity","HUD background opacity",&s.hudBackgroundOpacity,0,100,5,
+                    "Opacity of modern HUD panel and corner-stat backgrounds. 0% removes the dark boxes while keeping text and indicators visible.",[](const Settings &d){return d.accelerated!=0;}),
                 slider("hud_scale","Modern HUD size",&s.hudScale,50,100,5,"Scale the modern HUD from 50 to 100 percent.",[](const Settings &d){return d.accelerated&&d.hudStyle!=0;}),
                 choice("hud_layout","Modern HUD layout",&s.hudLayout,{"Bottom corners","Bottom centered","Top corners"},{0,1,2},"Choose where the health, armor, ammo and face panels sit.",[](const Settings &d){return d.accelerated&&d.hudStyle!=0;}),
                 check("look","Mouse look",&s.look,"Mouse look tilts the camera; combat keeps DOOM's automatic aiming."),
@@ -590,6 +592,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
         key("peek_left","Peek left",&s.peekLeft),key("peek_right","Peek right",&s.peekRight)}}}});
     tabs.push_back({"SPEEDRUN",{{"Session overlay",{
         check("speedrun_hud","Enable Speedrun HUD",&s.speedrunHUD,"Optional session statistics. Counters continue while hidden; saves do not roll back session history.",[](const Settings &d){return d.accelerated!=0;}),
+        slider("speedrun_background_opacity","Background opacity",&s.speedrunBackgroundOpacity,0,100,5,
+            "Speedrun panel background only. 0% shows the text without a dark box; 100% is fully opaque.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         choice("speedrun_anchor","Overlay position",&s.speedrunAnchor,{"Upper left","Upper right","Lower left","Lower right"},{0,1,2,3},"Safe side anchors avoid the crosshair and bottom status bar.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         check("speedrun_attempts","Map Attempts",&s.speedrunAttempts,"Each playable map load/restart/checkpoint begins one attempt.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_deaths","Map Deaths",&s.speedrunDeaths,"Actual player deaths this map visit.",[](const Settings &d){return d.speedrunHUD!=0;}),

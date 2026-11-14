@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE
 
-**Current build: 2026.11.15.1** | [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Current build: 2026.11.15.2** | [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
