@@ -1,6 +1,7 @@
 /build/
 /dist/
 /Screenshots/
+/test-references/
 *.dsg
 *.log
 __pycache__/
