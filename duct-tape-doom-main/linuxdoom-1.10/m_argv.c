@@ -39,7 +39,18 @@ char**		myargv;
 // in the program's command line arguments.
 // Returns the argument number (1 to argc-1)
 // or 0 if not present
-int M_CheckParm (char *check)
+#ifdef DOOM_MONSTER_PROFILE_ARGUMENTS
+#include "../platform/monster_profile.h"
+int M_CheckParm_mp_body(char *check);
+int M_CheckParm(char *check){
+    if(!mp_enabled)return M_CheckParm_mp_body(check);
+    MP_Scope scope=MP_Begin(MP_ARGUMENTS);int result=M_CheckParm_mp_body(check);MP_End(scope);return result;
+}
+#define MP_ARGUMENT_BODY M_CheckParm_mp_body
+#else
+#define MP_ARGUMENT_BODY M_CheckParm
+#endif
+int MP_ARGUMENT_BODY (char *check)
 {
     int		i;
 

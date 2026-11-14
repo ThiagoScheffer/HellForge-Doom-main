@@ -2,9 +2,10 @@
 
 ```yaml
 project: DOOM: HELLFORGE
-build: 2026.11.12.1
-updated_utc: 2026-11-11T17:52:02Z
+build: 2026.11.14.1
+updated_utc: 2026-11-13T19:16:57Z
 status: active
+evidence_build: 2026.11.12.1
 tests: ../../build
 index: ../README.md
 ```

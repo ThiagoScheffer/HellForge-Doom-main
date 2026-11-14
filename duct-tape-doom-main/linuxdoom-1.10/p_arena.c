@@ -25,6 +25,22 @@ static struct ArenaState {
 /* Runtime-only movement history: rebuilt after map changes and save loads. */
 static struct {mobj_t *actor;fixed_t x,y;int since,lastFail,checked;} recovery[1024];
 static unsigned serial=~0u;
+#ifdef DOOM_MONSTER_BENCHMARK
+#include "../platform/monster_bench_state.h"
+void MP_StateRecovery(MP_StateHash *h){
+ MP_StateField(h,serial==r_levelserial);if(serial!=r_levelserial)return;
+ const int values[]={arena.active,arena.queued,arena.count,arena.cursor,arena.spawned,arena.wanted,arena.attempts,arena.next,arena.budget,arena.live,arena.x,arena.y,arena.radius,arena.wave,arena.waveEnd,arena.elapsed};
+ for(size_t n=0;n<sizeof(values)/sizeof(values[0]);++n)MP_StateField(h,(uint64_t)(int64_t)values[n]);
+ MP_StateField(h,arena.random);
+ for(int n=0;n<NUMMOBJTYPES;++n){MP_StateField(h,arena.types[n]);MP_StateField(h,arena.spawnedTypes[n]);}
+ for(int n=0;n<arena.count&&n<ROUTE;++n){MP_StateField(h,arena.route[n].x);MP_StateField(h,arena.route[n].y);MP_StateField(h,arena.route[n].z);}
+ for(size_t n=0;n<h->count;++n){
+  mobj_t *actor=(mobj_t*)h->actor_at(h->context,n);int i=((uintptr_t)actor>>4)%1024;
+  MP_StateField(h,recovery[i].actor==actor);if(recovery[i].actor!=actor)continue;
+  MP_StateField(h,recovery[i].x);MP_StateField(h,recovery[i].y);MP_StateField(h,recovery[i].since);MP_StateField(h,recovery[i].lastFail);MP_StateField(h,recovery[i].checked);
+ }
+}
+#endif
 static unsigned roll(void){arena.random=arena.random*1664525u+1013904223u;return arena.random;}
 static int supported(int type){switch(type){
  case MT_POSSESSED:case MT_SHOTGUY:case MT_CHAINGUY:case MT_TROOP:case MT_SERGEANT:

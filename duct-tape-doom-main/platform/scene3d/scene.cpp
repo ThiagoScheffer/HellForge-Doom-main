@@ -22,6 +22,9 @@ extern "C" int Menu_BrandOpen(void);
 extern "C" { int Arcade_PodiumRect(float*); extern int arcade_podium_hires; extern unsigned arcade_rank_pixels[SCREENWIDTH*SCREENHEIGHT]; }
 #include "../mod_soundbank.h"
 extern "C" int p_fluidfastpistol,p_boostchaingun;
+#ifdef DOOM_MONSTER_BENCHMARK
+extern "C" int mp_bench_fixed_render;
+#endif
 extern "C" int g_death_load_last_save;
 extern "C" int sv_chain_collapses,sv_hanging_fragments,sv_collapse_size;
 extern "C" int p_player_surface_damage,p_monster_surface_damage,p_breakablewalls,p_throughwalls,p_breachdoors,p_wall_damage,p_deeperdig;
@@ -37,6 +40,7 @@ extern int st_helmet_style;
 int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 #include "../audio/sound_options.h"
 #include "../../linuxdoom-1.10/p_local.h"
+#include "../../linuxdoom-1.10/p_swarm.h"
 }
 #include "../settings_panel.h"
 namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
@@ -178,6 +182,8 @@ void applySettings() {
     R_WeaponAux=settings.accelerated&&P_FluidWeaponsEnabled()?fluidWeaponAux:nullptr;
     p_destructibledoors=settings.breakableWalls&&settings.doorBlowout;
     p_keyarena=settings.keyArena;p_arenaradius=settings.arenaRadius;p_monsterrecovery=settings.monsterRecovery;
+      P_SwarmConfigure(settings.monsterHibernation,settings.swarmDebug);
+    P_SetAmbushSightReuse(settings.ambushSightReuse);
     R_ArenaAnnouncement=[](int safe){I_StartNamedSound(safe?"DuctTape/ArenaSafe":"DuctTape/ArenaUnsafe",snd_SfxVolume,128,128,100);};
     p_keydoorshield=settings.breakableWalls&&settings.keyDoorShield;p_switchdoorshield=settings.breakableWalls&&settings.switchDoorShield;
     R_DoorRocketImpact=settings.accelerated?rocketDoorImpact:nullptr;
@@ -231,6 +237,8 @@ void sceneInit(SDL_Window *window) {
     int config=M_CheckParm((char*)"-graphics");
     if(config&&config+1<myargc)graphicsConfig=myargv[config+1];
     loadSettings();if(M_CheckParm((char*)"-classic"))settings.accelerated=0;
+    if(M_CheckParm((char*)"-ambushsightreuse"))settings.ambushSightReuse=1;
+    P_SetAmbushSightReuse(settings.ambushSightReuse);
     if(M_CheckParm((char*)"-rendercheck"))settings.accelerated=1;
     int fov=M_CheckParm((char*)"-fov");if(fov&&fov+1<myargc)settings.fov=std::clamp((float)atof(myargv[fov+1]),60.0f,120.0f);
     flashlightOn=M_CheckParm((char*)"-flashlight")!=0&&Game_HasEffect(GAME_EFFECT_FLASHLIGHT);
@@ -243,6 +251,7 @@ void sceneInit(SDL_Window *window) {
     if(paletteOption&&paletteOption+1<myargc)settings.palette=atoi(myargv[paletteOption+1])!=0;
 }
 static void clearLevelGeometry() {
+    spriteFilteringShutdown();
     vertexSections.clear();batches.clear();shadowBatches.clear();mirrorBatches.clear();
     decalBatches.clear();effectBatches.clear();effectAddBatches.clear();particleVertices.clear();
     mistVertices.clear();skyVertices.clear();shaftVertices.clear();heatVertices.clear();
@@ -513,6 +522,9 @@ FrameView prepareFrame(int w,int h) {
         }
         camera.eye[0]=units(mo->x);camera.eye[1]=units(mo->y);camera.eye[2]=units(player->viewz);
         float yaw=(float)(mo->angle*(2.0*doomPi/4294967296.0));
+#ifdef DOOM_MONSTER_BENCHMARK
+        if(!mp_bench_fixed_render)
+#endif
         if(tickTime&&!paused&&!menuactive&&!r_photoactive&&(!demoplayback||director_demo)) {
             fraction=worldInterpolation(SDL_GetTicksNS());
             if(std::hypot(camera.eye[0]-oldEye[0],camera.eye[1]-oldEye[1])<128) {
@@ -1003,6 +1015,22 @@ extern "C" void I_TestCombatPresentation(void) {
     settings=saved;leveltime=oldtime;bodyMotionShutdown();
     printf("Combat presentation: real monster damage, flinches, varied deaths and procedural geometry passed.\n");
 }
+
+#ifdef DOOM_MONSTER_BENCHMARK
+// Native validation fixture only: real artwork, wounds and body-motion records.
+extern "C" void I_TestSpriteFilterScene(int frame){
+    using namespace doom3d;static mobj_t *actors[3]={};mobj_t *p=players[0].mo;if(!p)return;
+    float yaw=(float)(p->angle*(2*doomPi/4294967296.0)),dx=std::cos(yaw),dy=std::sin(yaw);
+    if(frame==0)for(int i=0;i<3;++i){float side=(i-1)*64.f;
+        float distance=i<2?-350.f:160.f;
+        actors[i]=P_SpawnMobj(p->x+(fixed_t)((dx*distance-dy*side)*FRACUNIT),p->y+(fixed_t)((dy*distance+dx*side)*FRACUNIT),ONFLOORZ,MT_TROOP);
+        actors[i]->angle=p->angle+ANG180;actors[i]->tics=-1;
+    }
+    if(frame==4)woundHit(actors[0],actors[0]->x-(fixed_t)(dx*64*FRACUNIT),actors[0]->y-(fixed_t)(dy*64*FRACUNIT),actors[0]->z+40*FRACUNIT,(fixed_t)(dx*FRACUNIT),(fixed_t)(dy*FRACUNIT),0,5,nullptr);
+    if(frame==8)P_DamageMobj(actors[2],p,p,actors[2]->health+1);
+    if(frame==12){bodyHit(actors[1],actors[1]->x,actors[1]->y,actors[1]->z+28*FRACUNIT,(fixed_t)(dx*FRACUNIT),(fixed_t)(dy*FRACUNIT),5);P_DamageMobj(actors[1],p,p,5);}
+}
+#endif
 
 extern "C" void I_TestEffectsPreview(int t){
     using namespace doom3d;static mobj_t *actors[3]={};

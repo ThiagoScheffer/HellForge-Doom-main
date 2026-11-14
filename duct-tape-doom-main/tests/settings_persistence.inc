@@ -7,7 +7,32 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-write"||settingsCase=="--settings-write-f4"||settingsCase=="--settings-write-button") {
+    if(settingsCase=="--settings-ambush-ui-write"||settingsCase=="--settings-ambush-ui-disable"){
+        bool enable=settingsCase=="--settings-ambush-ui-write";
+        check(settings.ambushSightReuse!=enable,"isolated ambush profile starts in the expected state");
+        check(I_TestSettingsPersistence(5),"Performance checkbox toggles through actual F4 apply handler");
+        check(P_AmbushSightReuseActive()==enable,"F4 applies ambush sight choice to the running simulation");
+        check(fileContents(graphicsConfig).find(std::string("ambush_sight_reuse ")+(enable?"1":"0"))!=std::string::npos,"F4 persists the ambush sight choice");
+    }else if(settingsCase=="--settings-ambush-ui-read"||settingsCase=="--settings-ambush-ui-off"){
+        bool expected=settingsCase=="--settings-ambush-ui-read";
+        check(settings.ambushSightReuse==expected&&P_AmbushSightReuseActive()==expected,"ambush menu and simulation choice restore in a separate process");
+    }else if(settingsCase=="--settings-ambush-ui-discard"){
+        auto before=fileContents(graphicsConfig);int value=settings.ambushSightReuse;
+        check(I_TestSettingsPersistence(6),"F10 discards the Performance checkbox draft");
+        check(settings.ambushSightReuse==value&&P_AmbushSightReuseActive()==(value!=0)&&fileContents(graphicsConfig)==before,"discard preserves live behavior and the saved profile");
+    }else if(settingsCase=="--settings-swarm-write"){
+          settings.monsterHibernation=1;settings.swarmDebug=1;settings.spriteFiltering=1;settings.ambushSightReuse=1;applySettings();
+        check(P_AmbushSightReuseActive(),"ambush sight switch applies immediately");
+        check(I_TestSaveSettings(graphicsConfig)!=0,"swarm controls use the normal persistent settings writer");
+    }else if(settingsCase=="--settings-swarm-read"){
+          check(settings.monsterHibernation==1&&settings.swarmDebug==1&&settings.spriteFiltering==1&&settings.ambushSightReuse==1,"performance switches reload in a separate process");
+          check(P_AmbushSightReuseActive(),"restored ambush switch reaches simulation");
+          settings.ambushSightReuse=0;applySettings();check(!P_AmbushSightReuseActive(),"ambush sight switch disables immediately");
+          settings.ambushSightReuse=1;applySettings();check(P_AmbushSightReuseActive(),"ambush sight switch re-enables immediately");
+    }else if(settingsCase=="--settings-swarm-default"){
+          check(!settings.monsterHibernation&&!settings.swarmDebug&&!settings.spriteFiltering&&!settings.ambushSightReuse,"performance controls default off");
+          check(!P_AmbushSightReuseActive(),"ambush sight runtime defaults off");
+    }else if(settingsCase=="--settings-write"||settingsCase=="--settings-write-f4"||settingsCase=="--settings-write-button") {
         p_wp_balance.bleedDamage3=7;
         int mode=settingsCase=="--settings-write-button"?2:settingsCase=="--settings-write-f4"?1:0;
         check(I_TestSettingsPersistence(mode)!=0,"F4 control events and Apply/close save the current choices");

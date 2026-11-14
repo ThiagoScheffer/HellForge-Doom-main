@@ -1,3 +1,5 @@
+#include "monster_profile.h"
+#include "monster_wake_audit.h"
 #include "../../scene.h"
 #include "../../map_source.h"
 #include "../../map_world.h"
@@ -189,19 +191,23 @@ static int solidPositionUncached(mobj_t *m,fixed_t x,fixed_t y,fixed_t *floor,fi
  return 1;
 }
 int SV_Position(mobj_t *m,fixed_t x,fixed_t y,fixed_t *floor,fixed_t *ceiling){
+ MP_AUTO(MP_SUPPORT);
  if(!SV_Active())return -1;
  if(!SV_MapMode())return solidPositionUncached(m,x,y,floor,ceiling);
  struct Support {std::array<fixed_t,6> query{};uint64_t revision=~uint64_t(0);int result=-1;fixed_t floor=0,ceiling=0;};
  static std::map<mobj_t*,Support> supports;
  static unsigned level=~0u;
- if(level!=r_levelserial||supports.size()>4096){supports.clear();level=r_levelserial;}
+ if(level!=r_levelserial||supports.size()>4096){MP_COUNT(MP_CACHE_CLEAR,1);supports.clear();level=r_levelserial;}
  auto& support=supports[m];
+ MP_MAX(MP_CACHE_PEAK,supports.size());
  std::array<fixed_t,6> query{x,y,m->z,m->height,m->radius,m->flags&MF_MISSILE};
  auto stamp=mapWorld.supportStamp({unit(x),unit(y),unit(m->z)},unit(m->radius));
  if(support.query==query&&support.revision==stamp){
+  MP_COUNT(MP_CACHE_HIT,1);
   if(support.result==1){*floor=support.floor;*ceiling=support.ceiling;}
   return support.result;
  }
+ MP_COUNT(MP_CACHE_MISS,1);MP_COUNT(MP_CACHE_INVALIDATE,support.revision!=~uint64_t(0)&&support.revision!=stamp);
  int result=solidPositionUncached(m,x,y,floor,ceiling);
  support.query=query;support.revision=mapWorld.supportStamp({unit(x),unit(y),unit(m->z)},unit(m->radius));support.result=result;
  if(result==1){support.floor=*floor;support.ceiling=*ceiling;}
@@ -444,6 +450,10 @@ void SV_Blast(mobj_t *m,int radius){
  }
 }
 int SV_Sight(mobj_t *a,mobj_t *b){
+#ifdef DOOM_MONSTER_BENCHMARK
+ WA_SolidScope wakeScope;
+#endif
+ MP_AUTO(MP_SOLIDSIGHT);
  if(!SV_Active())return -1;
  for(float factor:{.25f,.5f,.75f})
   if(SV_Trace(unit(a->x),unit(a->y),unit(a->z)+unit(a->height)*.75f,

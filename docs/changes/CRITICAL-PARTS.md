@@ -1,3 +1,13 @@
+---
+project: DOOM: HELLFORGE
+build: 2026.11.14.1
+updated_utc: 2026-11-13T19:26:29Z
+status: active
+tests: MAIN-INTEGRATION-2026-11-14.md
+index: ../README.md
+evidence_scope: existing-feature-evidence-and-focused-integration-checks
+---
+
 # Sprite critical parts
 
 Enable **F4 > Combat > Critical parts** for sprite-based human headshots. The option defaults off and is saved as `critical_parts` in graphics settings.

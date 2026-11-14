@@ -1,3 +1,6 @@
+#include "../platform/monster_profile.h"
+#include "../platform/monster_wake_audit.h"
+#include "p_swarm.h"
 #include "i_lan.h"
 #include "p_arena.h"
 // Emacs style mode select   -*- C++ -*- 
@@ -331,8 +334,9 @@ void P_XYMovement (mobj_t* mo)
     }
     else
     {
-        // Only living grounded players receive the tighter movement tuning.
-        if (player && player->playerstate == PST_LIVE
+          // Voodoo dolls share player_t but drive Boom conveyor scripts. Keep
+          // their vanilla inertia; responsive braking belongs to the live body.
+          if (player && player->mo == mo && player->playerstate == PST_LIVE
             && !(mo->flags & MF_CORPSE) && P_UseResponsiveMovement ())
             friction = (player->cmd.forwardmove || player->cmd.sidemove)
                 ? 0xc000 : 0xa000;
@@ -519,7 +523,11 @@ P_NightmareRespawn (mobj_t* mobj)
 //
 // P_MobjThinker
 //
-void P_MobjThinker (mobj_t* mobj)
+#ifdef DOOM_MONSTER_PROFILING
+void P_MobjThinker_mp_body(mobj_t* mobj);
+void P_MobjThinker(mobj_t* mobj) { if(!mp_enabled){P_MobjThinker_mp_body(mobj);return;}MP_Scope scope={0};if(mp_enabled){scope=MP_Begin(MP_MOBJ);scope.actorType=mobj->type;}P_MobjThinker_mp_body(mobj);if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(P_MobjThinker) (mobj_t* mobj)
 {
     P_WeakpointTick(mobj);
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
@@ -643,6 +651,8 @@ P_SpawnMobj
     mobj->thinker.function.acp1 = (actionf_p1)P_MobjThinker;
 	
     P_AddThinker (&mobj->thinker);
+    P_SwarmSpawned(mobj);
+    WA_Spawn(mobj);
 
     return mobj;
 }
@@ -659,6 +669,11 @@ int		iquetail;
 
 void P_RemoveMobj (mobj_t* mobj)
 {
+    WA_Remove(mobj);
+    P_SwarmForget(mobj);
+#ifdef DOOM_MONSTER_PROFILING
+    if(mp_enabled)MP_ForgetActor(mobj);
+#endif
     P_WeakpointForget(mobj);
     P_ArenaForgetMonster(mobj);
     Arcade_RemoveProjectile(mobj);

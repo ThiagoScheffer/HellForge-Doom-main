@@ -786,6 +786,9 @@ void G_Ticker (void)
 	D_PageTicker ();
 	break;
     }
+#ifdef DOOM_MONSTER_BENCHMARK
+    {extern int mp_bench_demo_trace;extern void MP_BenchmarkObserve(void);if(mp_bench_demo_trace)MP_BenchmarkObserve();}
+#endif
 }
 
 

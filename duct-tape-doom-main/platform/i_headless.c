@@ -26,6 +26,9 @@ void I_StartFrame(void)
 {
     if (gamestate == GS_LEVEL && players[0].mo)
     {
+#ifdef DOOM_MONSTER_BENCHMARK
+        if(M_CheckParm("-monsterbench")){extern void MP_BenchmarkRun(void);MP_BenchmarkRun();}
+#endif
         if (M_CheckParm("-checkbigmap"))
         {
             if (M_CheckParm("-checkboom"))

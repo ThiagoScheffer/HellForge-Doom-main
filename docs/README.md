@@ -1,6 +1,13 @@
 # DOOM: HELLFORGE documentation
 
+Current integration: **2026.11.14.1**. See the
+[main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
+features, defaults, build identity and focused verification.
+
 This index separates current fork behavior from historical release evidence.
+The experimental reports below retain their original timestamps, claims and
+coverage limits. Their source is now included in the main integration; old
+statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
 
@@ -16,6 +23,26 @@ This index separates current fork behavior from historical release evidence.
 - [Critical-parts implementation](changes/CRITICAL-PARTS.md)
 
 ## Build and verification reports
+
+- [Ambush sight reuse: persisted F4 Performance switch](changes/AMBUSH-SIGHT-F4.md)
+
+- [Ambush sight reuse: actual wake transitions and MAP02 equivalence](changes/AMBUSH-SIGHT-REUSE.md)
+
+- [SF2012 MAP02: one-shot wake behavior and measured CPU costs](changes/SF2012-MAP02-SOUND-WAKE-AUDIT.md)
+
+- [SF2012 sight crash and restored experimental wall destruction](changes/SF2012-SIGHT-AND-DESTRUCTION-FIX.md)
+
+- [Phase 3A sprite frustum filtering: implementation and measured results](changes/SPRITE-FRUSTUM-FILTERING.md)
+
+- [Abandon MAP01 platform switches: conveyor footprint fix](changes/ABANDON-PLATFORM-FIX.md)
+
+- [oku2v31 extreme stress: measured rendering bottlenecks and streaming limits](changes/OKU-EXTREME-STRESS.md)
+
+- [MAP01 switch/conveyor monster-release fix](changes/SWARM-ACTIVATION-FIX.md)
+
+- [Experimental swarm optimization: idle-search reuse and targeted results](changes/SWARM-OPTIMIZATION-STEP1.md)
+
+- [Phase 2 isolated monster profiling revision](changes/MONSTER-PROFILING-PHASE2.md)
 
 Reports retain the build number and test conditions used when they were written.
 New active documents begin with a metadata block containing the HELLFORGE build,

@@ -158,6 +158,13 @@ void I_StartTic(void)
         if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
             I_Quit();
 #ifdef DOOM_TEST_DRIVER
+        /* Only this tagged benchmark event bypasses desktop-input isolation.
+         * Translate on the main thread; timer threads never touch Doom's ring. */
+#ifdef DOOM_MONSTER_BENCHMARK
+        if(event.type==SDL_EVENT_USER&&event.user.code==0x48464d50){
+            post(ev_keydown,KEY_ESCAPE,0,0);post(ev_keyup,KEY_ESCAPE,0,0);continue;
+        }
+#endif
         /* Keyboard, mouse and focus events must not overwrite D_PostEvent
          * fixtures or move/fire while the user works in another window. */
         continue;

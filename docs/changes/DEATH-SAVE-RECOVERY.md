@@ -1,3 +1,13 @@
+---
+project: DOOM: HELLFORGE
+build: 2026.11.14.1
+updated_utc: 2026-11-13T19:26:29Z
+status: active
+tests: MAIN-INTEGRATION-2026-11-14.md
+index: ../README.md
+evidence_scope: existing-feature-evidence-and-focused-integration-checks
+---
+
 # Load last save after death
 
 Updated: 12 November 2026.

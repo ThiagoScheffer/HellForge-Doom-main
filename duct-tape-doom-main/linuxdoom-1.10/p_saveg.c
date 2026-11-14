@@ -1,3 +1,4 @@
+#include "p_swarm.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -194,6 +195,7 @@ void P_ArchiveWorld (void)
 //
 void P_UnArchiveWorld (void)
 {
+    P_SwarmWorldChanged();
     int			i;
     int			j;
     sector_t*		sec;

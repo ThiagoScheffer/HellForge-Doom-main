@@ -18,6 +18,8 @@
 #include "r_main.h"
 #include "r_sky.h"
 #include <math.h>
+#include <limits.h>
+#include "m_bbox.h"
 extern void P_CalcHeight(player_t *player);
 
 int p_boom_compat;
@@ -303,9 +305,64 @@ int P_BoomActivate(line_t *l,mobj_t *actor,int side,int trigger){
 
 /* Scrollers are map-derived records. Only their changing displacement and
  * velocity are saved; sector/index provenance is reconstructed from the map. */
-typedef struct {int type,index,control,accel;fixed_t dx,dy,last,vx,vy;} boom_scroll_t;
+typedef struct {int type,index,control,accel;fixed_t dx,dy,last,vx,vy;int neighborStart,neighborCount;} boom_scroll_t;
 static boom_scroll_t *scrolls;
 static int scrollCount,scrollCapacity;
+static int *carryNeighbors,carryNeighborCount,carryNeighborCapacity;
+static fixed_t (*sectorBounds)[4];
+static void carryNeighbor(int sector){
+    if(carryNeighborCount==carryNeighborCapacity){
+        if(carryNeighborCapacity>INT_MAX/2)I_Error("Boom: too many conveyor contacts");
+        carryNeighborCapacity=carryNeighborCapacity?carryNeighborCapacity*2:128;
+        void *next=realloc(carryNeighbors,(size_t)carryNeighborCapacity*sizeof(*carryNeighbors));
+        if(!next)I_Error("Boom: cannot allocate conveyor contacts");carryNeighbors=next;
+    }
+    carryNeighbors[carryNeighborCount++]=sector;
+}
+static void buildCarryNeighbors(void){
+    int carries=0;for(int i=0;i<scrollCount;++i)if(scrolls[i].type==3){carries=1;break;}
+    if(!carries)return;
+    fixed_t radius=0;
+    for(int i=0;i<NUMMOBJTYPES;++i)if(mobjinfo[i].radius>radius)radius=mobjinfo[i].radius;
+    sectorBounds=calloc((size_t)numsectors,sizeof(*sectorBounds));
+    if(numsectors&&!sectorBounds)I_Error("Boom: cannot allocate conveyor bounds");
+    for(int i=0;i<numsectors;++i){
+        M_ClearBox(sectorBounds[i]);
+        for(int j=0;j<sectors[i].linecount;++j){line_t *l=sectors[i].lines[j];
+            M_AddToBox(sectorBounds[i],l->v1->x,l->v1->y);M_AddToBox(sectorBounds[i],l->v2->x,l->v2->y);
+        }
+    }
+    for(int i=0;i<scrollCount;++i)if(scrolls[i].type==3){
+        boom_scroll_t *s=&scrolls[i];fixed_t *b=sectorBounds[s->index];s->neighborStart=carryNeighborCount;
+        for(int j=0;j<numsectors;++j){fixed_t *other=sectorBounds[j];
+            if(j==s->index||!sectors[j].linecount)continue;
+            if((int64_t)other[BOXLEFT]>(int64_t)b[BOXRIGHT]+radius||(int64_t)other[BOXRIGHT]<(int64_t)b[BOXLEFT]-radius||
+               (int64_t)other[BOXBOTTOM]>(int64_t)b[BOXTOP]+radius||(int64_t)other[BOXTOP]<(int64_t)b[BOXBOTTOM]-radius)continue;
+            carryNeighbor(j);
+        }
+        s->neighborCount=carryNeighborCount-s->neighborStart;
+    }
+}
+static fixed_t contactBound(int64_t v){return v<INT_MIN?INT_MIN:v>INT_MAX?INT_MAX:(fixed_t)v;}
+static int touchesCarrySector(const mobj_t *mo,const sector_t *sector){
+    if(mo->subsector->sector==sector)return 1;
+    fixed_t box[4]={contactBound((int64_t)mo->y+mo->radius),contactBound((int64_t)mo->y-mo->radius),
+                   contactBound((int64_t)mo->x-mo->radius),contactBound((int64_t)mo->x+mo->radius)};
+    const fixed_t *bounds=sectorBounds[sector-sectors];
+    if(box[BOXRIGHT]<=bounds[BOXLEFT]||box[BOXLEFT]>=bounds[BOXRIGHT]||box[BOXTOP]<=bounds[BOXBOTTOM]||box[BOXBOTTOM]>=bounds[BOXTOP])return 0;
+    for(int i=0;i<sector->linecount;++i){line_t *line=sector->lines[i];
+        if(box[BOXRIGHT]<=line->bbox[BOXLEFT]||box[BOXLEFT]>=line->bbox[BOXRIGHT]||
+           box[BOXTOP]<=line->bbox[BOXBOTTOM]||box[BOXBOTTOM]>=line->bbox[BOXTOP])continue;
+        if(P_BoxOnLineSide(box,line)==-1)return 1;
+    }
+    return 0;
+}
+static void carryThing(mobj_t *mo,sector_t *sector,fixed_t dx,fixed_t dy){
+    int submerged=sector->heightsec>=0&&mo->z<sectors[sector->heightsec].floorheight;
+    if((mo->flags&MF_NOCLIP)||(!submerged&&((mo->flags&MF_NOGRAVITY)||mo->z>sector->floorheight)))return;
+    if(!touchesCarrySector(mo,sector))return;
+    mo->momx=(fixed_t)((uint32_t)mo->momx+dx);mo->momy=(fixed_t)((uint32_t)mo->momy+dy);
+}
 static fixed_t sumHeights(int sector){return (fixed_t)((uint32_t)sectors[sector].floorheight+(uint32_t)sectors[sector].ceilingheight);}
 static void addScroll(int type,int index,fixed_t dx,fixed_t dy,int control,int accel){
     if(scrollCount==scrollCapacity){
@@ -323,6 +380,8 @@ static int passiveSpecial(int value){
         (value>=245&&value<=255)||value==260||value==261||value==268||value==271||value==272||value==142||value==153||value==159;
 }
 void P_BoomSpawn(void){
+    free(carryNeighbors);carryNeighbors=NULL;carryNeighborCount=carryNeighborCapacity=0;
+    free(sectorBounds);sectorBounds=NULL;
     free(scrolls);scrolls=NULL;scrollCount=scrollCapacity=0;p_boom_compat=0;
     for(int i=0;i<numsectors;i++){
         sector_t *s=&sectors[i];s->heightsec=s->floorlightsec=s->ceilinglightsec=-1;s->skyline=0;
@@ -367,6 +426,7 @@ void P_BoomSpawn(void){
             }
         }
     }
+    buildCarryNeighbors();
     if(p_boom_compat)printf("Boom map features: %d scrollers\n",scrollCount);
 }
 void P_BoomTick(void){
@@ -380,11 +440,15 @@ void P_BoomTick(void){
             sector_t *sector=&sectors[s->index];
             if(s->type==1){sector->floor_xoffs=(fixed_t)((uint32_t)sector->floor_xoffs+dx);sector->floor_yoffs=(fixed_t)((uint32_t)sector->floor_yoffs+dy);}
             if(s->type==2){sector->ceiling_xoffs=(fixed_t)((uint32_t)sector->ceiling_xoffs+dx);sector->ceiling_yoffs=(fixed_t)((uint32_t)sector->ceiling_yoffs+dy);}
-            if(s->type==3)for(mobj_t *mo=sector->thinglist;mo;mo=mo->snext){
-                int submerged=sector->heightsec>=0&&mo->z<sectors[sector->heightsec].floorheight;
-                if(!(mo->flags&MF_NOCLIP)&&((!(mo->flags&MF_NOGRAVITY)&&mo->z<=mo->floorz)||submerged)){
-                    mo->momx=(fixed_t)((uint32_t)mo->momx+dx);mo->momy=(fixed_t)((uint32_t)mo->momy+dy);
-                }
+            if(s->type==3&&(dx||dy)){
+                for(mobj_t *mo=sector->thinglist;mo;mo=mo->snext)carryThing(mo,sector,dx,dy);
+                /* Actors keep contact while their footprint overlaps a conveyor,
+                 * even after their centre enters a non-conveyor gate sector.
+                 * Candidate sectors are unique and map-derived; no actor/save
+                 * fields or new collision structure are needed. */
+                for(int n=0;n<s->neighborCount;++n)
+                    for(mobj_t *mo=sectors[carryNeighbors[s->neighborStart+n]].thinglist;mo;mo=mo->snext)
+                        carryThing(mo,sector,dx,dy);
             }
         }
     }

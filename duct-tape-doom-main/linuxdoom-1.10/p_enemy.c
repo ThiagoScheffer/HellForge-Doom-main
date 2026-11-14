@@ -1,3 +1,6 @@
+#include "../platform/monster_profile.h"
+#include "../platform/monster_wake_audit.h"
+#include "m_argv.h"
 #include "p_arena.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
@@ -39,6 +42,7 @@ rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 #include "p_local.h"
 #include "p_digwall.h"
 #include "p_fluid.h"
+#include "p_swarm.h"
 
 #include "s_sound.h"
 
@@ -47,6 +51,34 @@ rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 // State.
 #include "doomstat.h"
 #include "r_state.h"
+
+// A negative sight result lives only on this A_Look stack, across no actions
+// or world updates. Never reuse the initial ambush test's positive result:
+// that test deliberately ignores facing, unlike P_LookForPlayers(false).
+typedef struct {
+    mobj_t *actor,*target;
+    fixed_t ax,ay,az,ah,bx,by,bz,bh;
+    subsector_t *as,*bs;
+} look_sight_t;
+static int ambushSightReuse=-1;
+void P_SetAmbushSightReuse(int enabled) {ambushSightReuse=enabled!=0;}
+boolean P_AmbushSightReuseActive(void) {
+    if(ambushSightReuse<0)ambushSightReuse=M_CheckParm("-ambushsightreuse")!=0;
+    return ambushSightReuse&&!netgame&&!demoplayback&&!demorecording;
+}
+static void P_RememberFalse(look_sight_t *r,mobj_t *a,mobj_t *b) {
+    r->actor=a;r->target=b;r->ax=a->x;r->ay=a->y;r->az=a->z;r->ah=a->height;r->as=a->subsector;
+    r->bx=b->x;r->by=b->y;r->bz=b->z;r->bh=b->height;r->bs=b->subsector;
+}
+static boolean P_AISight(mobj_t *a,mobj_t *b,int site,const look_sight_t *r) {
+    int reused=r&&r->actor==a&&r->target==b&&r->ax==a->x&&r->ay==a->y&&r->az==a->z&&r->ah==a->height&&r->as==a->subsector
+        &&r->bx==b->x&&r->by==b->y&&r->bz==b->z&&r->bh==b->height&&r->bs==b->subsector;
+#ifdef DOOM_MONSTER_BENCHMARK
+    return WA_Sight(a,b,site,reused);
+#else
+    return reused?false:P_CheckSight(a,b);
+#endif
+}
 
 // Data.
 #include "sounds.h"
@@ -193,7 +225,7 @@ boolean P_CheckMeleeRange (mobj_t*	actor)
     if (dist >= MELEERANGE-20*FRACUNIT+pl->info->radius)
 	return false;
 	
-    if (! P_CheckSight (actor, actor->target) )
+    if (! P_AISight (actor, actor->target,WA_MELEE,NULL) )
 	return false;
 							
     return true;		
@@ -211,7 +243,7 @@ boolean P_CheckMissileRange (mobj_t* actor)
     if(P_TacticsAttackBlocked(actor))return false;
     if(P_TacticsCanFire(actor))return true;
     if(P_AggressiveEnabled())return P_AggressiveCanFire(actor);
-    if (! P_CheckSight (actor, actor->target) )
+    if (! P_AISight (actor, actor->target,WA_MISSILE,NULL) )
 	return false;
 	
     if ( actor->flags & MF_JUSTHIT )
@@ -526,10 +558,10 @@ void P_NewChaseDir (mobj_t*	actor)
 // If allaround is false, only look 180 degrees in front.
 // Returns true if a player is targeted.
 //
-boolean
-P_LookForPlayers
+static boolean P_LookForPlayersImpl
 ( mobj_t*	actor,
-  boolean	allaround )
+  boolean	allaround,
+  const look_sight_t *previous )
 {
     int		c;
     int		stop;
@@ -563,7 +595,7 @@ P_LookForPlayers
 	if (P_Unseen (player->mo))
 	    continue;
 
-	if (!P_CheckSight (actor, player->mo))
+	if (!P_AISight (actor, player->mo,WA_PLAYERS,previous))
 	    continue;		// out of sight
 			
 	if (!allaround)
@@ -590,6 +622,18 @@ P_LookForPlayers
 
     return false;
 }
+
+static boolean P_LookForPlayersChecked(mobj_t *actor,boolean allaround,const look_sight_t *previous) {
+#ifdef DOOM_MONSTER_PROFILING
+    MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_PLAYERS);
+#endif
+    boolean result=P_LookForPlayersImpl(actor,allaround,previous);
+#ifdef DOOM_MONSTER_PROFILING
+    if(scope.active){if(result)MP_Count(MP_ACQUIRED,1);MP_End(scope);}
+#endif
+    return result;
+}
+boolean P_LookForPlayers(mobj_t *actor,boolean allaround) {return P_LookForPlayersChecked(actor,allaround,NULL);}
 
 
 //
@@ -635,9 +679,24 @@ void A_KeenDie (mobj_t* mo)
 // A_Look
 // Stay in state until a player is sighted.
 //
-void A_Look (mobj_t* actor)
+static void P_LookAction(mobj_t* actor);
+void A_Look(mobj_t *actor) {
+    WA_LookBegin(actor);
+#ifdef DOOM_MONSTER_PROFILING
+    MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_LOOK);
+#endif
+    P_LookAction(actor);
+#ifdef DOOM_MONSTER_PROFILING
+    if(scope.active)MP_End(scope);
+#endif
+    WA_LookEnd();
+}
+static void P_LookAction (mobj_t* actor)
 {
     mobj_t*	targ;
+    look_sight_t failed={0};
+    const look_sight_t *previous=NULL;
+    int soundWake=0;
 	
     actor->threshold = 0;	// any shot will wake up
     targ = actor->subsector->sector->soundtarget;
@@ -650,16 +709,20 @@ void A_Look (mobj_t* actor)
 
 	if ( actor->flags & MF_AMBUSH )
 	{
-	    if (P_CheckSight (actor, actor->target))
-		goto seeyou;
+	    if (P_AISight (actor, actor->target,WA_AMBUSH,NULL))
+            {soundWake=1;P_SwarmSoundWake();goto seeyou;}
+            if(P_AmbushSightReuseActive()){P_RememberFalse(&failed,actor,actor->target);previous=&failed;}
 	}
 	else
-	    goto seeyou;
+            {soundWake=1;P_SwarmSoundWake();goto seeyou;}
     }
 	
 	
-    if (!P_LookForPlayers (actor, false) )
-	return;
+    if(P_SwarmIdleSkip(actor))return;
+    {int previousLook=actor->lastlook;
+    if (!P_LookForPlayersChecked (actor, false,previous) ){
+        P_SwarmIdleNegative(actor,previousLook);return;
+    }}
 		
     // go into chase state
   seeyou:
@@ -695,6 +758,8 @@ void A_Look (mobj_t* actor)
 	    S_StartSound (actor, sound);
     }
 
+    MP_COUNT(MP_ACTIVATED,1);
+    WA_Transition(actor,soundWake);
     P_SetMobjState (actor, actor->info->seestate);
 }
 
@@ -704,7 +769,11 @@ void A_Look (mobj_t* actor)
 // Actor has a melee attack,
 // so it tries to close as fast as possible
 //
-void A_Chase (mobj_t*	actor)
+#ifdef DOOM_MONSTER_PROFILING
+void A_Chase_mp_body(mobj_t* actor);
+void A_Chase(mobj_t* actor) { if(!mp_enabled){A_Chase_mp_body(actor);return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_CHASE);A_Chase_mp_body(actor);if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(A_Chase) (mobj_t*	actor)
 {
     P_WeakpointFrenzyTarget(actor);
     if(P_WeakpointFeedingChase(actor))return;

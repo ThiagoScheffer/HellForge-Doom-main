@@ -1,3 +1,4 @@
+#include "../platform/monster_profile.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -470,12 +471,17 @@ P_SetThingPosition (mobj_t* thing)
 // to P_BlockLinesIterator, then make one or more calls
 // to it.
 //
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_BlockLinesIterator_mp_body(int x,int y,boolean(*func)(line_t*));
+boolean P_BlockLinesIterator(int x,int y,boolean(*func)(line_t*)) { if(!mp_enabled){return P_BlockLinesIterator_mp_body(x,y,func);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_LINES);boolean result=P_BlockLinesIterator_mp_body(x,y,func);if(scope.active)MP_End(scope);return result; }
+#endif
 boolean
-P_BlockLinesIterator
+MP_BODY(P_BlockLinesIterator)
 ( int			x,
   int			y,
   boolean(*func)(line_t*) )
 {
+    MP_COLLECT;
     int			offset;
     int32_t*		list;
     line_t*		ld;
@@ -494,15 +500,18 @@ P_BlockLinesIterator
 
     for ( list = blockmaplump+offset ; *list != -1 ; list++)
     {
+	MP_LOCAL_COUNT(MP_LINE_VISITS,1);
 	ld = &lines[*list];
 
-	if (ld->validcount == validcount)
-	    continue; 	// line has already been checked
+	if (ld->validcount == validcount) {
+            MP_LOCAL_COUNT(MP_LINE_DUPLICATES,1);
+	    continue;
+        } 	// line has already been checked
 
 	ld->validcount = validcount;
 		
-	if ( !func(ld) )
-	    return false;
+	MP_LOCAL_COUNT(MP_LINE_CALLBACKS,1);
+	if ( !func(ld) ) {MP_LOCAL_COUNT(MP_ITERATOR_STOPS,1);return false;}
     }
     return true;	// everything was checked
 }
@@ -511,12 +520,17 @@ P_BlockLinesIterator
 //
 // P_BlockThingsIterator
 //
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_BlockThingsIterator_mp_body(int x,int y,boolean(*func)(mobj_t*));
+boolean P_BlockThingsIterator(int x,int y,boolean(*func)(mobj_t*)) { if(!mp_enabled){return P_BlockThingsIterator_mp_body(x,y,func);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_THINGS);boolean result=P_BlockThingsIterator_mp_body(x,y,func);if(scope.active)MP_End(scope);return result; }
+#endif
 boolean
-P_BlockThingsIterator
+MP_BODY(P_BlockThingsIterator)
 ( int			x,
   int			y,
   boolean(*func)(mobj_t*) )
 {
+    MP_COLLECT;
     mobj_t*		mobj;
 	
     if ( x<0
@@ -532,8 +546,8 @@ P_BlockThingsIterator
 	 mobj ;
 	 mobj = mobj->bnext)
     {
-	if (!func( mobj ) )
-	    return false;
+	MP_LOCAL_COUNT(MP_THING_VISITS,1);MP_LOCAL_COUNT(MP_THING_CALLBACKS,1);
+	if (!func( mobj ) ) {MP_LOCAL_COUNT(MP_ITERATOR_STOPS,1);return false;}
     }
     return true;
 }

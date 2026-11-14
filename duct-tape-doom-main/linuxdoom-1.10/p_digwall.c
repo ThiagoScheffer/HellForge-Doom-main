@@ -1,3 +1,4 @@
+#include "../platform/monster_profile.h"
 /* Experimental per-wall excavation. Original BSP stays immutable; deformed
  * wall patches are a collision/render overlay in map coordinates. */
 #include <math.h>
@@ -385,7 +386,11 @@ int P_GlobalDigRetreat(int line,int side,mobj_t *thing,fixed_t x,fixed_t y){
 }
 /* Supplemental checks remain active after the actor has crossed the old
  * plane. The original room's heights provide floor/ceiling in the recess. */
-int P_GlobalDigPosition(mobj_t *thing,fixed_t x,fixed_t y,int *owner){
+#ifdef DOOM_MONSTER_PROFILING
+int P_GlobalDigPosition_mp_body(mobj_t *thing,fixed_t x,fixed_t y,int *owner);
+int P_GlobalDigPosition(mobj_t *thing,fixed_t x,fixed_t y,int *owner) { if(!mp_enabled){return P_GlobalDigPosition_mp_body(thing,x,y,owner);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_DIG_POSITION);int result=P_GlobalDigPosition_mp_body(thing,x,y,owner);if(scope.active)MP_End(scope);return result; }
+#endif
+int MP_BODY(P_GlobalDigPosition)(mobj_t *thing,fixed_t x,fixed_t y,int *owner){
     blockedMissile=NULL;
     *owner=-1;if(!P_GlobalDigEnabled()||(thing->flags&MF_NOCLIP))return 1;
     indexCuts();

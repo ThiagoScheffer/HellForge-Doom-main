@@ -953,8 +953,13 @@ static boolean DEH_Flags (patch_t* patch, const char* text, int* bits)
     return true;
 }
 
+#include "../platform/monster_profile.h"
+#include "p_swarm.h"
 static void DEH_Thing (patch_t* patch, const char* key, const char* value)
 {
+#ifdef DOOM_MONSTER_PROFILING
+    MP_PatchedType(patch->index);
+#endif
     mobjinfo_t*	info = &mobjinfo[patch->index];
     int		number;
     int		i;
@@ -1231,6 +1236,7 @@ static void DEH_Rename (patch_t* patch, const char* key, const char* value)
 static void DEH_Value (patch_t* patch, char* key, char* value)
 {
     int number;
+    if(patch->block==BLOCK_THING||patch->block==BLOCK_FRAME||patch->block==BLOCK_POINTER||patch->block==BLOCK_CODEPTR)P_SwarmPatchedDefinitions();
 
     switch (patch->block)
     {

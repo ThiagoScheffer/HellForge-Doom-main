@@ -26,11 +26,13 @@ void feedHeal(mobj_t *actor,int amount) {
     actor->health=std::min(actor->info->spawnhealth,std::max(actor->health,(int)std::min<int64_t>(ceiling,(int64_t)actor->health+amount)));
 }
 mobj_t *findFood(mobj_t *actor) {
+    MP_AUTO(MP_FEED);
+    MP_COLLECT;
     struct Candidate {mobj_t *actor;double distance;bool corpse;};
     std::vector<Candidate> choices;int visited=0;
     for(auto *t=thinkercap.next;t!=&thinkercap&&visited<256;t=t->next,++visited){
         if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
-        auto *other=(mobj_t*)t;if(foodValid(actor,other))choices.push_back({other,foodDistance(actor,other),other->health<=0});
+        MP_LOCAL_COUNT(MP_FEED_CANDIDATE,1);auto *other=(mobj_t*)t;if(foodValid(actor,other))choices.push_back({other,foodDistance(actor,other),other->health<=0});
     }
     std::stable_sort(choices.begin(),choices.end(),[](const auto &a,const auto &b){return a.corpse!=b.corpse?a.corpse>b.corpse:a.distance<b.distance;});
     int tested=0;for(const auto &choice:choices){if(++tested>8)break;if(P_WeakpointFoodPath&&P_WeakpointFoodPath(actor,choice.actor))return choice.actor;}

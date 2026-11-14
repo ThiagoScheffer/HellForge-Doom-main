@@ -1,3 +1,4 @@
+#include "../platform/monster_profile.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -215,6 +216,11 @@ boolean P_CrossSubsector (int num)
 	front = seg->frontsector;
 	back = seg->backsector;
 
+        // Some Boom WADs retain ML_TWOSIDED on a line with only one sidedef
+        // (e.g. SF2012 MAP02). The flag alone does not provide an opening.
+        if (!front || !back)
+            return false;
+
 	// no wall to block sight with?
 	if (front->floorheight == back->floorheight
 	    && front->ceilingheight == back->ceilingheight)
@@ -309,8 +315,12 @@ boolean P_CrossBSPNode (int bspnum)
 //  if a straight line between t1 and t2 is unobstructed.
 // Uses REJECT.
 //
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_CheckSight_mp_body(mobj_t* t1,mobj_t* t2);
+boolean P_CheckSight(mobj_t* t1,mobj_t* t2) { if(!mp_enabled){return P_CheckSight_mp_body(t1,t2);}MP_Scope scope=MP_Begin(MP_SIGHT);boolean result=P_CheckSight_mp_body(t1,t2);MP_Count(result?MP_SIGHT_VISIBLE:MP_SIGHT_BLOCKED,1);MP_End(scope);return result; }
+#endif
 boolean
-P_CheckSight
+MP_BODY(P_CheckSight)
 ( mobj_t*	t1,
   mobj_t*	t2 )
 {
@@ -333,7 +343,7 @@ P_CheckSight
     // Check in REJECT table.
     if (!P_GlobalDigThroughEnabled() && (rejectmatrix[bytenum]&bitnum))
     {
-	sightcounts[0]++;
+	MP_COUNT(MP_SIGHT_REJECT,1);sightcounts[0]++;
 
 	// can't possibly be connected
 	return false;	
@@ -341,7 +351,7 @@ P_CheckSight
 
     // An unobstructed LOS is possible.
     // Now look from eyes of t1 to any part of t2.
-    sightcounts[1]++;
+    MP_COUNT(MP_SIGHT_BSP,1);sightcounts[1]++;
 
     validcount++;
 	

@@ -39,6 +39,14 @@ int P_Random (void);
 // Fix randoms for demos.
 void M_ClearRandom (void);
 
+// Diagnostic runner only: count existing call sites, without changing RNG code.
+#ifdef DOOM_MONSTER_BENCHMARK
+int MP_BenchRandom(void);
+int MP_BenchMiscRandom(void);
+#define P_Random MP_BenchRandom
+#define M_Random MP_BenchMiscRandom
+#endif
+
 
 #endif
 //-----------------------------------------------------------------------------

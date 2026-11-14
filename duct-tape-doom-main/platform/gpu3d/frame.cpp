@@ -1,3 +1,4 @@
+#include "../monster_profile.h"
 #include <stdexcept>
 #include <string>
 extern "C" {extern int r_photoactive,r_photodof,r_photostyle;extern float r_photofocus;}
@@ -416,6 +417,7 @@ void releaseReflection() {
 
 using namespace gpu3d;
 void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
+    MP_AUTO(MP_RENDER);
     const bool allFrames=M_CheckParm((char*)"-profileallframes")!=0;
     const bool trace=allFrames||M_CheckParm((char*)"-profilespikes")!=0;
     static uint64_t previousEnd=0;
@@ -517,20 +519,26 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     // keeps the display's rate even without vsync.
     SDL_GPUCommandBuffer *render=profile.enabled?SDL_AcquireGPUCommandBuffer(device):command;
     if(!render) I_Error((char*)"GPU command buffer: %s",SDL_GetError());
+    { MP_AUTO(MP_GPU_UPLOAD);
     uploadFrame(render,transient,sectorInfo(),palette,overlay,settingsImage);
+    }
     stage(2);
+    { MP_AUTO(MP_GPU_ENCODE);
     drawReflection(render,view,camera);
     captureGlassProbes(render,camera);
     glassReflected=drawGlassReflection(render,view,camera);
     if((drawMist||r_photoactive)&&msaa)drawMistDepth(render,view,camera);
     drawMainView(render,view,camera,drawMist,msaa,weapons,hud,cross);
     if(camera.materials[1]>0)drawBloom(render,view,camera,weapons);
+    }
     stage(3);
+    { MP_AUTO(MP_GPU_SUBMIT);
     if(render!=command)submitProfiled(render,frameStart);
     if(swapchain)present(command,swapchain,view);
     flushUploads();
     if(screenshotPending||renderCheckDue()) {screenshotPending=false;capture(command,view,(int)drawableWidth,(int)drawableHeight);}
     else if(!SDL_SubmitGPUCommandBuffer(command)) I_Error((char*)"GPU rendering failed: %s",SDL_GetError());
+    }
     char renderer[64];snprintf(renderer,sizeof(renderer),"%s 3D",SDL_GetGPUDeviceDriver(device));
     if(renderer[0])renderer[0]=(char)toupper((unsigned char)renderer[0]);
     updateTitle(w,h,renderer);

@@ -1,3 +1,4 @@
+#include "../platform/monster_profile.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -821,8 +822,12 @@ void R_Init (void)
 //
 // R_PointInSubsector
 //
+#ifdef DOOM_MONSTER_PROFILING
+subsector_t* R_PointInSubsector_mp_body(fixed_t x,fixed_t y);
+subsector_t* R_PointInSubsector(fixed_t x,fixed_t y) { if(!mp_enabled){return R_PointInSubsector_mp_body(x,y);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_SUBSECTOR);subsector_t* result=R_PointInSubsector_mp_body(x,y);if(scope.active)MP_End(scope);return result; }
+#endif
 subsector_t*
-R_PointInSubsector
+MP_BODY(R_PointInSubsector)
 ( fixed_t	x,
   fixed_t	y )
 {

@@ -1,3 +1,5 @@
+#include "../platform/monster_profile.h"
+#include "p_swarm.h"
 #include "i_lan.h"
 #include "p_arena.h"
 #include <stdint.h>
@@ -492,8 +494,12 @@ boolean PIT_CheckThing(mobj_t *thing)
 //  speciallines[]
 //  numspeciallines
 //
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_CheckPosition_mp_body(mobj_t* thing, fixed_t x, fixed_t y);
+boolean P_CheckPosition(mobj_t* thing, fixed_t x, fixed_t y) { if(!mp_enabled){return P_CheckPosition_mp_body(thing,x,y);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_POSITION);boolean result=P_CheckPosition_mp_body(thing,x,y);if(mp_enabled&&!result)MP_Count(MP_POSITION_FAILED,1);if(scope.active)MP_End(scope);return result; }
+#endif
 boolean
-P_CheckPosition(mobj_t *thing,
+MP_BODY(P_CheckPosition)(mobj_t *thing,
                 fixed_t x,
                 fixed_t y)
 {
@@ -638,8 +644,12 @@ boolean P_RetreatFromDropoff(mobj_t *thing, fixed_t x, fixed_t y)
 // Attempt to move to a new position,
 // crossing special lines unless MF_TELEPORT is set.
 //
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_TryMove_mp_body(mobj_t* thing, fixed_t x, fixed_t y);
+boolean P_TryMove(mobj_t* thing, fixed_t x, fixed_t y) { if(!mp_enabled){return P_TryMove_mp_body(thing,x,y);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_TRYMOVE);boolean result=P_TryMove_mp_body(thing,x,y);if(mp_enabled&&!result)MP_Count(MP_MOVE_FAILED,1);if(scope.active)MP_End(scope);return result; }
+#endif
 boolean
-P_TryMove(mobj_t *thing,
+MP_BODY(P_TryMove)(mobj_t *thing,
           fixed_t x,
           fixed_t y)
 {
@@ -1753,6 +1763,7 @@ boolean
 P_ChangeSector(sector_t *sector,
                boolean crunch)
 {
+    P_SwarmWorldChanged();
     int x;
     int y;
     SV_SectorChanged(sector);

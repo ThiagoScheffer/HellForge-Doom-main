@@ -860,6 +860,12 @@ void D_DoomMain (void)
     char                    file[256];
 
     FindResponseFile ();
+#ifdef DOOM_MONSTER_BENCHMARK
+    {extern void MP_BenchmarkStartup(void);MP_BenchmarkStartup();}
+#endif
+#ifdef DOOM_MONSTER_PROFILING
+    {extern void MP_Startup(void);MP_Startup();}
+#endif
 	
     IdentifyVersion ();
 	

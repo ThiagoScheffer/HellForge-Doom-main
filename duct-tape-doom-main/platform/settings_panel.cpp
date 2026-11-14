@@ -123,6 +123,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("retro","Retro scanlines",&s.retro,"Dark lines between the rows of the picture, like an old CRT monitor."),
                 check("palette","Doom palette colors",&s.palette,"Quantize the final lighting and fog to the current WAD palette.")}}}},
         {"Gameplay",{
+            {"Monster performance (experimental)",{
+                check("monster_hibernation","Idle monster hibernation",&s.monsterHibernation,"Reuse unchanged negative idle searches while keeping full physics, collision and state timing. Classic geometry only; disabled in digging/solid modes, patched gameplay, respawn, demos, multiplayer and Arcade."),
+                check("swarm_debug","Swarm diagnostics",&s.swarmDebug,"Print an aggregate monster summary once per second: dormant, awake, reused idle searches, sound wakes and spawns.")}},
             {"Save recovery",{
                 check("death_load_last_save","Load last save on death",&s.deathLoadLastSave,"After dying, press Use to load the last save successfully written or loaded this session. If no usable save is available, restart the map normally. Single player only; disabled in demos and Arcade.")}},
             {"Combat and arenas",{
@@ -522,6 +525,12 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "so a monster across the room sounds across the room. Gunfire and blasts carry farther, faint and dull. "
                     "Off: DOOM's straight fade, still loud at mid range.",hasFalloff)}}}},
         {"Performance",{
+            {"Monster visibility",{
+                check("ambush_sight_reuse","Ambush sight reuse",&s.ambushSightReuse,
+                    "Reduce redundant monster visibility checks without changing hearing, activation or reactions. Works with destructible maps. Disabled during demos and multiplayer.")}},
+            {"Sprite preparation",{
+                check("sprite_frustum_filter","Conservative sprite filtering",&s.spriteFiltering,
+                    "Skips off-camera sprite work only when artwork and shadow bounds are safely outside view. Mirrors, reflections, flashlight silhouettes and uncertain effects keep normal rendering. Monster simulation is unchanged.",[](const Settings &d){return d.accelerated!=0;})}},
             {"Cheaper light work",{
                 check("bake_only_lights","Bake-only static lights",&s.bakeOnlyLights,
                     "Torches, lamps and glowing textures stop costing per-frame light work: their flicker, bump detail and gloss come from the bake, "

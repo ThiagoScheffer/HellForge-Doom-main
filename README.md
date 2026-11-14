@@ -1,5 +1,7 @@
 # DOOM: HELLFORGE
 
+**Current integration build: 2026.11.14.1** | [Release notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
 extends that foundation with sprite-aware combat, monster survival behavior,
@@ -28,10 +30,15 @@ configuration, and verification notes.
 | 🗺️ **[Large-WAD compatibility](docs/changes/BIG-WAD-COMPATIBILITY.md)** | Larger textures and maps can load beyond original engine limits. | 32-bit texture offsets, uncompressed XNOD support, checked allocations, blockmap rebuilding, and configurable zone memory. |
 | ⚙️ **[Settings that stay saved](docs/changes/F4-SETTINGS-PERSISTENCE.md)** | Applied F4 choices survive quitting, Low-FX launches, and settings export/import. | A comment-tolerant config reader and same-directory temporary writes that preserve the previous file on failure. |
 | ↩️ **[Use-to-load after death](docs/changes/DEATH-SAVE-RECOVERY.md)** | Press Use after dying to return to the last save written or loaded in the current session. | An optional death-flow hook into the normal loader, with ordinary map restart when no usable save is available. |
+| **[Monster visibility performance](docs/changes/AMBUSH-SIGHT-F4.md)** | Toggle ambush sight reuse from F4 without changing hearing or encounter activation. | Reuses only an unchanged false sight result within one action; no cross-tic LOS cache. |
+| **[Conservative sprite filtering](docs/changes/SPRITE-FRUSTUM-FILTERING.md)** | Reduce off-camera monster rendering work when safely outside view. | Artwork and shadow bounds, with fallbacks for mirrors, wounds, voxels and uncertain poses. |
+| **[Boom conveyor and switch fixes](docs/changes/ABANDON-PLATFORM-FIX.md)** | Restore affected voodoo conveyor releases and platform switch chains. | Preserves voodoo inertia and carries actors while their footprint still touches the conveyor. |
+| **[Safer WAD sight checks](docs/changes/SF2012-SIGHT-AND-DESTRUCTION-FIX.md)** | Avoid the identified SF2012 sight crash; keep wall destruction available. | Handles missing sectors on incorrectly flagged two-sided walls; normal launcher retains solid geometry. |
 
 **Start with F4.** Human critical parts, enhanced weak points, weapon
 vulnerabilities, injuries, bleeding, feeding, frenzy, and death-save recovery
-are optional and default off. Sprite combat additions are restricted to
+are optional and default off. New ambush sight reuse, sprite filtering and idle-search
+reuse also default off in the normal build. Sprite combat additions are restricted to
 single-player sprite rendering; multiplayer, demos, and voxel targets retain
 their documented exclusions.
 
@@ -167,6 +174,10 @@ See [LICENSE](LICENSE), [licenses/NOTICE.txt](licenses/NOTICE.txt), and
 
 ## Project status
 
-This fork is actively reorganizing its release and documentation identity.
-Historical reports retain their original build names and dates for traceability;
-current feature documents carry an explicit HELLFORGE build/time metadata block.
+Build 2026.11.14.1 integrates the tested experimental source and F4 controls into
+the main checkout. New performance controls remain optional. Idle-search reuse
+is restricted to classic geometry; normal solid-map launches retain destruction.
+Profiling and benchmark tools are opt-in build configurations and are compiled
+out of the normal launcher engine. Historical reports retain their original
+builds, dates and coverage limitations; see the current release notes for the
+integration checks and outstanding manual coverage.

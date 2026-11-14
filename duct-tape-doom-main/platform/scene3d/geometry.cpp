@@ -1,7 +1,10 @@
+#include "../monster_profile.h"
 /* The visible world each frame: leaf visibility, walls, flats and things
    batched per texture. */
 #include "internal.h"
 #include "frame_workers.h"
+#include "../sprite_frustum.h"
+#include "../sprite_visibility.h"
 #include "p_digwall.h"
 #include "../../../scene.h"
 #include "../../../map_world.h"
@@ -360,15 +363,81 @@ static void dynamicThingLight(const mobj_t *thing,float x,float y,float z,std::a
 // Immutable scene inputs, independent output per actor. No image-cache or
 // geometry mutation occurs in the workers.
 struct ThingLighting {
-    mobj_t *thing;int sector;float x,y,z;bool mirrored;
+    mobj_t *thing;int sector;float x,y,z;bool mirrored,culled=false;
     std::array<float,3> pulse{},beam{},baked{};
     ShadowLights shadows;StaticSample statics;
 };
 static void lightThing(ThingLighting &v) {
+    if(v.culled)return;
+    MP_AUTO(MP_SPRITE_LIGHT);
     v.pulse={};v.beam={};v.shadows={};v.statics={};
     dynamicThingLight(v.thing,v.x,v.y,v.z,v.pulse,v.beam,v.shadows);
     v.baked=bakedLightAt(v.x,v.y,v.z+units(v.thing->height)*0.5f,&sectors[v.sector],&v.statics);
     staticShadows(v.statics,v.z,v.shadows);
+}
+struct FilterArtwork {int width=0,height=0,left=0,top=0;bool read=false,valid=false;};
+static std::vector<FilterArtwork> filterArtwork;
+static std::vector<byte> filterPatch;
+static SpriteVisibilityStats filterStats{};
+void spriteFilteringShutdown(){filterArtwork.clear();filterPatch.clear();filterStats={};}
+static const FilterArtwork *filterDimensions(int lump){
+    int index=lump-firstspritelump;
+    if(index<0||index>=numspritelumps)return nullptr;
+    if(filterArtwork.size()!=(size_t)numspritelumps)filterArtwork.resize(numspritelumps);
+    auto &a=filterArtwork[index];
+    if(!a.read){
+        a.read=true;int bytes=W_LumpLength(lump);
+        // Read without adding zone-cache allocations ahead of the original
+        // draw order. Oversized/uncertain resources keep the original path.
+        if(bytes>=8&&bytes<=32*1024*1024){filterPatch.resize(bytes);W_ReadLump(lump,filterPatch.data());const patch_t *p=(const patch_t*)filterPatch.data();
+            a.width=SHORT(p->width);a.height=SHORT(p->height);a.left=SHORT(p->leftoffset);a.top=SHORT(p->topoffset);
+            a.valid=a.width>0&&a.height>0&&a.width<=8192&&a.height<=8192&&8+(size_t)a.width*4<=(size_t)bytes;
+        }
+    }
+    return a.valid?&a:nullptr;
+}
+static bool filterThing(const ThingLighting &item,const Uniforms &camera,float fraction){
+    auto keep=[](int reason){++filterStats.fallback[reason];return false;};
+    const mobj_t *thing=item.thing;
+    if(settings.ps2Style||thing->player||thing->health<=0||!(thing->flags&MF_COUNTKILL)||
+       (thing->flags&(MF_CORPSE|MF_MISSILE))||!thing->subsector||!thing->info)return keep(SVF_OTHER);
+    if(voxelMonster(*thing))return keep(SVF_VOXEL);
+    BodyPose pose{};DeathView death={thing->sprite,thing->frame,thing->angle,false,1,0,{}};
+    if(bodyPose(*thing,fraction,pose)||(settings.deathDirector&&deathView(*thing,fraction,death)))return keep(SVF_POSE);
+    WoundSpot spot;if(woundSpots(thing,&spot,1))return keep(SVF_WOUND);
+    if((size_t)item.sector>=sectorMist.size()||sectorMist[item.sector].liquid)return keep(SVF_LIQUID);
+    if(!prepareCriticalSurface)return keep(SVF_OTHER);
+    const auto &sf=sprites[thing->sprite].spriteframes[thing->frame&FF_FRAMEMASK];
+    unsigned rotation=sf.rotate?spriteRotation(units(thing->x)-camera.eye[0],units(thing->y)-camera.eye[1],thing->angle):0u;
+    const auto *art=filterDimensions(firstspritelump+sf.lump[rotation]);if(!art)return keep(SVF_ARTWORK);
+    using namespace doom_sprite_frustum;
+    float floor=floorZ(&sectors[item.sector]),ceiling=ceilZ(&sectors[item.sector]);
+    Camera view{{camera.eye[0],camera.eye[1],camera.eye[2]},
+                {camera.right[0],camera.right[1],camera.right[2]},
+                {camera.up[0],camera.up[1],camera.up[2]},
+                {camera.forward[0],camera.forward[1],camera.forward[2]},camera.projection[0],camera.projection[1],camera.projection[2]};
+    Bounds bounds=artwork(item.x,item.y,item.z,art->width,art->height,art->left,art->top,view.right,floor,ceiling,sectors[item.sector].ceilingpic!=skyflatnum);
+    double reach=shadowReach();
+    // Shadow vertices include distance-dependent decal lift. Bound its maximum
+    // over the entire horizontal footprint, not just at the actor centre.
+    double far=std::hypot(item.x-camera.eye[0],item.y-camera.eye[1])+2*reach;
+    include(bounds,{{item.x-reach,item.y-reach,floor-1.},{item.x+reach,item.y+reach,floor+2*(.15+far*.0004)+1}});
+    if(!valid(bounds)||!finite(view.eye)||!std::isfinite(floor)||!std::isfinite(ceiling))return keep(SVF_INVALID);
+    ++filterStats.eligible;
+    if(!outside(bounds,view))return false;
+    ++filterStats.rejected;return true;
+}
+static void filteredWoundView(const ThingLighting &v,const Uniforms &camera){
+    // Preserve the original image-cache allocation order and surface semantics,
+    // including off-camera cosmetic impacts; skip only lighting/drawing work.
+    const mobj_t *thing=v.thing;const auto &sf=sprites[thing->sprite].spriteframes[thing->frame&FF_FRAMEMASK];
+    unsigned rotation=sf.rotate?spriteRotation(units(thing->x)-camera.eye[0],units(thing->y)-camera.eye[1],thing->angle):0u;
+    Image &image=lumpImage(firstspritelump+sf.lump[rotation],false);
+    float top=v.z+image.top,bottom=top-image.height,floor=floorZ(&sectors[v.sector]),ceiling=ceilZ(&sectors[v.sector]);
+    float shift=std::max(0.f,floor-bottom);
+    if(sectors[v.sector].ceilingpic!=skyflatnum&&ceiling-floor>=image.height)shift=std::min(shift,ceiling-top);
+    top+=shift;bottom+=shift;
+    woundView(thing,players[displayplayer].mo,image,sf.flip[rotation],v.x,v.y,top-image.top,top,bottom,camera.right[0],camera.right[1],nullptr,(int)rotation);
 }
 // Things standing in a liquid sink in a little, like Heretic's
 // footclip (the floor hides their feet; small pickups only a
@@ -601,6 +670,7 @@ static void playerShadow(const Uniforms &camera,float fraction) {
     }
 }
 void geometry(const Uniforms &camera,float fraction) {
+    MP_AUTO(MP_GEOMETRY);
     prepareVoxelModels();
     const bool spike=M_CheckParm((char*)"-profilespikes")!=0;
     const bool detailed=spike||M_CheckParm((char*)"-profilegeometry")!=0;
@@ -658,18 +728,30 @@ void geometry(const Uniforms &camera,float fraction) {
         ThingLighting item{};item.thing=thing;item.sector=i;item.mirrored=inFront;
         interpolatedPosition(*thing,fraction,item.x,item.y,item.z);lightingJobs.push_back(item);
     }
+    filterStats={};filterStats.examined=lightingJobs.size();
+    if(!settings.spriteFiltering)filterStats.fallback[SVF_DISABLED]=lightingJobs.size();
+    else if(mirrored||reflectionActive||beam||director_view_active||camera.effects[2]!=0)filterStats.fallback[SVF_SECONDARY]=lightingJobs.size();
+    else {
+        uint64_t begin=SDL_GetTicksNS();
+        for(auto &v:lightingJobs)v.culled=filterThing(v,camera,fraction);
+        filterStats.filter_ns=SDL_GetTicksNS()-begin;
+    }
+    filterStats.retained=lightingJobs.size()-filterStats.rejected;
     auto calculate=[&](int n){lightThing(lightingJobs[n]);};
     if(lightingJobs.size()>=32)frameParallelFor((int)lightingJobs.size(),calculate);
     else for(int n=0;n<(int)lightingJobs.size();++n)calculate(n);
     if(M_CheckParm((char*)"-verifylightthreads"))for(const auto &item:lightingJobs) {
+        if(item.culled)continue;
         auto serial=item;lightThing(serial);
         if(serial.pulse!=item.pulse||serial.beam!=item.beam||serial.baked!=item.baked||
             memcmp(&serial.statics,&item.statics,sizeof(StaticSample))||
             memcmp(&serial.shadows,&item.shadows,sizeof(ShadowLights)))
             I_Error((char*)"Parallel sprite lighting differs from serial lighting");
     }
-    for(const auto &item:lightingJobs)
-        addThing(item.thing,item.sector,camera,fraction,beam,casters,item.mirrored?&mirror:nullptr,item);
+    for(const auto &item:lightingJobs){
+        if(item.culled)filteredWoundView(item,camera);
+        else addThing(item.thing,item.sector,camera,fraction,beam,casters,item.mirrored?&mirror:nullptr,item);
+    }
     timing(7);profileAdd(profile.frame.spritesMs,spritesStart);
     std::sort(casters.begin(),casters.end(),[](const Caster &a,const Caster &b){return a.distance<b.distance;});
     for(size_t n=0;n<std::min(size_t(6),casters.size());++n) {
@@ -695,3 +777,5 @@ void geometry(const Uniforms &camera,float fraction) {
     }
 }
 } // namespace doom3d
+
+extern "C" SpriteVisibilityStats I_SpriteVisibilityStats(void){return doom3d::filterStats;}

@@ -47,3 +47,25 @@ ctest --test-dir build -C Release -E "^bigmap-" --output-on-failure
 ```
 
 Keep `build/Release/doom.pdb` with the matching engine build for crash analysis. See [reload/cache details](docs/changes/RELOAD-LIGHTING-CACHE.md).
+
+## Monster performance diagnostics and current controls
+
+The normal launcher build explicitly sets `DOOM_MONSTER_PROFILING=OFF`,
+`DOOM_MONSTER_PROFILE_ARGUMENTS=OFF` and `DOOM_MONSTER_BENCHMARK=OFF`, including
+when reusing a build directory previously used for diagnostics. Normal F4
+controls still include ambush sight reuse and conservative sprite filtering,
+both default off. Gameplay also exposes restricted classic-only idle-search
+reuse and aggregate swarm diagnostics.
+
+For diagnostic work, use a separate build directory, configure
+`-DDOOM_MONSTER_PROFILING=ON -DDOOM_MONSTER_BENCHMARK=ON`, then build
+`doom-monster-bench` and/or `doom-headless`. Runtime profiling needs
+`-profilemonsters <output-directory>`; wake auditing additionally needs
+`-bench-wake-audit`. Use owned WADs and isolated configs. See the
+[profiling report](docs/changes/MONSTER-PROFILING-PHASE2.md) and
+[MAP02 exact-reuse checks](docs/changes/AMBUSH-SIGHT-REUSE.md). Some historical
+runner scripts assume the sibling experimental worktree or locally supplied
+WADs; adjust their paths before use. They are not part of the normal launcher.
+
+Current integration and focused acceptance checks:
+[2026.11.14.1](docs/changes/MAIN-INTEGRATION-2026-11-14.md).

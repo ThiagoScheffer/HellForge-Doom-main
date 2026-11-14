@@ -183,6 +183,9 @@ struct Settings {
     int fluidGloves=0; int fluidBareHands=1; int fluidFastPistol=1;
     int combatNotices=1;
     int deathLoadLastSave=0;
+    int monsterHibernation=0,swarmDebug=0;
+    int spriteFiltering=0;
+    int ambushSightReuse=0;
     int fluidWeapons=1,fluidSounds=1,fluidMonsters=1;
     int fluidRocketFire=1;
     int fluidFiringSmoke=1,fluidReloadSmoke=1,fluidHotSmoke=1,fluidSmokeBio=0,fluidIndoorSmoke=0;

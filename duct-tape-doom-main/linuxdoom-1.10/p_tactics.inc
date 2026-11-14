@@ -1,8 +1,22 @@
+#include "../platform/monster_profile.h"
 #include "m_arcade.h"
 /* Bounded, opt-in species tactics. All actual movement goes through P_Move. */
 int p_advancedtactics;
 typedef struct {mobj_t *actor;int decision,until,dir,side,shots,seen,burst,burstAfter,press;fixed_t x,y,z,lockx,locky,lockz;int lockUntil,chargeRetry;boolean visible,hold;} tactic_t;
 static tactic_t tactics[1024];static unsigned tacticsSerial;static int tacticsBudget=-1;
+#ifdef DOOM_MONSTER_BENCHMARK
+#include "../platform/monster_bench_state.h"
+void MP_StateTactics(MP_StateHash *h){
+    MP_StateField(h,tacticsSerial==r_levelserial);MP_StateField(h,tacticsBudget);
+    if(tacticsSerial!=r_levelserial)return;
+    for(size_t i=0;i<h->count;++i){
+        mobj_t *actor=(mobj_t*)h->actor_at(h->context,i);const tactic_t *t=&tactics[((uintptr_t)actor>>4)%1024];
+        MP_StateField(h,t->actor==actor);if(t->actor!=actor)continue;
+        const int values[]={t->decision,t->until,t->dir,t->side,t->shots,t->seen,t->burst,t->burstAfter,t->press,t->x,t->y,t->z,t->lockx,t->locky,t->lockz,t->lockUntil,t->chargeRetry,t->visible,t->hold};
+        for(size_t n=0;n<sizeof(values)/sizeof(values[0]);++n)MP_StateField(h,(uint64_t)(int64_t)values[n]);
+    }
+}
+#endif
 boolean P_TacticsEnabled(void){return !arcade_active&&p_advancedtactics&&!demoplayback&&!demorecording&&!netgame;}
 void P_SetAdvancedTactics(int enabled){if(enabled!=p_advancedtactics){memset(tactics,0,sizeof(tactics));tacticsBudget=-1;}p_advancedtactics=enabled;}
 static tactic_t *P_TacticData(mobj_t *actor){
@@ -60,8 +74,16 @@ static void P_TacticNeighbors(mobj_t *actor){
     tacticNeighborActor=actor;tacticNeighbors=tacticVisited=0;tacticAwayX=tacticAwayY=0;tacticCorpse=NULL;tacticCorpseDistance=192*FRACUNIT;
     int x=(actor->x-bmaporgx)>>MAPBLOCKSHIFT,y=(actor->y-bmaporgy)>>MAPBLOCKSHIFT;
     for(int by=y-1;by<=y+1&&tacticVisited<48;++by)for(int bx=x-1;bx<=x+1&&tacticVisited<48;++bx)P_BlockThingsIterator(bx,by,PIT_TacticNeighbor);
+    MP_COUNT(MP_TACTIC_CANDIDATE,tacticVisited);
 }
+#ifdef DOOM_MONSTER_PROFILING
+boolean P_TacticsMove_mp_body(mobj_t *actor);
 boolean P_TacticsMove(mobj_t *actor){
+    if(!mp_enabled)return P_TacticsMove_mp_body(actor);
+    MP_Scope scope=MP_Begin(MP_TACTIC_MOVE);boolean result=P_TacticsMove_mp_body(actor);MP_End(scope);return result;
+}
+#endif
+boolean MP_BODY(P_TacticsMove)(mobj_t *actor){
     if(!P_TacticValid(actor)||(actor->flags&MF_SKULLFLY))return false;tactic_t *t=P_TacticData(actor);
     if(leveltime<t->until){if(P_TacticStep(actor,t->dir))return true;t->until=0;t->side=-t->side;}
     if(leveltime<t->decision||tacticsBudget==leveltime)return false;
@@ -144,7 +166,11 @@ void P_TacticsFired(mobj_t *actor){
         if(actor->type==MT_BABY)t->shots=0;if(actor->type==MT_SPIDER)t->shots=0;
     }
 }
-void P_TacticsTick(mobj_t *actor){
+#ifdef DOOM_MONSTER_PROFILING
+void P_TacticsTick_mp_body(mobj_t* actor);
+void P_TacticsTick(mobj_t* actor) { if(!mp_enabled){P_TacticsTick_mp_body(actor);return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_TACTICS);P_TacticsTick_mp_body(actor);if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(P_TacticsTick)(mobj_t *actor){
     if(!P_TacticValid(actor))return;tactic_t *t=P_TacticData(actor);
     if(actor->type==MT_KNIGHT&&leveltime<t->press&&leveltime%4==0)P_TacticStep(actor,P_TacticDirection(actor,actor->target->x,actor->target->y));
     if(actor->type==MT_HEAD&&leveltime%2==0){

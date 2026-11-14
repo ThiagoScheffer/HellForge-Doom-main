@@ -1,3 +1,5 @@
+#include "../platform/monster_profile.h"
+#include "../platform/monster_bench_state.h"
 #include <algorithm>
 #include <cmath>
 #include <climits>
@@ -298,16 +300,18 @@ static bool frenzyVictim(mobj_t *actor,mobj_t *other) {
     return dx*dx+dy*dy<=range*range&&P_CheckSight(actor,other);
 }
 void P_WeakpointFrenzyTarget(mobj_t *actor) {
+    MP_AUTO(MP_FRENZY);
     auto it=runtime.find(actor);if(it==runtime.end())return;auto &r=it->second;
     if(!P_WeakpointFrenzied(actor)) {
         if(r.frenzyUntil){if(actor->target==r.frenzyTarget)actor->target=nullptr;actor->threshold=0;}
         r.frenzyUntil=0;r.frenzyTarget=nullptr;return;
     }
     if(!frenzyVictim(actor,r.frenzyTarget)) {
+        MP_COLLECT;
         r.frenzyTarget=nullptr;double nearest=INFINITY;
         for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next) {
             if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
-            auto *other=(mobj_t*)t;
+            MP_LOCAL_COUNT(MP_FRENZY_CANDIDATE,1);auto *other=(mobj_t*)t;
             double dx=(double)other->x-actor->x,dy=(double)other->y-actor->y,d=dx*dx+dy*dy;
             if(d<nearest&&frenzyVictim(actor,other)){nearest=d;r.frenzyTarget=other;}
         }
@@ -467,3 +471,24 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
     }
     return bytes;
 }
+#ifdef DOOM_MONSTER_BENCHMARK
+void MP_StateCombat(MP_StateHash *h){
+    MP_StateField(h,serial);MP_StateField(h,shotId);MP_StateActor(h,shotSource);MP_StateField(h,shotWeapon);
+    MP_StateField(h,feedBudgetTic);MP_StateField(h,feedBudget);
+    for(size_t i=0;i<h->count;++i){
+        auto *actor=(mobj_t*)h->actor_at(h->context,i);auto found=runtime.find(actor);
+        MP_StateField(h,found!=runtime.end());
+        if(found!=runtime.end()){
+            const auto &r=found->second;
+            for(int value:{(int)r.kind,r.aimUntil,r.aimCooldown,r.legUntil,r.legCooldown,r.offset,(int)r.directProcessed,(int)r.friendlyMissile,
+                          r.bleedUntil,r.bleedNext,r.frenzyUntil,r.bleedTier,r.bleedVoiceNext,r.attackCredit,r.bleedPlayer,
+                          r.feedPhase,r.feedUntil,r.feedCooldown,r.feedSearch,(int)r.noEat})MP_StateField(h,(uint64_t)(int64_t)value);
+            MP_StateField(h,r.shot);MP_StateField(h,r.bleedDischarge);
+            MP_StateActor(h,r.bleedSource);MP_StateActor(h,r.frenzyTarget);MP_StateActor(h,r.feedTarget);MP_StateActor(h,r.feedPrevious);
+            for(float value:r.start)MP_StateFloat(h,value);for(float value:r.end)MP_StateFloat(h,value);
+        }
+        auto shot=pellets.find(actor);MP_StateField(h,shot!=pellets.end());
+        if(shot!=pellets.end()){MP_StateField(h,shot->second.total);MP_StateField(h,shot->second.face);MP_StateField(h,shot->second.frenzyHead);}
+    }
+}
+#endif

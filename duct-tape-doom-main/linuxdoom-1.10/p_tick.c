@@ -1,3 +1,5 @@
+#include "../platform/monster_profile.h"
+#include "p_swarm.h"
 #include "p_arena.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
@@ -123,7 +125,11 @@ void P_AllocateThinker (thinker_t*	thinker)
 //
 // P_RunThinkers
 //
-void P_RunThinkers (void)
+#ifdef DOOM_MONSTER_PROFILING
+void P_RunThinkers_mp_body(void);
+void P_RunThinkers(void) { if(!mp_enabled){P_RunThinkers_mp_body();return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_THINKERS);P_RunThinkers_mp_body();if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(P_RunThinkers) (void)
 {
     thinker_t*	currentthinker;
 
@@ -162,7 +168,11 @@ void P_RunThinkers (void)
 // P_Ticker
 //
 
-void P_Ticker (void)
+#ifdef DOOM_MONSTER_PROFILING
+void P_Ticker_mp_body(void);
+void P_Ticker(void) { if(!mp_enabled){P_Ticker_mp_body();return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_TIC);P_Ticker_mp_body();if(scope.active)MP_End(scope);if(mp_enabled)MP_AutoTic(gametic); }
+#endif
+void MP_BODY(P_Ticker) (void)
 {
     int		i;
 
@@ -195,15 +205,20 @@ void P_Ticker (void)
     
 		
     if (R_BeforeTic) R_BeforeTic();
+    if(leveltime<3)MP_STAGE("initial_tic_begin");
     for (i=0 ; i<MAXPLAYERS ; i++)
 	if (playeringame[i])
 	    P_PlayerThink (&players[i]);
 			
     P_ArenaTick();
     SV_Tick();
+    if(leveltime<3)MP_STAGE("initial_thinkers_begin");
     P_RunThinkers ();
+    if(leveltime<3)MP_STAGE("initial_thinkers_end");
     P_UpdateSpecials ();
     P_RespawnSpecials ();
+    P_SwarmEndTic();
+    if(leveltime<3)MP_STAGE("initial_tic_end");
 
     // for par times
     leveltime++;

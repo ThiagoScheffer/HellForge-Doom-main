@@ -16,11 +16,20 @@ using System.Xml;
 using System.Runtime.InteropServices;
 
 internal static class Data {
+#if HELLFORGE_EXPERIMENTAL
+    internal const string ProductName = "DOOM: HELLFORGE — Experimental";
+    internal const string ProductShortName = "DOOM-Hellforge-Experimental";
+    internal const string BuildLabel = "MONSTER PERFORMANCE   /   EXPERIMENTAL BUILD";
+    internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOOM-HellforgeLauncher-Experimental");
+    internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DOOM Hellforge Experimental");
+#else
     internal const string ProductName = "DOOM: HELLFORGE";
     internal const string ProductShortName = "DOOM-Hellforge";
+    internal const string BuildLabel = "SOLID GEOMETRY   /   DESTRUCTION BUILD";
     internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOOM-HellforgeLauncher");
-    internal static readonly string Screenshots = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Screenshots");
     internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DOOM Hellforge");
+#endif
+    internal static readonly string Screenshots = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Screenshots");
     internal static string BuildVersion {
         get {
             var assembly=Assembly.GetExecutingAssembly();
@@ -84,6 +93,11 @@ internal static class Data {
             return names.Contains("voxeldef.txt")&&names.Contains("voxels/possa.kvx")&&names.Contains("zscript/cheellovox/cheellomonstersdoom1.zc");
         }
     }
+#if HELLFORGE_EXPERIMENTAL
+    // Classic geometry is a diagnostic opt-in: it cannot provide wall destruction.
+    internal static string GeometryMode(bool classic) { return classic?"-nodigging":"-solidmaps"; }
+    internal static string AmbushSightMode(bool enabled) { return enabled?" -ambushsightreuse":""; }
+#endif
     internal static string Arguments(string game,string[] files) {
         var classic=new List<string>();var sounds=new List<string>();string fluid=null,voxels=null;bool monsters=false;
         foreach(string f in files){
@@ -97,7 +111,12 @@ internal static class Data {
                 if(WadHas(f,"E5M1")&&!WadHas(game,"E4M1"))throw new IOException("SIGIL requires the Ultimate Doom IWAD (DOOM.WAD). Select that IWAD, then keep SIGIL in the add-on list.");
                 classic.Add(f);}
         }
+#if HELLFORGE_EXPERIMENTAL
+        string args=GeometryMode(Environment.GetCommandLineArgs().Any(a=>a.Equals("--classic-geometry",StringComparison.OrdinalIgnoreCase)))+" -uzmovement -iwad "+Quote(game);
+        args+=AmbushSightMode(Environment.GetCommandLineArgs().Any(a=>a.Equals("--ambush-sight-reuse",StringComparison.OrdinalIgnoreCase)));
+#else
         string args="-solidmaps -uzmovement -iwad "+Quote(game);
+#endif
         if(voxels!=null)args+=" -voxeldoom "+Quote(voxels);
         if(monsters)args+=" -fluidmonsters";
         if(classic.Count>0)args+=" -file "+String.Join(" ",classic.Select(Quote));
@@ -498,7 +517,7 @@ internal sealed class ParallaxHero : Control {
             g.DrawString("THE MODERN CLASSIC DOOM EXPERIENCE",eyebrow,accent,33,48);
             g.DrawString("DOOM:",heading,pale,29,75);
             g.DrawString("HELLFORGE",heading,pale,29,125);
-            g.DrawString("SOLID GEOMETRY   /   DESTRUCTION BUILD",subtitle,muted,33,197);
+            g.DrawString(Data.BuildLabel,subtitle,muted,33,197);
             if(Width>790) {
                 var size=g.MeasureString(versionMark,mono);
                 g.DrawString(versionMark,mono,muted,Math.Max(530,Width-(int)size.Width-27),20);

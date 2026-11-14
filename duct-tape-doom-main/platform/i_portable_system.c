@@ -58,6 +58,18 @@ byte *I_ZoneBase(int *size)
         I_Error("Invalid zone size");
     *size = I_GetHeapSize();
     printf("Zone capacity: %d MiB\n",mb_used);
+#if defined(_WIN32) && defined(DOOM_MONSTER_BENCHMARK)
+    {
+        int fixed=M_CheckParm("-bench-zone-base");
+        if(fixed&&fixed+1<myargc){
+            void *address=(void*)(uintptr_t)strtoull(myargv[fixed+1],NULL,0);
+            memory=(byte*)VirtualAlloc(address,(size_t)*size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+            if(!memory||memory!=address)I_Error("Benchmark fixed zone address unavailable");
+            printf("Benchmark fixed zone: %p, %d bytes\n",memory,*size);
+            return memory;
+        }
+    }
+#endif
     memory = malloc((size_t)*size);
     if (!memory)
         I_Error("Could not allocate the DOOM memory zone");

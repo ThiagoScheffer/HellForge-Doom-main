@@ -1,3 +1,4 @@
+#include "../platform/monster_profile.h"
 #include "m_arcade.h"
 /* Native adaptation of the supplied FluidMonsters FluidWalk mixin.
  * Transient substeps stay outside mobj_t so existing saves remain readable.
@@ -29,6 +30,19 @@ static mobj_t *stepping;
 static int divisor=1;
 extern fixed_t tmdropoffz;
 static unsigned bucket(mobj_t *actor){return (unsigned)((uintptr_t)actor>>4)&1023;}
+#ifdef DOOM_MONSTER_BENCHMARK
+#include "../platform/monster_bench_state.h"
+void MP_StateFluid(MP_StateHash *h){
+    MP_StateActor(h,stepping);MP_StateField(h,divisor);
+    for(size_t i=0;i<h->count;++i){
+        mobj_t *actor=(mobj_t*)h->actor_at(h->context,i);walk_t *w=walks[bucket(actor)];
+        while(w&&w->actor!=actor)w=w->next;
+        MP_StateField(h,w!=NULL);if(!w)continue;
+        MP_StateField(h,w->state?w->state-states:-1);MP_StateField(h,w->remaining);MP_StateField(h,w->duration);MP_StateField(h,w->direction);
+        MP_StateField(h,w->x);MP_StateField(h,w->y);MP_StateField(h,w->z);
+    }
+}
+#endif
 int p_fluidweapons=1,p_fluidmonsters=1;
 int p_netfluidweapons,p_netfluidfastpistol;
 extern int p_fluidfastpistol;
@@ -54,7 +68,11 @@ void P_FluidReset(void){
 }
 fixed_t P_FluidMoveSpeed(mobj_t *actor){return P_WeakpointWalkSpeed(actor,(fixed_t)((int64_t)actor->info->speed*FRACUNIT/(stepping==actor?divisor:1)));}
 fixed_t P_FluidFloatSpeed(mobj_t *actor){return FLOATSPEED/(stepping==actor?divisor:1);}
-int P_FluidChase(mobj_t *actor,actionf_p1 action){
+#ifdef DOOM_MONSTER_PROFILING
+int P_FluidChase_mp_body(mobj_t* actor,actionf_p1 action);
+int P_FluidChase(mobj_t* actor,actionf_p1 action) { if(!mp_enabled){return P_FluidChase_mp_body(actor,action);}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_FLUIDCHASE);int result=P_FluidChase_mp_body(actor,action);if(scope.active)MP_End(scope);return result; }
+#endif
+int MP_BODY(P_FluidChase)(mobj_t *actor,actionf_p1 action){
     if(!P_FluidEnabled()||!supported(actor)||(actor->flags&MF_SKULLFLY))return 0;
     if(action!=(actionf_p1)A_Chase&&action!=(actionf_p1)A_VileChase&&action!=(actionf_p1)A_Hoof&&action!=(actionf_p1)A_Metal&&action!=(actionf_p1)A_BabyMetal)return 0;
     P_FluidRemove(actor);
@@ -65,6 +83,7 @@ int P_FluidChase(mobj_t *actor,actionf_p1 action){
        step can still intersect it. Keep vanilla's full, collision-checked
        action for that state; do not add substeps after consuming the step.
        This also recovers affected actors in existing saves. */
+    MP_COUNT(MP_OVERLAP,1);
     int overlap=!P_CheckPosition(actor,x,y);
     /* Position checks accept intersecting sector boundaries; TryMove also
        checks their vertical opening and step height. A short substep may
@@ -85,7 +104,11 @@ int P_FluidChase(mobj_t *actor,actionf_p1 action){
     }
     return 1;
 }
-void P_FluidTick(mobj_t *actor){
+#ifdef DOOM_MONSTER_PROFILING
+void P_FluidTick_mp_body(mobj_t* actor);
+void P_FluidTick(mobj_t* actor) { if(!mp_enabled){P_FluidTick_mp_body(actor);return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_FLUIDTICK);P_FluidTick_mp_body(actor);if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(P_FluidTick)(mobj_t *actor){
     walk_t *entry=walks[bucket(actor)];while(entry&&entry->actor!=actor)entry=entry->next;
     if(!entry)return;
     double dx=((double)actor->x-entry->x)/FRACUNIT;
@@ -94,7 +117,7 @@ void P_FluidTick(mobj_t *actor){
     if(!P_FluidEnabled()||(actor->flags&MF_SKULLFLY)||actor->state!=entry->state||actor->health<=0||actor->movedir!=entry->direction||
        dx*dx+dy*dy+dz*dz>64.0*64.0){P_FluidRemove(actor);return;}
     mobj_t *previous=stepping;int oldDivisor=divisor;stepping=actor;divisor=entry->duration;
-    int moved=P_Move(actor);stepping=previous;divisor=oldDivisor;
+    MP_COUNT(MP_FLUID_STEP,1);int moved=P_Move(actor);MP_COUNT(MP_FLUID_FAILED,!moved);stepping=previous;divisor=oldDivisor;
     if(!moved||--entry->remaining<=0){P_FluidRemove(actor);return;}
     entry->x=actor->x;entry->y=actor->y;entry->z=actor->z;
 }

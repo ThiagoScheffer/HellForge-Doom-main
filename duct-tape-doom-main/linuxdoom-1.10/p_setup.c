@@ -1,4 +1,6 @@
 #include "../platform/level_lifecycle.h"
+#include "p_swarm.h"
+#include "../platform/monster_profile.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -848,6 +850,7 @@ P_SetupLevel
   int		playermask,
   skill_t	skill)
 {
+    MP_SETUP_STAGE("map_setup_begin");
     if(R_BeforeLevelReset)R_BeforeLevelReset(); // Join workers before any level-owned memory changes.
 
     int		i;
@@ -855,6 +858,7 @@ P_SetupLevel
     int		lumpnum;
 	
     P_FluidReset(); P_GlobalDigReset(); ++r_levelserial;
+    P_SwarmBeginLevel();
     totalkills = totalitems = totalsecret = wminfo.maxfrags = 0;
     wminfo.partime = 180;
     for (i=0 ; i<MAXPLAYERS ; i++)
@@ -925,6 +929,7 @@ P_SetupLevel
         P_LoadSegs (lumpnum+ML_SEGS);
     }
     P_CheckNodeIndices ();
+    MP_SETUP_STAGE("map_geometry_loaded");
 	
     {
 	// Vanilla read past a short REJECT lump; pad it with zeros (visible).
@@ -944,10 +949,12 @@ P_SetupLevel
 	}
     }
     P_GroupLines ();
+    MP_SETUP_STAGE("map_lines_grouped");
 
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;
     P_LoadThings (lumpnum+ML_THINGS);
+    MP_SETUP_STAGE("map_actors_spawned");
     
     // if deathmatch, randomly spawn the active players
     if (deathmatch)
@@ -973,6 +980,7 @@ P_SetupLevel
     // preload graphics
     if (precache)
 	R_PrecacheLevel ();
+    MP_SETUP_STAGE("map_setup_end");
 
     //printf ("free memory: 0x%x\n", Z_FreeMemory());
 

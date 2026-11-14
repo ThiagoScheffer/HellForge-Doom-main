@@ -613,6 +613,7 @@ void woundsShutdown();
 struct WoundSpot { float height,across,yaw,radius;int tic; };
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most);
 bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask);
+void spriteFilteringShutdown();
 void woundVertex(Vertex &vertex,byte state);
 void maskedRow(std::vector<Vertex> &out,const std::vector<byte> &mask,int width,int r,bool flip,
                const std::function<Vertex(int,bool)> &corner);

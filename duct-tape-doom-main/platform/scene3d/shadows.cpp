@@ -1,12 +1,15 @@
 /* Sprite shadows: things' shadows from the sun or a strong light, and
    silhouettes the flashlight throws on the wall behind. */
 #include "internal.h"
+#include "../monster_profile.h"
+#include "../sprite_frustum.h"
 
 namespace doom3d {
 // The strongest visible shot or projectile supplies a world-space light here.
 // Contact shadows stay separate and remain after the transient shadow fades.
 void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
                     float x,float y,float z,const Uniforms &camera,const ShadowLight *light,bool anyThing,const RagdollCard *card) {
+    MP_AUTO(MP_SHADOW);
     if(!anyThing&&!(thing.info->flags&MF_COUNTKILL)&&Game_ThingRole(thing.type)!=GAME_THING_UNCOUNTED_MONSTER) return;
     float u0=0,v0=0,u1=image.width,v1=image.height;
     if(card) {
@@ -20,11 +23,11 @@ void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
     float floor=floorZ(sector),height=std::max(0.0f,z-floor);
     float opacity=0.28f*lighting(sector)/(1.0f+height/48.0f);
     if(opacity<0.015f) return;
-    float width=std::clamp(units(thing.radius)*2.0f,20.0f,80.0f)*std::min(1.7f,1.0f+height/160.0f);
+    float width=std::clamp(units(thing.radius)*2.0f,doom_sprite_frustum::shadowWidthMin,doom_sprite_frustum::shadowWidthMax)*std::min(doom_sprite_frustum::shadowScaleMax,1.0f+height/160.0f);
     // A settled corpse lies on the floor. Projecting its gameplay collision
     // height from low pool lights stretched it into long rectangular bands.
     bool prone=(thing.flags&MF_CORPSE)&&thing.tics==-1;
-    float baseLength=width*(prone?0.2f:0.65f);
+    float baseLength=width*(prone?0.2f:doom_sprite_frustum::shadowContactLength);
     float casterHeight=prone?std::min(4.0f,image.height*0.15f):units(thing.height);
     float length=baseLength,start=-length*0.35f;
     Point across={camera.right[0],camera.right[1]},away={-across.y,across.x};
@@ -32,7 +35,7 @@ void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
         float dx=x-light->x,dy=y-light->y,distance=std::hypot(dx,dy);
         if(distance>1.0f&&light->z>z+8.0f) {
             away={dx/distance,dy/distance};across={away.y,-away.x};
-            length=std::clamp(distance*casterHeight/(light->z-z),baseLength,prone?width:192.0f);
+            length=std::clamp(distance*casterHeight/(light->z-z),baseLength,prone?width:doom_sprite_frustum::shadowLengthMax);
             start=0;opacity=std::clamp(light->strength*0.55f,0.0f,0.65f);
         }
     }

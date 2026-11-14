@@ -1,4 +1,5 @@
-// Emacs style mode select   -*- C++ -*- 
+#include "../platform/monster_wake_audit.h"
+// Emacs style mode select   -*- C++ -*-
 //-----------------------------------------------------------------------------
 //
 // $Id:$
@@ -62,6 +63,8 @@ EV_Teleport
     fixed_t	oldy;
     fixed_t	oldz;
 
+    WA_Teleport(thing,line,0);
+
     // don't teleport missiles
     if (thing->flags & MF_MISSILE)
 	return 0;		
@@ -124,6 +127,7 @@ EV_Teleport
 
 		thing->angle = m->angle;
 		thing->momx = thing->momy = thing->momz = 0;
+                WA_Teleport(thing,line,1);
 		return 1;
 	    }	
 	}

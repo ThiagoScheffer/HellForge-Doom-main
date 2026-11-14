@@ -1,6 +1,9 @@
 /* Eye adaptation to the light around the player, and the flashlight
    tint and bounce from what it lights. */
 #include "internal.h"
+#ifdef DOOM_MONSTER_BENCHMARK
+extern "C" int mp_bench_light_clock;
+#endif
 
 namespace doom3d {
 static std::array<float,3> flashlightTint={},flashlightTargetTint={};
@@ -65,6 +68,11 @@ void updateExposure(Uniforms &camera) {
 // It creates no virtual lights, portal blocker lists, or per-pixel bounce work.
 void updateFlashlightTint(Uniforms &camera) {
     uint64_t now=SDL_GetTicksNS();
+#ifdef DOOM_MONSTER_BENCHMARK
+    // Explicit visual-fixture clock; ordinary replay and playable builds retain
+    // the original wall-clock smoothing, with no simulation timing changes.
+    if(mp_bench_light_clock)now=(uint64_t)(leveltime+1)*1000000000ull/TICRATE;
+#endif
     if(flashlightLevelSerial!=r_levelserial) {
         flashlightTint={};flashlightTargetTint={};flashlightTime=0;flashlightSampleTime=0;
         bounce={};targetBounce={};flashlightLevelSerial=r_levelserial;

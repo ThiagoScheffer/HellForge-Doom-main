@@ -131,7 +131,11 @@ void P_GlobalDigFlatHeights(mobj_t *thing,fixed_t x,fixed_t y,int sector,fixed_t
         if(c)*ceiling+=(fixed_t)(depth*FRACUNIT);else *floor-=(fixed_t)(depth*FRACUNIT);
     }
 }
-void P_GlobalDigRefreshHeights(mobj_t *thing){
+#ifdef DOOM_MONSTER_PROFILING
+void P_GlobalDigRefreshHeights_mp_body(mobj_t *thing);
+void P_GlobalDigRefreshHeights(mobj_t *thing) { if(!mp_enabled){P_GlobalDigRefreshHeights_mp_body(thing);return;}MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_DIG_HEIGHT);P_GlobalDigRefreshHeights_mp_body(thing);if(scope.active)MP_End(scope); }
+#endif
+void MP_BODY(P_GlobalDigRefreshHeights)(mobj_t *thing){
     recoverCraterSupport(thing);
     if(!flatCount||!thing->subsector||thing->flags&MF_NOCLIP)return;
     indexFlats();int s=(int)(thing->subsector->sector-sectors);

@@ -638,6 +638,20 @@ extern "C" int I_TestSettingsControls(void) {
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
+    if(mode==5||mode==6){
+        bool found=false;int before=settings.ambushSightReuse;
+        for(size_t t=0;t<panel.tabs.size()&&!found;++t){selectTab((int)t);
+            for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;
+                if(o&&o->key&&std::string(o->key)=="ambush_sight_reuse"){
+                    if(std::string(panel.tabs[t].title)!="Performance")return 0;
+                    panel.selected=(int)i;found=true;break;
+                }}}
+        if(!found)return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        if(panel.draft.ambushSightReuse==before||settings.ambushSightReuse!=before)return 0;
+        I_Render3DSettingsKey(mode==5?SDL_SCANCODE_F4:SDL_SCANCODE_F10,0);
+        return !panel.open&&settings.ambushSightReuse==(mode==5?!before:before);
+    }
     if(mode>=3){
         panel.draft.criticalParts=!settings.criticalParts;panel.draft.fov=settings.fov+5;
         if(mode==3)I_Render3DSettingsKey(SDL_SCANCODE_F10,0);

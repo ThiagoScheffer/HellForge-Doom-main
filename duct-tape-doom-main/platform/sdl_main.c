@@ -62,7 +62,11 @@ static boolean is_absolute(const char *path)
  * while they still resolve. -file and -deh take every path up to the next option. */
 static void absolute_path_args(int argc, char **argv)
 {
-    static const char *single[] = { "-iwad", "-config", "-record", "-soundfont" };
+    static const char *single[] = { "-iwad", "-config", "-record", "-soundfont"
+#ifdef DOOM_MONSTER_PROFILING
+        , "-profilemonsters"
+#endif
+    };
     static const char *lists[] = { "-file", "-deh", "-bex" };
     char *folder = SDL_GetCurrentDirectory();
     if (!folder) return;
