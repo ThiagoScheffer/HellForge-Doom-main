@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE documentation
 
-Current build: **2026.11.15.2**. See [HUD background opacity](changes/HUD-BACKGROUND-OPACITY.md) and [Elemental Damage 2.0 and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md) for the latest update and the
+Current build: **2026.11.15.3**. See [Speedrun position/layout](changes/SPEEDRUN-LAYOUT.md), [HUD background opacity](changes/HUD-BACKGROUND-OPACITY.md) and [Elemental Damage 2.0 and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md) for the latest update and the
 [main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
 features, defaults, build identity and focused verification.
 
@@ -10,6 +10,8 @@ coverage limits. Their source is now included in the main integration; old
 statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
+
+- [Speedrun X/Y controls and column/row layouts](changes/SPEEDRUN-LAYOUT.md)
 
 - [HUD and Speedrun background opacity](changes/HUD-BACKGROUND-OPACITY.md)
 

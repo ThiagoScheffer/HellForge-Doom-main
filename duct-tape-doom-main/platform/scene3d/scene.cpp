@@ -663,7 +663,7 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
     }
     std::vector<unsigned> modern(SCREENWIDTH*SCREENHEIGHT,0);
     if((r_photoactive||director_watch||director_demo&&demoplayback)&&!menuactive){if(!r_photoactive)std::fill(overlay.begin(),overlay.end(),0);}
-    else {modernHud(modern);combatWidgets(modern);combatWidgets(overlay,true);}
+    else {modernHud(modern);combatWidgets(overlay);combatWidgets(overlay,true);}
     directorMarkers(overlay);
     if(!r_photoactive&&!(director_demo&&demoplayback)){
     keyNotice(overlay);

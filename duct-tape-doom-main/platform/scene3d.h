@@ -165,7 +165,8 @@ struct Settings {
     int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
     int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
     int elementalDot=0,combatMessages=0;
-    int speedrunHUD=0,speedrunAttempts=1,speedrunDeaths=1,speedrunStreak=1,speedrunAttemptTime=1,speedrunRuntime=1,speedrunDealt=1,speedrunTaken=1,speedrunAnchor=0;
+    int speedrunHUD=0,speedrunAttempts=1,speedrunDeaths=1,speedrunStreak=1,speedrunAttemptTime=1,speedrunRuntime=1,speedrunDealt=1,speedrunTaken=1,speedrunAnchor=0,speedrunLayout=0;
+    float speedrunX=0,speedrunY=0;
     int elementalCombatFX=0,advancedMonsterReactions=0;
     int eyeInjuries=0;
     int monsterBleeding=0,headshotFrenzy=0,monsterMetalSparks=1,headshotFeedback=2,headshotSound=1,monsterFeeding=0;

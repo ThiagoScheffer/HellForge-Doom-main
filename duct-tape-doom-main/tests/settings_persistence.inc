@@ -7,7 +7,26 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-opacity-write"){
+    if(settingsCase=="--settings-layout-write"){
+        check(settings.speedrunLayout==0&&settings.speedrunX==0&&settings.speedrunY==0,"existing profiles retain column layout and zero adjustments");
+        char sample[8][48]={"MAP04","ATT 1","DTH 0","KS 0","TIME 00:00.00","RUN 00:00:00","DEALT 0","TAKEN 0"};int visible[8]={1,1,1,1,1,1,1,1};
+        for(int layout:{0,1})for(float offset:{-100.f,0.f,100.f}){
+            settings.speedrunLayout=layout;settings.speedrunX=settings.speedrunY=offset;auto p=speedrunPanel(sample,visible);
+            check(p.x>=3&&p.y>=3&&p.x-3+p.width<=SCREENWIDTH&&p.y-3+p.height<=SCREENHEIGHT,"both layouts clamp the entire panel within the HUD viewport");
+        }
+        settings.speedrunLayout=1;auto row=speedrunPanel(sample,visible);check(row.cells[0].y==row.cells[7].y,"normal metrics fit side by side in a single info row");
+        {bool pending=worldPending;worldPending=true;settings.speedrunHUD=1;settings.speedrunX=settings.speedrunY=0;
+            std::vector<unsigned> pixels(SCREENWIDTH*SCREENHEIGHT,0);combatWidgets(pixels);int top=SCREENHEIGHT,bottom=-1;
+            for(int y=0;y<SCREENHEIGHT;++y)for(int x=0;x<SCREENWIDTH;++x)if(pixels[y*SCREENWIDTH+x]>>24){top=std::min(top,y);bottom=std::max(bottom,y);}
+            check(bottom>=top&&bottom-top<16,"actual row painting forms a single compact info bar");worldPending=pending;}
+        for(int i=1;i<8;++i)std::snprintf(sample[i],48,"VERY LARGE SESSION VALUE 12345678901234567890");auto wrap=speedrunPanel(sample,visible);
+        check(wrap.cells[7].y>wrap.cells[1].y&&wrap.width<=SCREENWIDTH,"long row values wrap safely rather than clipping off screen");
+        visible[2]=0;check(speedrunPanel(sample,visible).count==7,"hidden metrics consume no layout cells");
+        settings.speedrunX=15;settings.speedrunY=-20;settings.speedrunLayout=1;
+        check(I_TestSaveSettings(graphicsConfig),"position and layout save through the normal F4 writer");
+    }else if(settingsCase=="--settings-layout-read"){
+        check(settings.speedrunLayout==1&&settings.speedrunX==15&&settings.speedrunY==-20,"row layout and independent X/Y adjustments persist after restart");
+    }else if(settingsCase=="--settings-opacity-write"){
         check(settings.hudBackgroundOpacity==75&&settings.speedrunBackgroundOpacity==80,"HUD opacity defaults retain dark readable panels");
         bool pending=worldPending;worldPending=true;settings.hudStyle=1;settings.hudFace=0;settings.hudLayout=0;settings.hudScale=100;settings.speedrunHUD=1;settings.speedrunAnchor=0;
         for(float percent:{0.f,25.f,100.f}){
