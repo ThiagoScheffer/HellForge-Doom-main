@@ -9,6 +9,8 @@ baseline_commit: f77c754c1d0b7c7bd020e10ac250d759ef6ff3f5
 index: ../README.md
 ```
 
+**Later extension:** [Elemental Damage 2.0](ELEMENTAL-DAMAGE-2.md) adds separately enabled damaging burns, Cacodemon charring and HUD features in build 2026.11.15.1. This report retains the original cosmetic-only release evidence and advanced-reaction behavior.
+
 Implemented in the current main checkout, preserving unrelated source and gameplay systems. The two new **F4 > Combat** switches default off and persist through normal apply/save/export/import:
 
 - **Elemental Combat FX** (`elemental_combat_fx`): cosmetic fire/plasma feedback and charred corpses. Burning never adds damage.

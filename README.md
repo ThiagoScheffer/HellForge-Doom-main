@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE
 
-**Current build: 2026.11.14.3** | [Elemental combat update](docs/changes/ELEMENTAL-COMBAT.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Current build: 2026.11.15.1** | [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
@@ -25,6 +25,7 @@ configuration, and verification notes.
 | :--- | :--- | :--- |
 | 🎯 **[Sprite-based headshots](docs/changes/CRITICAL-PARTS.md)** | 2× human headshots, per-pellet hits, and shots through transparent sprite gaps. | Uses the displayed frame, rotation, mirroring, and silhouette; shares impact coordinates with attached wounds. |
 | 👁️ **[Monster weak points](docs/changes/ENHANCED-MONSTER-COMBAT.md)** | Heads, eyes, faces, brains, and mechanical legs have distinct combat rules. Weapon choice matters. | Monster profiles, conservative region classification, projectile provenance, and damage multipliers that do not stack. |
+| **[Elemental Damage 2.0, combat notifications & Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md)** | Optional Imp/Mancubus fire damage, blue plasma burns, charred Cacodemons, colored combat events and seven independent session metrics. | One authoritative DoT stream per actor, v6 status saves, bounded event queue and event-based session history that survives checkpoint reloads. |
 | **[Elemental combat & injury reactions](docs/changes/ELEMENTAL-COMBAT.md)** | Cosmetic fire, blue plasma burns, charred corpses, Mancubus stagger, wounded Baron aggression and Arch-vile health siphoning. | Confirmed health-loss provenance, bounded local donor queries, immutable corpse artwork variants and versioned actor status saves. |
 | 👁️ **[Eye injuries](docs/changes/EYE-INJURIES.md)** | Hitscan eye hits can blind Cacodemons/Pain Elementals until they eat a corpse, or provoke ten seconds of Spider Mastermind rage. | Fingerprint-validated visible-eye masks, one chance per discharge, normal projectiles, bounded feeding and versioned save state. |
 | 💥 **[Impact feedback & frenzy](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md)** | Metal-leg sparks, headshot confirmation, and close super-shotgun hits that can provoke infighting. | Confirmed-impact events, per-discharge bookkeeping, bounded particles, and preserved attacker attribution. |
@@ -39,7 +40,7 @@ configuration, and verification notes.
 
 **Start with F4.** Human critical parts, enhanced weak points, weapon
 vulnerabilities, injuries, eye injuries, bleeding, feeding, frenzy, and death-save recovery
-are optional and default off. New ambush sight reuse, sprite filtering and idle-search
+are optional and default off. Damaging elemental burns, colored notifications and the Speedrun HUD also default off. New ambush sight reuse, sprite filtering and idle-search
 reuse also default off in the normal build. Sprite combat additions are restricted to
 single-player sprite rendering; multiplayer, demos, and voxel targets retain
 their documented exclusions.

@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE documentation
 
-Current build: **2026.11.14.3**. See [Elemental combat](changes/ELEMENTAL-COMBAT.md) for the latest update and the
+Current build: **2026.11.15.1**. See [Elemental Damage 2.0 and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md) for the latest update and the
 [main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
 features, defaults, build identity and focused verification.
 
@@ -10,6 +10,9 @@ coverage limits. Their source is now included in the main integration; old
 statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
+
+- [Elemental Damage 2.0, colored notifications and Speedrun HUD](changes/ELEMENTAL-DAMAGE-2.md)
+
 
 - [Elemental combat, charred corpses and advanced injury reactions](changes/ELEMENTAL-COMBAT.md)
 

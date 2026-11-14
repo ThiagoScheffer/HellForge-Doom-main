@@ -722,7 +722,7 @@ P_KillMobj
     mobjtype_t	item;
     mobj_t*	mo;
 	
-    P_WeakpointForget(target);
+    P_WeakpointDied(target);
     Arcade_Kill(source,target);
     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);
 
@@ -841,28 +841,28 @@ P_DamageMobj
     player_t*	player;
     fixed_t	thrust;
     int		temp;
-    int elementKind,previousBurn;
+    int elementKind,previousBurn,healthBefore;
 	
     if(lan_session&&!deathmatch&&!lan_friendlyfire&&source&&source!=target&&source->player&&target->player)return;
 
     if ( !(target->flags & MF_SHOOTABLE) )
 	return;	// shouldn't happen...
 		
-    if(R_DamageHit&&!p_wp_bleed_damage)R_DamageHit(target,inflictor,source,damage);
+    if(R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)R_DamageHit(target,inflictor,source,damage);
 
     if (target->health <= 0)
 	return;
 
     damage=P_WeakpointAdjustDamage(target,inflictor,source,damage);
 
-    P_AggressiveContact(target,inflictor,source);
+    if(!p_wp_dot_damage)P_AggressiveContact(target,inflictor,source);
 
     if ( target->flags & MF_SKULLFLY )
     {
 	target->momx = target->momy = target->momz = 0;
     }
 
-    if (R_DamageHit&&!p_wp_bleed_damage)
+    if (R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)
 	R_DamageHit (target, inflictor, source, damage);
 	
     player = target->player;
@@ -955,13 +955,15 @@ P_DamageMobj
     }
     
     // do the damage	
-    if(!p_wp_bleed_damage)P_AggressiveDamage(target,inflictor,source,damage);
+    if(!p_wp_bleed_damage&&!p_wp_dot_damage)P_AggressiveDamage(target,inflictor,source,damage);
     if(damage>0)Arcade_Impact(inflictor,source,target);
     Arcade_Damage(source,target,damage);
     if(damage>0)P_PhotoEvent(2,target);
     elementKind=P_CombatDamageKind(inflictor,source);
     previousBurn=P_CombatVisualKind(target);
+    healthBefore=target->health;
     target->health -= damage;	
+    P_SessionDamage(target,source,healthBefore,damage);
     if (target->health <= 0)
     {
 	P_NoticeKill(source,target,inflictor);
@@ -971,7 +973,7 @@ P_DamageMobj
     }
 
     P_CombatConfirmed(target,source,elementKind,damage,-1);
-    if(p_wp_bleed_damage)return;
+    if(p_wp_bleed_damage||p_wp_dot_damage)return;
     if(damage>0)P_WeakpointFeedingHurt(target);
 
     if ( (P_Random () < target->info->painchance)
@@ -998,4 +1000,3 @@ P_DamageMobj
     }
 			
 }
-

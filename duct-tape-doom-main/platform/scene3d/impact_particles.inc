@@ -180,15 +180,16 @@ void combatElemental(mobj_t *actor,int kind) {
     // First-person feedback uses the ordinary damage flash and fatal pain sound;
     // never attach persistent flames to the camera/player actor.
     if(actor->player)return;
+    bool minimal=kind>=4;if(minimal)kind-=3;
     static int tic=-1,budget=0,lights=0;
     if(tic!=leveltime){tic=leveltime;budget=lights=0;}
-    if(leveltime%3||budget>=32||impactParticles.size()>=512)return;
+    if(leveltime%(minimal?6:3)||budget>=(minimal?8:32)||impactParticles.size()>=512)return;
     auto *viewer=players[displayplayer].mo;
     if(!viewer||std::hypot(units(actor->x-viewer->x),units(actor->y-viewer->y))>1200)return;
     float x=units(actor->x)+randomRange(-8,8),y=units(actor->y)+randomRange(-8,8);
     float z=units(actor->z)+randomRange(2,std::max(4.f,units(actor->height)*.8f));
     std::array<float,3> color=kind==2?std::array<float,3>{.15f,.45f,1.f}:kind==3?std::array<float,3>{1.f,.08f,.04f}:std::array<float,3>{1.f,.45f,.08f};
     impactParticle(x,y,z,randomRange(-7,7),randomRange(-7,7),randomRange(14,32),.45f,kind==2?1.4f:3,5,color);++budget;
-    if(kind!=2&&budget<32&&impactParticles.size()<512){impactParticle(x,y,z,0,0,18,.7f,5,6,{.18f,.16f,.15f});++budget;}
-    if(lights<4){sparkFlash(x,y,z,kind==3?72:48,.35f,color);++lights;}
+    if(!minimal&&kind!=2&&budget<32&&impactParticles.size()<512){impactParticle(x,y,z,0,0,18,.7f,5,6,{.18f,.16f,.15f});++budget;}
+    if(!minimal&&lights<4){sparkFlash(x,y,z,kind==3?72:48,.35f,color);++lights;}
 }

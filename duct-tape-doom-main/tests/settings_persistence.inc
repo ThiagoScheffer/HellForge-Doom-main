@@ -7,7 +7,15 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-elemental-write"){
+    if(settingsCase=="--settings-elemental2-write"){
+        check(!settings.elementalDot&&!settings.combatMessages&&!settings.speedrunHUD,"three new features default off");
+        check(I_TestSettingsPersistence(9),"actual Combat and SPEEDRUN tabs apply new controls through F4");
+        check(p_wp_dot&&settings.speedrunHUD&&settings.combatMessages&&!settings.speedrunDeaths&&settings.speedrunAnchor==3,"metric visibility and anchor apply independently");
+    }else if(settingsCase=="--settings-elemental2-read"){
+        check(settings.elementalDot&&settings.combatMessages&&settings.speedrunHUD&&!settings.speedrunDeaths&&settings.speedrunAnchor==3,"all new settings restore from separate-process profile");
+        settings.accelerated=1;applySettings();check(p_wp_dot,"restored damaging option reaches gameplay");
+        auto before=fileContents(graphicsConfig);check(I_TestSettingsPersistence(10),"F10 discards new UI drafts");check(fileContents(graphicsConfig)==before&&p_wp_dot&&settings.speedrunHUD,"discard preserves file and active controls");
+    }else if(settingsCase=="--settings-elemental-write"){
         check(!settings.elementalCombatFX&&!settings.advancedMonsterReactions,"new elemental controls default off");
         settings.elementalCombatFX=settings.advancedMonsterReactions=1;settings.accelerated=1;applySettings();
         check(p_wp_elemental&&p_wp_reactions,"both controls reach gameplay");

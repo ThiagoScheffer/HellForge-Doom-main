@@ -4,6 +4,12 @@
 extern "C" { int ST_FaceIndex(void); int Arcade_MenuOpen(void); extern int arcade_active; }
 extern "C" { const unsigned char *ST_HelmetFace(int index); }
 namespace doom3d {
+inline const char *hudGlyph(char c){
+    static constexpr const char* alphabet="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-/:.,";
+    static constexpr const char* glyphs[]={"111101101101111","010110010010111","111001111100111","111001111001111","101101111001001","111100111001111","111100111101111","111001010010010","111101111101111","111101111001111",
+        "010101111101101","110101110101110","111100100100111","110101101101110","111100110100111","111100110100100","111100101101111","101101111101101","111010010010111","001001001101111","101101110101101","100100100100111","101111111101101","110101101101101","111101101101111","111101111100100","111101101111001","110101110101101","111100111001111","111010010010010","101101101101111","101101101101010","101101111111101","101101010101101","101101010010010","111001010100111","000000111000000","001001010100100","000010000010000","000000000000010","000000000010100"};
+    const char *found=strchr(alphabet,c);return found?glyphs[found-alphabet]:nullptr;
+}
 inline void modernHud(std::vector<unsigned>& out) {
     if(!worldPending||menuactive||automapactive||Arcade_MenuOpen())return;
     std::vector<unsigned> hud(SCREENWIDTH*SCREENHEIGHT,0);
@@ -13,9 +19,6 @@ inline void modernHud(std::vector<unsigned>& out) {
             for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)hud[yy*SCREENWIDTH+xx]=color;
     };
     // Compact, neutral 3x5 lettering; values use twice the label size.
-    const char* alphabet="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-/";
-    const char* glyphs[]={"111101101101111","010110010010111","111001111100111","111001111001111","101101111001001","111100111001111","111100111101111","111001010010010","111101111101111","111101111001111",
-        "010101111101101","110101110101110","111100100100111","110101101101110","111100110100111","111100110100100","111100101101111","101101111101101","111010010010111","001001001101111","101101110101101","100100100100111","101111111101101","110101101101101","111101101101111","111101111100100","111101101111001","110101110101101","111100111001111","111010010010010","101101101101111","101101101101010","101101111111101","101101010101101","101101010010010","111001010100111","000000111000000","001001010100100"};
     struct Label {std::string value;int x,y,size;unsigned color;bool fixed=false;};
     std::vector<Label> labels;
     auto text=[&](const std::string& value,int x,int y,int size,unsigned color){labels.push_back({value,x,y,size,color});};
@@ -140,8 +143,7 @@ inline void modernHud(std::vector<unsigned>& out) {
         std::string value=label.value;
         if(scale<.7f){if(value=="HEALTH")value="HP";else if(value=="ARMOR")value="AR";}
         for(char c:value){
-            const char* found=strchr(alphabet,c);
-            if(found){const char* bits=glyphs[found-alphabet];
+            if(const char* bits=hudGlyph(c)){
                 for(int row=0;row<5;++row)for(int col=0;col<3;++col)if(bits[row*3+col]=='1')
                     for(int yy=0;yy<size;++yy)for(int xx=0;xx<size;++xx){
                         int px=x+col*size+xx,py=y+row*size+yy;
@@ -152,5 +154,34 @@ inline void modernHud(std::vector<unsigned>& out) {
         }
     }
 }
+inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false){
+    if((!settings.speedrunHUD&&!settings.combatMessages)||!worldPending||menuactive||automapactive||Arcade_MenuOpen()||!P_WeakpointActive())return;
+    auto box=[&](int x,int y,int w,int h){for(int yy=std::max(0,y);yy<std::min(SCREENHEIGHT,y+h);++yy)for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)out[yy*SCREENWIDTH+xx]=0xd0141010u;};
+    auto text=[&](const char *value,int x,int y,unsigned color){for(int n=0;value[n]&&n<76;++n,x+=4)if(const char *bits=hudGlyph(value[n]))for(int row=0;row<5;++row)for(int col=0;col<3;++col)if(bits[row*3+col]=='1'&&x+col>=0&&x+col<SCREENWIDTH&&y+row>=0&&y+row<SCREENHEIGHT)out[(y+row)*SCREENWIDTH+x+col]=color;};
+    if(settings.speedrunHUD&&!fixed){
+        static combat_stats_t previous{};static bool valid=false;static char lines[8][48]{};
+        const auto &stats=*P_SessionStats();
+        if(!valid||std::memcmp(&stats,&previous,sizeof(stats))){
+            previous=stats;valid=true;
+            if(gamemode==commercial)std::snprintf(lines[0],48,"SPEEDRUN - MAP%02d",stats.map);else std::snprintf(lines[0],48,"SPEEDRUN - E%dM%d",stats.episode,stats.map);
+            std::snprintf(lines[1],48,"ATTEMPTS %llu",(unsigned long long)stats.attempts);
+            std::snprintf(lines[2],48,"DEATHS %llu",(unsigned long long)stats.deaths);
+            std::snprintf(lines[3],48,"KILLSTREAK %llu",(unsigned long long)stats.streak);
+            auto timer=[](char *dest,const char *title,uint64_t t){std::snprintf(dest,48,"%s %02llu:%02llu:%02llu.%02llu",title,(unsigned long long)(t/126000),(unsigned long long)(t/2100%60),(unsigned long long)(t/35%60),(unsigned long long)(t%35*100/35));};
+            timer(lines[4],"ATTEMPT",stats.attemptTics);timer(lines[5],"RUNTIME",stats.runtimeTics);
+            std::snprintf(lines[6],48,"DMG DEALT %llu",(unsigned long long)stats.dealt);
+            std::snprintf(lines[7],48,"DMG TAKEN %llu",(unsigned long long)stats.taken);
+        }
+        int visible[]={1,settings.speedrunAttempts,settings.speedrunDeaths,settings.speedrunStreak,settings.speedrunAttemptTime,settings.speedrunRuntime,settings.speedrunDealt,settings.speedrunTaken};
+        int rows=0;for(int v:visible)rows+=v!=0;
+        int h=rows*8+6,x=(settings.speedrunAnchor&1)?210:8,y=settings.speedrunAnchor>=2?158-h:settings.hudLayout==2?98:56;
+        y=std::min(y,168-h);box(x-3,y-3,115,h);int row=0;
+        for(int i=0;i<8;++i)if(visible[i]){char clipped[28];std::snprintf(clipped,sizeof(clipped),"%s",lines[i]);text(clipped,x,y+row++*8,i?0xfff3e8deu:0xffffb15au);}
+    }
+    if(settings.combatMessages&&fixed){combat_notice_t notices[3];int count=P_HudNotices(notices);
+        for(int i=0;i<count;++i){char value[61];std::snprintf(value,sizeof(value),"%s",notices[i].text);int width=(int)std::strlen(value)*4,x=(SCREENWIDTH-width)/2,y=28+i*8;box(x-2,y-1,width+3,7);text(value,x,y,notices[i].color);}
+    }
+}
+
 }
 #endif

@@ -1,6 +1,6 @@
 /* Optional elemental feedback and injury reactions. Included by p_weakpoints.cpp
-   to share actor lifecycle/save records; no new thinkers or damage-over-time. */
-int p_wp_elemental=0,p_wp_reactions=0;
+   to share actor lifecycle/save records; periodic damage uses the normal damage boundary. */
+int p_wp_elemental=0,p_wp_reactions=0,p_wp_dot=0,p_wp_dot_damage=0;
 void (*P_CombatVisual)(mobj_t*,int)=nullptr;
 int (*P_CombatCompatible)(mobj_t*)=nullptr;
 void (*P_CombatStagger)(mobj_t*)=nullptr;
@@ -12,8 +12,10 @@ uint32_t cosmeticSerial=0;
 int siphonBudgetTic=-1,siphonBudget=0;
 bool elementalEligible(mobj_t *m) {
     if(!m||!P_WeakpointActive()||(P_WeakpointTargetAllowed&&!P_WeakpointTargetAllowed(m)))return false;
-    return m->player||m->type==MT_POSSESSED||m->type==MT_SHOTGUY||m->type==MT_CHAINGUY||m->type==MT_TROOP||m->type==MT_SERGEANT;
+    return m->player||m->type==MT_POSSESSED||m->type==MT_SHOTGUY||m->type==MT_CHAINGUY||m->type==MT_TROOP||m->type==MT_SERGEANT||m->type==MT_HEAD;
 }
+bool dotEligible(mobj_t *m){return allowed(m)&&m->info&&((m->flags&MF_COUNTKILL)||m->type==MT_SKULL)&&!(m->flags&(MF_MISSILE|MF_ARENA|MF_ARENAOLD));}
+void clearDot(Runtime &r){r.dotUntil=r.dotNext=r.dotKind=r.dotDamage=0;r.dotSource=nullptr;r.dotPlayer=-1;}
 bool compatible(mobj_t *m){return P_CombatCompatible&&P_CombatCompatible(m);}
 }
 void P_CombatConfigure(int elemental,int reactions) {
@@ -23,21 +25,24 @@ void P_CombatConfigure(int elemental,int reactions) {
         if(!reactions&&r.staggerUntil>leveltime&&entry.first->state&&entry.first->state->tics>0)entry.first->tics=std::min<int>(entry.first->tics,entry.first->state->tics);
         if(!reactions)r.staggerUntil=r.staggerCooldown=r.baronUntil=r.siphonUntil=r.siphonNext=r.siphonCooldown=0;
     }
-    if(!elemental)P_CombatFireEnd();
+    if(!elemental&&!p_wp_dot)P_CombatFireEnd();
 }
 void P_CombatFireBegin(mobj_t *source,mobj_t *fire) {
-    if(!p_wp_elemental||!P_WeakpointActive())return;
+    if((!p_wp_elemental&&!p_wp_dot)||!P_WeakpointActive())return;
     fireSource=source;fireInflictor=fire;fireVictims.clear();
 }
 void P_CombatFireEnd(void){fireSource=fireInflictor=nullptr;fireVictims.clear();}
 int P_CombatDamageKind(mobj_t *inflictor,mobj_t *source) {
-    if(!p_wp_elemental||!P_WeakpointActive()||p_wp_bleed_damage)return 0;
-    if(fireSource&&source==fireSource&&(inflictor==fireSource||inflictor==fireInflictor))return 1;
+    if(p_wp_dot_damage)return p_wp_dot_damage;
+    if((!p_wp_elemental&&!p_wp_dot)||!P_WeakpointActive()||p_wp_bleed_damage)return 0;
+    if(fireSource&&source==fireSource&&(inflictor==fireSource||inflictor==fireInflictor))return 4;
     if(inflictor&&inflictor->type==MT_FATSHOT&&(inflictor->flags&MF_MISSILE))return 1;
+    if(inflictor&&inflictor->type==MT_TROOPSHOT&&(inflictor->flags&MF_MISSILE)&&p_wp_dot)return 3;
     auto it=runtime.find(inflictor);
     return source&&source->player&&inflictor&&inflictor->type==MT_PLASMA&&it!=runtime.end()&&it->second.kind==WP_PLASMA_DIRECT?2:0;
 }
 int P_CombatVisualKind(mobj_t *actor) {
+    if(int dot=P_CombatDotKind(actor))return dot;
     if(!p_wp_elemental||!elementalEligible(actor))return 0;
     auto it=runtime.find(actor);return it!=runtime.end()&&(it->second.burnUntil>leveltime||(actor->player&&actor->health<=0))?it->second.burnKind:0;
 }
@@ -49,11 +54,11 @@ int P_CombatRage(mobj_t *actor) {
     if(!p_wp_reactions||!p_wp_bleeding||!allowed(actor)||actor->type!=MT_BRUISER||P_WeakpointFrenzied(actor))return 0;
     auto it=runtime.find(actor);return it!=runtime.end()&&it->second.baronUntil>leveltime;
 }
-void P_CombatConfirmed(mobj_t *actor,mobj_t*,int kind,int actual,int previousBurn) {
+void P_CombatConfirmed(mobj_t *actor,mobj_t *source,int kind,int actual,int previousBurn) {
     if(actual<=0||!P_WeakpointActive()||!actor)return;
     // previousBurn == -1 is the native survivor notification. Reactions run
     // after the existing player bullet pipeline has escalated bleeding.
-    if(p_wp_reactions&&p_wp_bleeding&&allowed(actor)){
+    if(!p_wp_dot_damage&&p_wp_reactions&&p_wp_bleeding&&allowed(actor)){
         int tier=P_WeakpointBleedTier(actor);
         if(actor->type==MT_BRUISER&&(tier>=2||(int64_t)actor->health*100<=actor->info->spawnhealth*40LL)){
             auto &r=runtime[actor];if(r.baronUntil<=leveltime)r.baronUntil=leveltime+280;
@@ -65,28 +70,59 @@ void P_CombatConfirmed(mobj_t *actor,mobj_t*,int kind,int actual,int previousBur
             }
         }
     }
-    if(!p_wp_elemental||!elementalEligible(actor)||previousBurn==0&&kind==0&&actor->health>0)return;
+    int element=kind==2?2:kind?1:0;
     if(actor->health<=0){
-        if(kind||previousBurn==1){
-            auto &r=runtime[actor];r.charred=!actor->player;r.burnKind=kind?kind:previousBurn;r.burnUntil=leveltime+70;
-            // Player deaths are fire-specific, never caused merely by an old cosmetic ignition.
-            if(actor->player&&kind!=1){r.burnKind=0;r.burnUntil=0;}
+        if(p_wp_elemental&&elementalEligible(actor)&&(element||previousBurn==1||previousBurn==2)){
+            auto &r=runtime[actor];r.charred=!actor->player;r.burnKind=element?element:previousBurn;r.burnUntil=leveltime+70;
+            if(actor->player&&element!=1){r.burnKind=0;r.burnUntil=0;}
         }
         return;
     }
-    if(!kind)return;
-    if(kind==1&&fireSource){
+    if(p_wp_dot_damage||!kind)return;
+    // A single Vile attack may report direct and splash damage to the same actor.
+    if(kind==4&&fireSource){
         if(std::find(fireVictims.begin(),fireVictims.end(),actor)!=fireVictims.end())return;
         if(fireVictims.size()>=256)return;fireVictims.push_back(actor);
     }
+    if(p_wp_dot&&dotEligible(actor)){
+        int chance=0,duration=0,damage=0;
+        bool human=actor->type==MT_POSSESSED||actor->type==MT_SHOTGUY||actor->type==MT_CHAINGUY;
+        if(kind==3&&human){chance=15;duration=210;damage=3;}
+        else if(kind==1&&elementalEligible(actor)){chance=10;duration=140;damage=5;}
+        else if(kind==2){chance=12;duration=175;damage=4;}
+        if(chance){
+            if(roll(chance)){
+                auto &r=runtime[actor];bool same=r.dotKind==element&&r.dotUntil>=leveltime;
+                if(!same)r.dotNext=leveltime+35;
+                r.dotUntil=leveltime+duration;r.dotKind=element;r.dotDamage=damage;r.dotSource=source;r.dotPlayer=-1;
+                if(source&&source->player)for(int i=0;i<MAXPLAYERS;++i)if(source->player==&players[i])r.dotPlayer=i;
+            }
+            // A failed damaging ignition must not start a misleading cosmetic fire.
+            if(kind!=2||!p_wp_elemental)return;
+        }
+    }
+    if(!p_wp_elemental||!elementalEligible(actor)||kind==3)return;
+    kind=element;
     // Render-only ignition uses its own deterministic hash, never P_Random.
     uint32_t h=(++cosmeticSerial)*747796405u+(uint32_t)leveltime*2891336453u;h=(h^(h>>16))*2246822519u;h^=h>>13;
     if(kind==2||h%100<10){auto &r=runtime[actor];r.burnKind=kind;r.burnUntil=leveltime+(kind==1?105:12);}
 }
 static void combatExpansionTick(mobj_t *actor) {
-    if(!p_wp_elemental&&!p_wp_reactions)return;
+    if(!p_wp_elemental&&!p_wp_reactions&&!p_wp_dot)return;
     auto it=runtime.find(actor);
-    if(it!=runtime.end()&&p_wp_elemental&&P_CombatVisualKind(actor)&&P_CombatVisual)P_CombatVisual(actor,it->second.burnKind);
+    if(!P_WeakpointActive()){if(it!=runtime.end()){clearDot(it->second);it->second.burnUntil=it->second.burnKind=it->second.charred=0;}return;}
+    if(it!=runtime.end()&&it->second.dotKind){
+        if(!p_wp_dot||!dotEligible(actor)||leveltime>it->second.dotUntil)clearDot(it->second);
+        else if(leveltime>=it->second.dotNext&&it->second.dotNext<=it->second.dotUntil){
+            int kind=it->second.dotKind,damage=it->second.dotDamage;auto *source=it->second.dotSource;
+            if(!source&&it->second.dotPlayer>=0)source=players[it->second.dotPlayer].mo;
+            it->second.dotNext+=35;
+            p_wp_dot_damage=kind;P_DamageMobj(actor,nullptr,source,damage);p_wp_dot_damage=0;
+            if(actor->health<=0)return;
+        }
+        it=runtime.find(actor);
+    }
+    if(it!=runtime.end()&&P_CombatVisualKind(actor)&&P_CombatVisual){int visual=P_CombatVisualKind(actor);P_CombatVisual(actor,p_wp_elemental?visual:visual+3);}
     if(!p_wp_reactions||!p_wp_bleeding||!allowed(actor)||actor->type!=MT_VILE)return;
     if(it!=runtime.end()&&it->second.siphonUntil){
         auto &r=it->second;
@@ -121,3 +157,12 @@ static void combatExpansionTick(mobj_t *actor) {
 
 static void combatExpansionReset(){P_CombatFireEnd();cosmeticSerial=0;siphonBudgetTic=-1;siphonBudget=0;}
 
+
+void P_CombatConfigureDot(int enabled){
+    p_wp_dot=enabled!=0;
+    if(!p_wp_dot)for(auto &entry:runtime)clearDot(entry.second);
+}
+int P_CombatDotKind(mobj_t *actor){
+    if(!p_wp_dot||!dotEligible(actor))return 0;
+    auto it=runtime.find(actor);return it!=runtime.end()&&it->second.dotUntil>=leveltime?it->second.dotKind:0;
+}

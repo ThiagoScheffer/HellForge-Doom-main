@@ -26,13 +26,13 @@ static void elementalRules(){
     for(int i=0;i<64;++i)P_CombatConfirmed(&target,&source,1,5,-1);
     check(P_CombatVisualKind(&target)==1&&wp_test_rng_calls==0,"ignition uses no gameplay random calls");
     mobj_t arch{},flame{};P_WeakpointForget(&target);
-    P_CombatFireBegin(&arch,&flame);check(P_CombatDamageKind(&arch,&arch)==1&&P_CombatDamageKind(&flame,&arch)==1,"Arch-vile direct/radius provenance shares one real attack context");
-    P_CombatConfirmed(&target,&arch,1,5,-1);int initial=P_CombatVisualKind(&target);
-    for(int i=0;i<100;++i)P_CombatConfirmed(&target,&arch,1,5,-1);
+    P_CombatFireBegin(&arch,&flame);check(P_CombatDamageKind(&arch,&arch)==4&&P_CombatDamageKind(&flame,&arch)==4,"Arch-vile direct/radius provenance shares one real attack context");
+    P_CombatConfirmed(&target,&arch,4,5,-1);int initial=P_CombatVisualKind(&target);
+    for(int i=0;i<100;++i)P_CombatConfirmed(&target,&arch,4,5,-1);
     check(P_CombatVisualKind(&target)==initial,"Arch-vile direct and radius damage cannot repeat ignition chance");P_CombatFireEnd();
     check(!P_CombatDamageKind(&flame,&arch),"visual-only Arch-vile fire cannot ignite");
     target.health=0;P_CombatConfirmed(&target,&source,0,5,1);check(P_CombatCharred(&target),"death while burning leaves cosmetic charred corpse");
-    std::vector<unsigned char> data(P_WeakpointSave(nullptr));P_WeakpointSave(data.data());check(data[0]==5,"new expansion uses save trailer v5");
+    std::vector<unsigned char> data(P_WeakpointSave(nullptr));P_WeakpointSave(data.data());check(data[0]==6,"new expansion uses save trailer v6");
     P_WeakpointClear();P_WeakpointLoad(data.data(),data.size());check(P_CombatCharred(&target),"charred corpse survives indexed save load");
     std::vector<unsigned char> legacy(data.begin(),data.begin()+168);legacy[0]=4;uint32_t legacySize=176;
     for(int i=0;i<4;++i)legacy.push_back((unsigned char)(legacySize>>(i*8)));for(char c:{'W','P','0','1'})legacy.push_back(c);
@@ -40,7 +40,7 @@ static void elementalRules(){
     P_WeakpointForget(&target);target.health=100;check(!P_CombatCharred(&target)&&!P_CombatVisualKind(&target),"resurrection forget clears charred and burning state");
     target.health=0;P_CombatConfirmed(&target,&source,2,100,0);check(P_CombatCharred(&target)&&P_CombatVisualKind(&target)==2,"plasma fatal effect is blue and charred");
     P_CombatConfigure(0,0);check(!P_CombatCharred(&target)&&!P_CombatVisualKind(&target),"disabling elemental FX clears statuses immediately");
-    for(int type:{MT_KNIGHT,MT_BRUISER,MT_HEAD,MT_SPIDER,MT_WOLFSS}){
+    for(int type:{MT_KNIGHT,MT_BRUISER,MT_SPIDER,MT_WOLFSS}){
         reset(type);P_CombatConfigure(1,0);target.health=0;P_CombatConfirmed(&target,&source,1,100,0);check(!P_CombatCharred(&target),"noneligible monster cannot become charred");
     }
     reset(MT_TROOP);P_CombatConfigure(1,0);target.player=&player;target.health=0;P_CombatConfirmed(&target,&source,1,100,0);

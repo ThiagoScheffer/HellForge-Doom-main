@@ -1,3 +1,4 @@
+#include "p_weakpoints.h"
 #include "../platform/monster_profile.h"
 #include "p_swarm.h"
 #include "p_arena.h"
@@ -204,6 +205,7 @@ void MP_BODY(P_Ticker) (void)
     }
     
 		
+    if(!r_photoactive)P_SessionTick(players[consoleplayer].mo&&players[consoleplayer].mo->health>0);
     if (R_BeforeTic) R_BeforeTic();
     if(leveltime<3)MP_STAGE("initial_tic_begin");
     for (i=0 ; i<MAXPLAYERS ; i++)

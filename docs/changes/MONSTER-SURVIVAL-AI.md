@@ -2,13 +2,15 @@
 
 ```yaml
 project: DOOM: HELLFORGE
-build: 2026.11.14.3
-updated_utc: 2026-11-14T10:02:57Z
+build: 2026.11.15.1
+updated_utc: 2026-11-14T11:56:29Z
 status: active
 evidence_build: 2026.11.12.1
 tests: MONSTER-SURVIVAL-AI-TESTS.md
 index: ../README.md
 ```
+
+Latest optional extension: [Elemental Damage 2.0, combat notifications and Speedrun HUD](ELEMENTAL-DAMAGE-2.md), build **2026.11.15.1**. Existing anatomical, survival and advanced reaction rules remain in place.
 
 Current extension: [Elemental combat and advanced reactions](ELEMENTAL-COMBAT.md), build **2026.11.14.3**. Baron and Arch-vile now join progressive bleeding; the linked report supersedes older eligibility lists below. Existing damage multipliers remain unchanged.
 

@@ -1,3 +1,4 @@
+#include "p_weakpoints.h"
 #include "p_arena.h"
 #include "m_arcade.h"
 #include "p_notices.h"
@@ -476,6 +477,7 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 //
 extern  gamestate_t     wipegamestate;
 
+static int sessionDemoLoad=0;
 void G_DoLoadLevel (void)
 {
     int             i;
@@ -520,6 +522,7 @@ void G_DoLoadLevel (void)
     }
     P_SetupLevel (gameepisode, gamemap, 0, gameskill);
     P_NoticeLevel();
+    if(!sessionDemoLoad)P_SessionMap(gameepisode,gamemap);
     displayplayer = consoleplayer;		// view the guy you are playing
     starttime = I_GetTime ();
     gameaction = ga_nothing;
@@ -1501,6 +1504,7 @@ void G_DoNewGame (void)
     fastparm = false;
     nomonsters = false;
     consoleplayer = 0;
+    P_SessionNewVisit();
     G_InitNew (d_skill, d_episode, d_map);
     if(director_record_pending){director_record_pending=0;director_demo=1;G_RecordDemo(director_take);G_BeginRecording();}
     gameaction = ga_nothing;
@@ -1785,7 +1789,7 @@ void G_DoPlayDemo (void)
 
     // don't spend a lot of time in loadlevel
     precache = false;
-    G_InitNew (skill, episode, map);
+    sessionDemoLoad=1;G_InitNew (skill, episode, map);sessionDemoLoad=0;
     precache = true;
 
     usergame = false;

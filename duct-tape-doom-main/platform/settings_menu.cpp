@@ -638,6 +638,17 @@ extern "C" int I_TestSettingsControls(void) {
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
+    if(mode==9||mode==10){
+        panel.draft.accelerated=1;bool discard=mode==10;int beforeDot=settings.elementalDot,beforeHud=settings.speedrunHUD,beforeMessage=settings.combatMessages;
+        auto chooseKey=[&](const char *key,const char *tab){for(size_t t=0;t<panel.tabs.size();++t){selectTab((int)t);for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;if(o&&o->key&&!strcmp(o->key,key)){if(strcmp(panel.tabs[t].title,tab))return false;panel.selected=(int)i;return true;}}}return false;};
+        for(const char *key:{"elemental_damage_over_time","combat_event_messages","speedrun_hud"}){
+            if(!chooseKey(key,!strcmp(key,"speedrun_hud")?"SPEEDRUN":"Combat"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        }
+        if(!discard){if(!chooseKey("speedrun_deaths","SPEEDRUN"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);if(!chooseKey("speedrun_anchor","SPEEDRUN"))return 0;for(int i=0;i<3;++i)I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);}
+        if(settings.elementalDot!=beforeDot||settings.speedrunHUD!=beforeHud||settings.combatMessages!=beforeMessage)return 0;
+        I_Render3DSettingsKey(discard?SDL_SCANCODE_F10:SDL_SCANCODE_F4,0);
+        return !panel.open&&settings.elementalDot==(discard?beforeDot:!beforeDot)&&settings.speedrunHUD==(discard?beforeHud:!beforeHud)&&settings.combatMessages==(discard?beforeMessage:!beforeMessage);
+    }
     if(mode>=5&&mode<=8){
         bool eye=mode>=7,discard=mode==6||mode==8;
         if(eye){panel.draft.accelerated=panel.draft.enhancedWeakPoints=1;}

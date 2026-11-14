@@ -177,6 +177,10 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Monster-specific plasma, rocket and BFG weaknesses. Single-player sprites only; direct hits and splash remain separate.",[](const Settings &d){return d.accelerated!=0;}),
                 check("localized_injury_effects","Localized Injury Effects",&s.localizedInjuries,
                     "Temporary heavy head-hit aim disruption and mechanical rocket-leg immobilization. Requires the corresponding weak-point or weapon rule.",[](const Settings &d){return d.accelerated!=0;}),
+                check("elemental_damage_over_time","Elemental Damage Over Time",&s.elementalDot,
+                    "Actual burns: Imp fire 15% / 6x3 HP; Mancubus fire 10% / 4x5 HP; player plasma 12% / 5x4 HP. One stream per sprite monster; separate from cosmetic FX. Single-player only.",[](const Settings &d){return d.accelerated!=0;}),
+                check("combat_event_messages","Colored Combat Notifications",&s.combatMessages,
+                    "Yellow critical bleeding; purple actual frenzy and eye-injury activations. Three short messages maximum.",[](const Settings &d){return d.accelerated!=0;}),
                 check("elemental_combat_fx","Elemental Combat FX",&s.elementalCombatFX,
                     "Cosmetic Mancubus/Arch-vile ignition, plasma feedback and charred corpses. No burn damage. Single-player sprites only.",[](const Settings &d){return d.accelerated!=0;}),
                 check("advanced_monster_reactions","Advanced Monster Reactions",&s.advancedMonsterReactions,
@@ -584,6 +588,17 @@ std::vector<OptionTab> optionTabs(Settings &s) {
     tabs.push_back({"Controls",{{"Corner peeking",{
         check("corner_peek","Corner peeking",&s.cornerPeek,"Hold the left/right peek keys to lean around a corner with a gentle 12-degree view tilt; release to return. Walls stop the camera. Shots originate from the collision-checked leaning view, keeping the crosshair centered. Disabled in demos and multiplayer.",[](const Settings &d){return d.accelerated!=0;}),
         key("peek_left","Peek left",&s.peekLeft),key("peek_right","Peek right",&s.peekRight)}}}});
+    tabs.push_back({"SPEEDRUN",{{"Session overlay",{
+        check("speedrun_hud","Enable Speedrun HUD",&s.speedrunHUD,"Optional session statistics. Counters continue while hidden; saves do not roll back session history.",[](const Settings &d){return d.accelerated!=0;}),
+        choice("speedrun_anchor","Overlay position",&s.speedrunAnchor,{"Upper left","Upper right","Lower left","Lower right"},{0,1,2,3},"Safe side anchors avoid the crosshair and bottom status bar.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        check("speedrun_attempts","Map Attempts",&s.speedrunAttempts,"Each playable map load/restart/checkpoint begins one attempt.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_deaths","Map Deaths",&s.speedrunDeaths,"Actual player deaths this map visit.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_killstreak","Killstreak",&s.speedrunStreak,"Player-credited monster kills this attempt, including owned damage-over-time kills.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_attempt_time","Current Attempt Time",&s.speedrunAttemptTime,"Simulation gameplay time; freezes at player death until a new attempt.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_runtime","Gameplay Runtime",&s.speedrunRuntime,"Session simulation time, including active world ticks while dead; excludes pause, stopped menus, loading and intermission.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_damage_dealt","Total Damage Dealt",&s.speedrunDealt,"Session monster HP actually removed by player-owned attacks. Excludes overkill and duplicate notifications.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_damage_taken","Total Damage Taken",&s.speedrunTaken,"Session player HP lost after armor and protection.",[](const Settings &d){return d.speedrunHUD!=0;})
+    }}}});
     return tabs;
 }
 
