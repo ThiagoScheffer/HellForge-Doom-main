@@ -246,6 +246,7 @@ boolean P_TryMove (mobj_t* thing, fixed_t x, fixed_t y);
 boolean P_TeleportMove (mobj_t* thing, fixed_t x, fixed_t y);
 void	P_SlideMove (mobj_t* mo);
 boolean P_CheckSight (mobj_t* t1, mobj_t* t2);
+mobj_t *P_SpawnMissileDirectional(mobj_t *source,mobjtype_t type,angle_t yaw,fixed_t slope);
 void P_SetAmbushSightReuse(int enabled);
 boolean P_AmbushSightReuseActive(void);
 void 	P_UseLines (player_t* player);

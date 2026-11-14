@@ -13,7 +13,8 @@ extern "C" {
 #include "m_random.h"
 }
 wp_balance_t p_wp_balance={200,175,150,150,150,200,175,150,200,300,150,150,125,
-    30,25,8,105,105,30,35,175,96,128,3,7,10,50,30,210,2,20,40,350,128,512,3,4,280,350,15,25,105,70,30,60,384,16,5,10,35,105,175,128,14,8,32,175,175,64,3};
+    30,25,8,105,105,30,35,175,96,128,3,7,10,50,30,210,2,20,40,350,128,512,3,4,280,350,15,25,105,70,30,60,384,16,5,10,35,105,175,128,14,8,32,175,175,64,3,15,350,70,15,200,200,512};
+int p_wp_eyes=0;
 int p_wp_enhanced=0,p_wp_vulnerabilities=0,p_wp_injuries=0;
 int p_wp_bleeding=0,p_wp_frenzy=0,p_wp_bleed_damage=0,p_wp_feeding=0;
 int (*P_WeakpointFoodPath)(mobj_t*,mobj_t*)=nullptr;
@@ -29,6 +30,9 @@ int (*P_WeakpointTargetAllowed)(const mobj_t*)=nullptr;
 int (*P_WeakpointLocate)(mobj_t*,mobj_t*,wp_impact_t*)=nullptr;
 namespace {
 struct Runtime {
+    bool blind=false,eyeMissile=false;
+    int blindFire=0,eyeRageUntil=0,eyeSearch=0;
+    mobj_t *eyeTarget=nullptr;
     wp_damage_kind_t kind=WP_OTHER;
     int aimUntil=0,aimCooldown=0,legUntil=0,legCooldown=0,offset=0;
     bool directProcessed=false,friendlyMissile=false;
@@ -43,7 +47,7 @@ struct Runtime {
     uint64_t shot=0;
 };
 std::unordered_map<mobj_t*,Runtime> runtime;
-struct Pellets {int total=0,face=0;bool frenzyHead=false;};
+struct Pellets {int total=0,face=0;bool frenzyHead=false,eye=false;};
 std::unordered_map<mobj_t*,Pellets> pellets;
 mobj_t *shotSource=nullptr;
 weapontype_t shotWeapon=wp_pistol;
@@ -56,6 +60,48 @@ bool roll(int chance) {return chance>=100||(chance>0&&P_Random()*100/256<chance)
 bool heavy(int type){return type==MT_FATSO||type==MT_CYBORG;}
 bool mechanical(int type){return type==MT_BABY||type==MT_SPIDER;}
 bool floating(int type){return type==MT_HEAD||type==MT_PAIN;}
+struct DamageContext {const wp_damage_event_t *event;bool consumed;DamageContext *previous;};
+DamageContext *damageContext=nullptr;
+}
+int P_WeakpointBlind(mobj_t *actor) {
+    if(!p_wp_eyes||!p_wp_enhanced||!allowed(actor)||!floating(actor->type))return 0;
+    auto it=runtime.find(actor);return it!=runtime.end()&&it->second.blind;
+}
+int P_WeakpointEyeRage(mobj_t *actor) {
+    if(!p_wp_eyes||!p_wp_enhanced||!allowed(actor)||actor->type!=MT_SPIDER)return 0;
+    auto it=runtime.find(actor);return it!=runtime.end()&&leveltime<it->second.eyeRageUntil;
+}
+void P_WeakpointConfigureEyes(int enabled) {
+    p_wp_eyes=enabled!=0;
+    if(p_wp_eyes&&p_wp_enhanced)return;
+    for(auto &entry:runtime){auto &r=entry.second;
+        if(r.blind){P_WeakpointStopFeeding(entry.first);r.feedCooldown=r.feedSearch=0;entry.first->target=nullptr;entry.first->threshold=0;}
+        if(r.eyeRageUntil&&entry.first->target==r.eyeTarget){entry.first->target=nullptr;entry.first->threshold=0;}
+        r.blind=false;r.blindFire=r.eyeRageUntil=r.eyeSearch=0;r.eyeTarget=nullptr;r.eyeMissile=false;
+    }
+}
+int P_WeakpointBlindFireDue(mobj_t *actor) {
+    if(!P_WeakpointBlind(actor))return 0;auto &r=runtime[actor];
+    if(leveltime<r.blindFire)return 0;r.blindFire=leveltime+p_wp_balance.blindFireInterval;return 1;
+}
+void P_WeakpointBlindAim(mobj_t *actor,angle_t *yaw,fixed_t *slope) {
+    *yaw=actor->angle;*slope=0;if(!P_WeakpointBlind(actor))return;
+    *yaw=((uint32_t)P_Random()<<24)|((uint32_t)P_Random()<<16);
+    double pitch=(P_Random()*2.0/255.0-1.0)*p_wp_balance.blindPitch;
+    *slope=(fixed_t)std::lround(std::tan(pitch*3.141592653589793/180)*FRACUNIT);actor->angle=*yaw;
+}
+int P_WeakpointAdjustDamage(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage) {
+    if(damage<=0||!p_wp_eyes||!p_wp_enhanced||!P_WeakpointActive())return damage;
+    bool resolved=damageContext&&!damageContext->consumed&&damageContext->event->target==target&&
+        damageContext->event->source==source&&damageContext->event->inflictor==inflictor&&damageContext->event->finalDamage==damage;
+    if(resolved)damageContext->consumed=true;
+    if(!resolved&&P_WeakpointEyeRage(target))damage=P_WeakpointScale(damage,p_wp_balance.eyeIncoming);
+    if(target->player&&P_WeakpointEyeRage(source))damage=P_WeakpointScale(damage,p_wp_balance.eyePlayerDamage);
+    return damage;
+}
+void P_WeakpointDealDamage(wp_damage_event_t *e) {
+    DamageContext context{e,false,damageContext};damageContext=&context;
+    P_DamageMobj(e->target,e->inflictor,e->source,e->finalDamage);damageContext=context.previous;
 }
 int P_WeakpointActive(void){return !netgame&&!demoplayback&&!demorecording;}
 int P_WeakpointHuman(int type){return type==MT_POSSESSED||type==MT_SHOTGUY||type==MT_CHAINGUY||type==MT_WOLFSS;}
@@ -88,11 +134,12 @@ void P_WeakpointConfigure(int enhanced,int vulnerabilities,int injuries) {
     if(enhanced!=p_wp_enhanced||vulnerabilities!=p_wp_vulnerabilities||injuries!=p_wp_injuries) {
         for(auto it=runtime.begin();it!=runtime.end();) {
             auto &r=it->second;r.aimUntil=r.aimCooldown=r.legUntil=r.legCooldown=r.offset=0;
-            if(r.kind==WP_OTHER&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile&&!r.feedPhase&&!r.feedCooldown&&!r.feedSearch&&!r.noEat)it=runtime.erase(it);else ++it;
+            if(r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile&&!r.feedPhase&&!r.feedCooldown&&!r.feedSearch&&!r.noEat)it=runtime.erase(it);else ++it;
         }
     }
     p_wp_enhanced=enhanced;p_wp_vulnerabilities=vulnerabilities;p_wp_injuries=injuries;
     if(!enhanced&&p_wp_frenzy)P_WeakpointConfigureExtras(p_wp_bleeding,p_wp_frenzy);
+    if(!enhanced)P_WeakpointConfigureEyes(p_wp_eyes);
 }
 wp_damage_kind_t P_WeakpointBulletKind(void){return shotSource&&(shotWeapon==wp_shotgun||shotWeapon==wp_supershotgun)?WP_SHOTGUN_PELLET:WP_BULLET;}
 void P_WeakpointResolve(wp_damage_event_t *e) {
@@ -136,11 +183,17 @@ void P_WeakpointResolve(wp_damage_event_t *e) {
             if(e->impact.region==WP_FACE&&e->impact.confidence==100&&e->impact.distance<=range)++p.face;
         }
     } else region=100;
-    e->finalDamage=fatal?e->target->health:P_WeakpointScale(e->baseDamage,std::max(region,weapon));
+    int incoming=P_WeakpointEyeRage(e->target)?p_wp_balance.eyeIncoming:100;
+    e->finalDamage=fatal?e->target->health:P_WeakpointScale(e->baseDamage,std::max({region,weapon,incoming}));
 }
 void P_WeakpointAfterDamage(const wp_damage_event_t *e) {
     if(!e->target||e->target->health<=0){if(e->target)P_WeakpointForget(e->target);return;}
     if(!e->eligible||e->baseDamage<=0||e->finalDamage<=0)return;
+    if(p_wp_eyes&&p_wp_enhanced&&e->source==shotSource&&
+        (e->weapon==wp_pistol||e->weapon==wp_chaingun||e->weapon==wp_shotgun||e->weapon==wp_supershotgun)&&
+        (e->kind==WP_BULLET||e->kind==WP_SHOTGUN_PELLET)&&e->impact.confidence==100&&
+        (floating(e->target->type)||e->target->type==MT_SPIDER)&&
+        e->impact.eyeContact)pellets[e->target].eye=true;
     if(p_wp_bleeding&&e->weapon!=wp_nochange&&(e->kind==WP_BULLET||e->kind==WP_SHOTGUN_PELLET)&&
         (e->target->type==MT_TROOP||e->target->type==MT_KNIGHT||e->target->type==MT_FATSO||e->target->type==MT_SERGEANT)) {
         bool critical=p_wp_enhanced&&e->impact.confidence==100&&
@@ -175,7 +228,7 @@ void P_WeakpointAfterDamage(const wp_damage_event_t *e) {
 }
 void P_WeakpointApply(wp_damage_event_t *e) {
     if(e->resolved>1)return;
-    P_WeakpointResolve(e);P_WeakpointNotify(e);P_DamageMobj(e->target,e->inflictor,e->source,e->finalDamage);P_WeakpointAfterDamage(e);
+    P_WeakpointResolve(e);P_WeakpointNotify(e);P_WeakpointDealDamage(e);P_WeakpointAfterDamage(e);
     e->resolved=2;
 }
 void P_WeakpointBeginShot(mobj_t *source,weapontype_t weapon) {
@@ -189,6 +242,13 @@ void P_WeakpointEndShot(void) {
         for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next) {
             auto entryIt=completed.find((mobj_t*)t);if(entryIt==completed.end())continue;
             const auto &entry=*entryIt;
+            if(allowed(entry.first)&&p_wp_eyes&&entry.second.eye&&!P_WeakpointBlind(entry.first)&&roll(p_wp_balance.eyeChance)){
+                auto *actor=entry.first;auto &r=runtime[actor];
+                if(floating(actor->type)){P_WeakpointStopFeeding(actor);r.blind=true;r.blindFire=leveltime+p_wp_balance.blindFireInterval;}
+                else {r.eyeRageUntil=leveltime+p_wp_balance.eyeRageDuration;r.eyeSearch=0;r.eyeTarget=nullptr;}
+                actor->target=nullptr;actor->threshold=0;
+                if(P_WeakpointFoodWake)P_WeakpointFoodWake(actor);
+            }
             if(allowed(entry.first)&&p_wp_frenzy&&entry.second.frenzyHead&&roll(p_wp_balance.frenzyChance)) {
                 runtime[entry.first].frenzyUntil=leveltime+p_wp_balance.frenzyDuration;
                 P_WeakpointFrenzyTarget(entry.first);
@@ -254,6 +314,7 @@ void P_WeakpointForget(mobj_t *actor){
     runtime.erase(actor);pellets.erase(actor);
     for(auto &entry:runtime){if(entry.second.bleedSource==actor)entry.second.bleedSource=nullptr;
         if(entry.second.frenzyTarget==actor)entry.second.frenzyTarget=nullptr;
+        if(entry.second.eyeTarget==actor){entry.second.eyeTarget=nullptr;if(entry.first->target==actor){entry.first->target=nullptr;entry.first->threshold=0;}}
         if(entry.second.feedPrevious==actor)entry.second.feedPrevious=nullptr;
         if(entry.second.feedTarget==actor){
             if(entry.first->target==actor){
@@ -290,18 +351,34 @@ fixed_t P_WeakpointWalkSpeed(mobj_t *actor,fixed_t speed) {
     return P_WeakpointBleeding(actor)?(fixed_t)((int64_t)speed*(100-p_wp_balance.bleedSlow)/100):speed;
 }
 int P_WeakpointFrenzied(mobj_t *actor) {
+    if(P_WeakpointEyeRage(actor))return 1;
     auto it=runtime.find(actor);return p_wp_frenzy&&p_wp_enhanced&&allowed(actor)&&it!=runtime.end()&&leveltime<it->second.frenzyUntil;
 }
 static bool frenzyVictim(mobj_t *actor,mobj_t *other) {
     if(!other||other==actor||other->player||other->health<=0||!(other->flags&MF_SHOOTABLE)||
         !(other->flags&MF_COUNTKILL)&&other->type!=MT_SKULL)return false;
     double dx=(double)other->x-actor->x,dy=(double)other->y-actor->y;
-    double range=(double)p_wp_balance.frenzySearch*FRACUNIT;
+    double range=(double)(P_WeakpointEyeRage(actor)?p_wp_balance.eyeSearchRange:p_wp_balance.frenzySearch)*FRACUNIT;
     return dx*dx+dy*dy<=range*range&&P_CheckSight(actor,other);
 }
 void P_WeakpointFrenzyTarget(mobj_t *actor) {
     MP_AUTO(MP_FRENZY);
     auto it=runtime.find(actor);if(it==runtime.end())return;auto &r=it->second;
+    if(P_WeakpointEyeRage(actor)) {
+        if(!frenzyVictim(actor,r.eyeTarget)) {
+            r.eyeTarget=nullptr;
+            if(leveltime>=r.eyeSearch){
+                r.eyeSearch=leveltime+TICRATE;double nearest=INFINITY;
+                for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next){
+                    if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
+                    auto *other=(mobj_t*)t;double dx=(double)other->x-actor->x,dy=(double)other->y-actor->y,d=dx*dx+dy*dy;
+                    if(d<nearest&&frenzyVictim(actor,other)){nearest=d;r.eyeTarget=other;}
+                }
+            }
+        }
+        actor->target=r.eyeTarget;actor->threshold=r.eyeTarget?100:0;return;
+    }
+    if(r.eyeRageUntil){if(actor->target==r.eyeTarget)actor->target=nullptr;actor->threshold=0;r.eyeRageUntil=r.eyeSearch=0;r.eyeTarget=nullptr;}
     if(!P_WeakpointFrenzied(actor)) {
         if(r.frenzyUntil){if(actor->target==r.frenzyTarget)actor->target=nullptr;actor->threshold=0;}
         r.frenzyUntil=0;r.frenzyTarget=nullptr;return;
@@ -320,16 +397,17 @@ void P_WeakpointFrenzyTarget(mobj_t *actor) {
     actor->target=r.frenzyTarget;actor->threshold=100;
 }
 void P_WeakpointMonsterMissile(mobj_t *missile,mobj_t *actor) {
-    if(P_WeakpointFrenzied(actor))runtime[missile].friendlyMissile=true;
+    if(P_WeakpointEyeRage(actor))runtime[missile].eyeMissile=true;
+    else if(P_WeakpointFrenzied(actor))runtime[missile].friendlyMissile=true;
 }
 int P_WeakpointFriendlyMissile(mobj_t *missile) {
-    auto it=runtime.find(missile);return P_WeakpointActive()&&p_wp_frenzy&&it!=runtime.end()&&it->second.friendlyMissile;
+    auto it=runtime.find(missile);return P_WeakpointActive()&&it!=runtime.end()&&((p_wp_frenzy&&it->second.friendlyMissile)||(p_wp_eyes&&p_wp_enhanced&&it->second.eyeMissile));
 }
 void P_WeakpointTick(mobj_t *actor) {
-    if(p_wp_feeding)P_WeakpointFeedingTick(actor);
+    if(p_wp_feeding||P_WeakpointBlind(actor))P_WeakpointFeedingTick(actor);
     auto it=runtime.find(actor);if(it==runtime.end())return;
     if(!allowed(actor)) {
-        if(it->second.kind==WP_OTHER&&!it->second.friendlyMissile&&!it->second.noEat)P_WeakpointForget(actor);
+        if(it->second.kind==WP_OTHER&&!it->second.eyeMissile&&!it->second.friendlyMissile&&!it->second.noEat)P_WeakpointForget(actor);
         return;
     }
     P_WeakpointFrenzyTarget(actor);
@@ -353,7 +431,7 @@ void P_WeakpointTick(mobj_t *actor) {
     it=runtime.find(actor);
     if(it!=runtime.end()) {
         const auto &r=it->second;
-        if(r.kind==WP_OTHER&&!r.friendlyMissile&&!r.noEat&&!r.bleedUntil&&!r.frenzyUntil&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.aimUntil<=leveltime&&
+        if(r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.friendlyMissile&&!r.noEat&&!r.bleedUntil&&!r.frenzyUntil&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.aimUntil<=leveltime&&
             r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)runtime.erase(it);
     }
 }
@@ -388,6 +466,9 @@ BalanceKey keys[]={
     WP_KEY(feedLiveHeal,"feed_live_heal",1,20),WP_KEY(feedCorpseHeal,"feed_corpse_heal",1,25),WP_KEY(feedSearch,"feed_search",7,350),WP_KEY(feedPursuit,"feed_pursuit",35,350),WP_KEY(feedCooldown,"feed_cooldown",35,3500),WP_KEY(feedThreat,"feed_threat",0,256),
     WP_KEY(sparkBullet,"metal_sparks_bullet",1,32),WP_KEY(sparkPellet,"metal_sparks_pellet",1,16),WP_KEY(sparkCap,"metal_sparks_cap",1,64),WP_KEY(sparkScale,"metal_spark_scale",100,300),
     WP_KEY(headBloodScale,"head_blood_scale",100,300),WP_KEY(headWallReach,"head_wall_reach",1,96),WP_KEY(headWallMarks,"head_wall_marks",0,3),
+    WP_KEY(eyeChance,"eye_injury_chance",0,100),WP_KEY(eyeRageDuration,"eye_rage_duration",35,3500),WP_KEY(blindFireInterval,"blind_fire_interval",35,350),
+    WP_KEY(blindPitch,"blind_fire_pitch",0,30),WP_KEY(eyeIncoming,"eye_rage_incoming",100,800),WP_KEY(eyePlayerDamage,"eye_rage_player_damage",100,800),
+    WP_KEY(eyeSearchRange,"eye_rage_search",64,2048),
     WP_KEY(lowHealthPercent,"low_health_percent",0,100),WP_KEY(faceMajorityPercent,"face_majority_percent",1,100)
 #undef WP_KEY
 };
@@ -404,10 +485,10 @@ uint32_t get(const unsigned char *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|(
 std::vector<mobj_t*> actors(){std::vector<mobj_t*> out;for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next)if(t->function.acp1==(actionf_p1)P_MobjThinker)out.push_back((mobj_t*)t);return out;}
 }
 size_t P_WeakpointSave(unsigned char *destination) {
-    auto list=actors();std::vector<unsigned char> out;put(out,3);put(out,0);uint32_t count=0;
+    auto list=actors();std::vector<unsigned char> out;put(out,4);put(out,0);uint32_t count=0;
     for(size_t i=0;i<list.size();++i) {
         auto it=runtime.find(list[i]);if(it==runtime.end())continue;const auto &r=it->second;
-        if(r.kind==WP_OTHER&&!r.friendlyMissile&&!r.noEat&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.bleedUntil<=leveltime&&r.frenzyUntil<=leveltime&&r.aimUntil<=leveltime&&r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)continue;
+        if(r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.friendlyMissile&&!r.noEat&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.bleedUntil<=leveltime&&r.frenzyUntil<=leveltime&&r.aimUntil<=leveltime&&r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)continue;
         ++count;put(out,(uint32_t)i+1);put(out,r.kind);put(out,r.directProcessed);
         put(out,(uint32_t)r.shot);put(out,(uint32_t)(r.shot>>32));
         for(int n:{r.aimUntil,r.aimCooldown,r.legUntil,r.legCooldown})put(out,(uint32_t)std::max(0,n-leveltime));
@@ -421,6 +502,8 @@ size_t P_WeakpointSave(unsigned char *destination) {
         put(out,r.feedPhase);put(out,actorId(r.feedTarget));put(out,actorId(r.feedPrevious));
         for(int timer:{r.feedUntil,r.feedCooldown,r.feedSearch})put(out,std::max(0,timer-leveltime));
         put(out,r.noEat);put(out,(uint32_t)(r.bleedPlayer+1));
+        put(out,r.blind);put(out,std::max(0,r.blindFire-leveltime));put(out,std::max(0,r.eyeRageUntil-leveltime));
+        put(out,std::max(0,r.eyeSearch-leveltime));put(out,actorId(r.eyeTarget));put(out,r.eyeMissile);
     }
     for(int i=0;i<4;++i)out[4+i]=(unsigned char)(count>>(i*8));
     put(out,(uint32_t)(out.size()+8));out.insert(out.end(),{'W','P','0','1'});
@@ -430,8 +513,8 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
     P_WeakpointClear();if(length<16||std::memcmp(data+length-4,"WP01",4))return 0;
     size_t bytes=get(data+length-8);if(bytes<16||bytes>length)return 0;
     const auto *p=data+length-bytes;uint32_t count=get(p+4);
-    uint32_t version=get(p);size_t stride=version==1?60:version==2?84:136;
-    if((version!=1&&version!=2&&version!=3)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
+    uint32_t version=get(p);size_t stride=version==1?60:version==2?84:version==3?136:160;
+    if((version!=1&&version!=2&&version!=3&&version!=4)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
     auto list=actors();p+=8;
     for(uint32_t i=0;i<count;++i,p+=stride) {
         uint32_t id=get(p),kind=get(p+4);if(!id||id>list.size()||kind>WP_OTHER+7)continue;
@@ -446,7 +529,7 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
             auto ref=[&](uint32_t n)->mobj_t*{return n&&n<=list.size()?list[n-1]:nullptr;};
             r.bleedSource=ref(get(p+72));r.frenzyTarget=ref(get(p+76));r.friendlyMissile=get(p+80)!=0;
         }
-        if(version==3) {
+        if(version>=3) {
             r.bleedTier=(int)std::min(get(p+84),3u);r.bleedDischarge=(uint64_t)get(p+88)|((uint64_t)get(p+92)<<32);
             serial=std::max(serial,r.bleedDischarge);r.bleedVoiceNext=leveltime+(int)std::min(get(p+96),3500u);r.attackCredit=(int)std::min(get(p+100),99u);
             r.feedPhase=(int)std::min(get(p+104),3u);
@@ -458,10 +541,24 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
             if(r.bleedTier&&r.bleedUntil==0)r.bleedUntil=leveltime;
             if(!r.feedTarget)r.feedPhase=0;
         } else if(r.bleedUntil>=leveltime&&r.bleedUntil>0)r.bleedTier=1;
+        if(version>=4){
+            r.blind=get(p+136)!=0;r.blindFire=leveltime+(int)std::min(get(p+140),3500u);
+            auto remain=std::min(get(p+144),3500u);r.eyeRageUntil=remain?leveltime+(int)remain:0;
+            r.eyeSearch=leveltime+(int)std::min(get(p+148),3500u);
+            uint32_t target=get(p+152);r.eyeTarget=target&&target<=list.size()?list[target-1]:nullptr;r.eyeMissile=get(p+156)!=0;
+        }
         auto *actor=list[id-1];
+        if(!floating(actor->type)||!allowed(actor)){r.blind=false;r.blindFire=0;}
+        if(actor->type!=MT_SPIDER||!allowed(actor)){r.eyeRageUntil=r.eyeSearch=0;r.eyeTarget=nullptr;}
+        if(!(actor->flags&MF_MISSILE))r.eyeMissile=false;
+        if(!p_wp_eyes||!p_wp_enhanced){
+            if((r.blind&&actor->target==r.feedTarget)||(r.eyeRageUntil&&actor->target==r.eyeTarget)){actor->target=nullptr;actor->threshold=0;}
+            if(r.blind){r.feedPhase=r.feedUntil=r.feedCooldown=r.feedSearch=0;r.feedTarget=r.feedPrevious=nullptr;}
+            r.blind=false;r.blindFire=r.eyeRageUntil=r.eyeSearch=0;r.eyeTarget=nullptr;r.eyeMissile=false;
+        }
         // A save cannot re-arm statuses whose current feature switch is off.
         if(!p_wp_bleeding){r.bleedUntil=r.bleedNext=r.bleedTier=r.bleedVoiceNext=r.attackCredit=0;r.bleedDischarge=0;r.bleedSource=nullptr;r.bleedPlayer=-1;}
-        if(!p_wp_feeding){
+        if(!p_wp_feeding&&!r.blind){
             if(r.feedPhase&&actor->target==r.feedTarget)actor->target=r.feedPrevious&&r.feedPrevious->health>0&&(r.feedPrevious->flags&MF_SHOOTABLE)?r.feedPrevious:nullptr;
             r.feedPhase=r.feedUntil=r.feedCooldown=r.feedSearch=0;r.feedTarget=r.feedPrevious=nullptr;
         }
@@ -482,13 +579,13 @@ void MP_StateCombat(MP_StateHash *h){
             const auto &r=found->second;
             for(int value:{(int)r.kind,r.aimUntil,r.aimCooldown,r.legUntil,r.legCooldown,r.offset,(int)r.directProcessed,(int)r.friendlyMissile,
                           r.bleedUntil,r.bleedNext,r.frenzyUntil,r.bleedTier,r.bleedVoiceNext,r.attackCredit,r.bleedPlayer,
-                          r.feedPhase,r.feedUntil,r.feedCooldown,r.feedSearch,(int)r.noEat})MP_StateField(h,(uint64_t)(int64_t)value);
+                          r.feedPhase,r.feedUntil,r.feedCooldown,r.feedSearch,(int)r.noEat,(int)r.blind,r.blindFire,r.eyeRageUntil,r.eyeSearch,(int)r.eyeMissile})MP_StateField(h,(uint64_t)(int64_t)value);
             MP_StateField(h,r.shot);MP_StateField(h,r.bleedDischarge);
-            MP_StateActor(h,r.bleedSource);MP_StateActor(h,r.frenzyTarget);MP_StateActor(h,r.feedTarget);MP_StateActor(h,r.feedPrevious);
+            MP_StateActor(h,r.bleedSource);MP_StateActor(h,r.frenzyTarget);MP_StateActor(h,r.feedTarget);MP_StateActor(h,r.feedPrevious);MP_StateActor(h,r.eyeTarget);
             for(float value:r.start)MP_StateFloat(h,value);for(float value:r.end)MP_StateFloat(h,value);
         }
         auto shot=pellets.find(actor);MP_StateField(h,shot!=pellets.end());
-        if(shot!=pellets.end()){MP_StateField(h,shot->second.total);MP_StateField(h,shot->second.face);MP_StateField(h,shot->second.frenzyHead);}
+        if(shot!=pellets.end()){MP_StateField(h,shot->second.total);MP_StateField(h,shot->second.face);MP_StateField(h,shot->second.frenzyHead);MP_StateField(h,shot->second.eye);}
     }
 }
 #endif

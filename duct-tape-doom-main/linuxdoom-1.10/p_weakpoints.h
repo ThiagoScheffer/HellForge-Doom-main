@@ -17,6 +17,7 @@ typedef struct {
     int confidence; /* 0 unknown, 100 verified pixel region. */
     float x,y,z,u,v,distance;
     int sprite,frame,rotation,flipped;
+    int eyeContact; /* Verified visible eye/socket overlay; primary region is unchanged. */
 } wp_impact_t;
 typedef struct {
     mobj_t *target,*source,*inflictor;
@@ -40,9 +41,18 @@ typedef struct {
     int bleedDamage2,bleedDamage3,bleedDuration2,bleedDuration3,bleedAttack2,bleedAttack3,bleedVoice2,bleedVoice3;
     int feedStart,feedStop,feedRadius,feedBite,feedLiveHeal,feedCorpseHeal,feedSearch,feedPursuit,feedCooldown,feedThreat;
     int sparkBullet,sparkPellet,sparkCap,sparkScale,headBloodScale,headWallReach,headWallMarks;
+    int eyeChance,eyeRageDuration,blindFireInterval,blindPitch,eyeIncoming,eyePlayerDamage,eyeSearchRange;
 } wp_balance_t;
 extern wp_balance_t p_wp_balance;
 extern int p_wp_enhanced,p_wp_vulnerabilities,p_wp_injuries;
+extern int p_wp_eyes;
+void P_WeakpointConfigureEyes(int enabled);
+int P_WeakpointBlind(mobj_t*);
+int P_WeakpointEyeRage(mobj_t*);
+int P_WeakpointBlindFireDue(mobj_t*);
+void P_WeakpointBlindAim(mobj_t*,angle_t*,fixed_t*);
+int P_WeakpointAdjustDamage(mobj_t*,mobj_t*,mobj_t*,int);
+void P_WeakpointDealDamage(wp_damage_event_t*);
 extern int (*P_WeakpointTargetAllowed)(const mobj_t*);
 extern int (*P_WeakpointLocate)(mobj_t*,mobj_t*,wp_impact_t*);
 extern int p_wp_bleeding,p_wp_frenzy,p_wp_bleed_damage;

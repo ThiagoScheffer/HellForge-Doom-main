@@ -7,7 +7,20 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-ambush-ui-write"||settingsCase=="--settings-ambush-ui-disable"){
+    if(settingsCase=="--settings-eye-default"){
+        check(!settings.eyeInjuries&&!p_wp_eyes,"eye injuries default off");
+    }else if(settingsCase=="--settings-eye-write"){
+        check(!settings.eyeInjuries,"fresh eye setting starts off");
+        check(I_TestSettingsPersistence(7),"real Combat checkbox applies through F4");
+        check(settings.eyeInjuries&&p_wp_eyes&&p_wp_enhanced,"eye switch reaches gameplay with its required control");
+    }else if(settingsCase=="--settings-eye-read"||settingsCase=="--settings-eye-discard"){
+        check(settings.eyeInjuries&&settings.enhancedWeakPoints,"eye and required feature persist after restart");
+        settings.accelerated=1;applySettings();check(p_wp_eyes&&p_wp_enhanced,"restored eye preference reaches simulation");
+        if(settingsCase=="--settings-eye-discard"){
+            auto before=fileContents(graphicsConfig);check(I_TestSettingsPersistence(8),"F10 discards eye checkbox draft");
+            check(settings.eyeInjuries&&p_wp_eyes&&fileContents(graphicsConfig)==before,"eye discard leaves current behavior and file unchanged");
+        }
+    }else if(settingsCase=="--settings-ambush-ui-write"||settingsCase=="--settings-ambush-ui-disable"){
         bool enable=settingsCase=="--settings-ambush-ui-write";
         check(settings.ambushSightReuse!=enable,"isolated ambush profile starts in the expected state");
         check(I_TestSettingsPersistence(5),"Performance checkbox toggles through actual F4 apply handler");

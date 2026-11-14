@@ -2,15 +2,17 @@
    state; native hooks below preserve this fork's collision/animation helpers. */
 namespace {
 int feedBudgetTic=-1,feedBudget=0;
-bool predator(mobj_t *actor){return actor&&(actor->type==MT_HEAD||actor->type==MT_SERGEANT);}
+bool predator(mobj_t *actor){return actor&&(actor->type==MT_HEAD||actor->type==MT_SERGEANT||(actor->type==MT_PAIN&&P_WeakpointBlind(actor)));}
 double foodDistance(mobj_t *a,mobj_t *b){double x=(double)a->x-b->x,y=(double)a->y-b->y;return std::hypot(x,y)/FRACUNIT;}
 bool foodThreat(mobj_t *actor) {
+    if(P_WeakpointBlind(actor))return false;
     if(!p_wp_balance.feedThreat)return false;
     for(int i=0;i<MAXPLAYERS;++i){auto *mo=players[i].mo;
         if(mo&&mo->health>0&&foodDistance(actor,mo)<=p_wp_balance.feedThreat&&P_CheckSight(actor,mo))return true;}
     return false;
 }
 bool foodValid(mobj_t *actor,mobj_t *food) {
+    if(P_WeakpointBlind(actor)&&food&&food->health>0)return false;
     if(!food||food==actor||!P_WeakpointFoodEligible(food,food->health<=0))return false;
     return foodDistance(actor,food)<=p_wp_balance.feedRadius&&P_CheckSight(actor,food);
 }
@@ -55,7 +57,7 @@ int P_WeakpointFoodEligible(mobj_t *food,int corpse) {
     }
 }
 int P_WeakpointFeeding(mobj_t *actor) {
-    auto it=runtime.find(actor);return p_wp_feeding&&allowed(actor)&&!P_WeakpointFrenzied(actor)&&it!=runtime.end()&&it->second.feedPhase>0;
+    auto it=runtime.find(actor);return (p_wp_feeding||P_WeakpointBlind(actor))&&allowed(actor)&&!P_WeakpointFrenzied(actor)&&it!=runtime.end()&&it->second.feedPhase>0;
 }
 void P_WeakpointStopFeeding(mobj_t *actor) {
     auto it=runtime.find(actor);if(it==runtime.end())return;auto &r=it->second;
@@ -67,21 +69,22 @@ void P_WeakpointStopFeeding(mobj_t *actor) {
 }
 void P_WeakpointConfigureFeeding(int enabled) {
     if(p_wp_feeding==enabled)return;p_wp_feeding=enabled;
-    if(!enabled)for(auto &entry:runtime){P_WeakpointStopFeeding(entry.first);entry.second.feedCooldown=entry.second.feedSearch=0;}
+    if(!enabled)for(auto &entry:runtime){if(P_WeakpointBlind(entry.first))continue;P_WeakpointStopFeeding(entry.first);entry.second.feedCooldown=entry.second.feedSearch=0;}
 }
-void P_WeakpointFeedingHurt(mobj_t *actor){if(p_wp_feeding)P_WeakpointStopFeeding(actor);}
+void P_WeakpointFeedingHurt(mobj_t *actor){if(p_wp_feeding||P_WeakpointBlind(actor))P_WeakpointStopFeeding(actor);}
 void P_WeakpointFeedingTick(mobj_t *actor) {
     if(!predator(actor)||!allowed(actor)||!actor->info)return;
     auto found=runtime.find(actor);
     bool busy=found!=runtime.end()&&found->second.feedPhase;
+    bool blind=P_WeakpointBlind(actor)!=0;
     if(busy) {
-        if(!p_wp_feeding||P_WeakpointFrenzied(actor)||foodThreat(actor)||actor->health*100LL>=actor->info->spawnhealth*(int64_t)p_wp_balance.feedStop||
+        if((!p_wp_feeding&&!blind)||P_WeakpointFrenzied(actor)||foodThreat(actor)||(!blind&&actor->health*100LL>=actor->info->spawnhealth*(int64_t)p_wp_balance.feedStop)||
             leveltime>=found->second.feedUntil){P_WeakpointStopFeeding(actor);return;}
         if(found->second.feedTarget&&!foodValid(actor,found->second.feedTarget)){P_WeakpointStopFeeding(actor);return;}
         if(found->second.feedTarget)actor->target=found->second.feedTarget;
         return;
     }
-    if(!p_wp_feeding||P_WeakpointFrenzied(actor)||actor->health*100LL>actor->info->spawnhealth*(int64_t)p_wp_balance.feedStart||
+    if((!p_wp_feeding&&!blind)||P_WeakpointFrenzied(actor)||(!blind&&actor->health*100LL>actor->info->spawnhealth*(int64_t)p_wp_balance.feedStart)||
         foodThreat(actor)||!P_WeakpointFoodPath||!P_WeakpointFoodAnimate)return;
     auto &r=runtime[actor];if(leveltime<r.feedCooldown||leveltime<r.feedSearch)return;
     if(feedBudgetTic!=leveltime){feedBudgetTic=leveltime;feedBudget=0;}
@@ -92,13 +95,17 @@ void P_WeakpointFeedingTick(mobj_t *actor) {
     if(P_WeakpointFoodWake)P_WeakpointFoodWake(actor);
 }
 int P_WeakpointFeedingChase(mobj_t *actor) {
-    if(!p_wp_feeding)return 0;
+    if(!p_wp_feeding&&!P_WeakpointBlind(actor))return 0;
     P_WeakpointFeedingTick(actor);if(!P_WeakpointFeeding(actor))return 0;
     auto &r=runtime[actor];auto *food=r.feedTarget;
     if(r.feedPhase==3) {
         if(food&&food->health<=0&&foodTouch(actor,food)&&P_WeakpointFoodEligible(food,1)&&P_WeakpointFoodConsume) {
             runtime[food].noEat=true;int amount=(int)((int64_t)actor->info->spawnhealth*p_wp_balance.feedCorpseHeal/100);
             P_WeakpointFoodConsume(food);feedHeal(actor,std::max(1,amount));
+            if(P_WeakpointBlind(actor)){
+                // The corpse was actually consumed; searching/touching alone cannot cure.
+                r.blind=false;r.blindFire=0;P_WeakpointStopFeeding(actor);actor->target=nullptr;actor->threshold=0;return 1;
+            }
         }
         r.feedPhase=1;r.feedTarget=nullptr;
         if(actor->health*100LL>=actor->info->spawnhealth*(int64_t)p_wp_balance.feedStop){P_WeakpointStopFeeding(actor);return 1;}

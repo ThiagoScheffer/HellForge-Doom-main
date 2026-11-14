@@ -164,6 +164,7 @@ struct Settings {
     int gunImpacts=1;
     int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
     int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
+    int eyeInjuries=0;
     int monsterBleeding=0,headshotFrenzy=0,monsterMetalSparks=1,headshotFeedback=2,headshotSound=1,monsterFeeding=0;
     int breakableWalls=1;
     int throughWalls=0;

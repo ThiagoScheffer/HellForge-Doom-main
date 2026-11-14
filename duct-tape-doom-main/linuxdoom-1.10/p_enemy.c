@@ -693,6 +693,15 @@ void A_Look(mobj_t *actor) {
 }
 static void P_LookAction (mobj_t* actor)
 {
+    if(P_WeakpointBlind(actor)){
+        if(actor->info->seestate&&actor->state!=&states[actor->info->seestate])P_SetMobjState(actor,(statenum_t)actor->info->seestate);
+        return;
+    }
+    if(P_WeakpointEyeRage(actor)){
+        P_WeakpointFrenzyTarget(actor);
+        if(actor->target&&actor->info->seestate&&actor->state!=&states[actor->info->seestate])P_SetMobjState(actor,(statenum_t)actor->info->seestate);
+        return;
+    }
     mobj_t*	targ;
     look_sight_t failed={0};
     const look_sight_t *previous=NULL;
@@ -775,7 +784,17 @@ void A_Chase(mobj_t* actor) { if(!mp_enabled){A_Chase_mp_body(actor);return;}MP_
 #endif
 void MP_BODY(A_Chase) (mobj_t*	actor)
 {
+    if(P_WeakpointBlind(actor)){
+        if(P_WeakpointFeedingChase(actor))return;
+        actor->target=NULL;actor->threshold=0;
+        if(P_WeakpointBlindFireDue(actor)&&actor->info->missilestate){P_SetMobjState(actor,(statenum_t)actor->info->missilestate);return;}
+        if(actor->movedir==DI_NODIR||--actor->movecount<0||!P_Move(actor)){
+            actor->movedir=P_Random()&7;actor->movecount=P_Random()&15;
+        }
+        actor->angle=(angle_t)actor->movedir*ANG45;return;
+    }
     P_WeakpointFrenzyTarget(actor);
+    if(P_WeakpointEyeRage(actor)&&!actor->target)return;
     if(P_WeakpointFeedingChase(actor))return;
     int		delta;
 
@@ -1102,6 +1121,10 @@ void A_SargAttack (mobj_t* actor)
 void A_HeadAttack (mobj_t* actor)
 {
     if(P_WeakpointFeedingAttack(actor))return;
+    if(P_WeakpointBlind(actor)){
+        angle_t yaw;fixed_t slope;P_WeakpointBlindAim(actor,&yaw,&slope);
+        P_SpawnMissileDirectional(actor,MT_HEADSHOT,yaw,slope);return;
+    }
     int		damage;
 	
     if (!actor->target)
@@ -1609,10 +1632,10 @@ void A_SkullAttack (mobj_t* actor)
 // A_PainShootSkull
 // Spawn a lost soul and launch it at the target
 //
-void
-A_PainShootSkull
+static void
+P_PainShootSkullCore
 ( mobj_t*	actor,
-  angle_t	angle )
+  angle_t	angle,int blind,fixed_t slope )
 {
     fixed_t	x;
     fixed_t	y;
@@ -1663,9 +1686,14 @@ A_PainShootSkull
 	return;
     }
 		
-    newmobj->target = actor->target;
-    A_SkullAttack (newmobj);
+    if(blind){
+        newmobj->target=NULL;newmobj->angle=angle;newmobj->flags|=MF_SKULLFLY;
+        newmobj->momx=FixedMul(SKULLSPEED,finecosine[an]);newmobj->momy=FixedMul(SKULLSPEED,finesine[an]);newmobj->momz=FixedMul(SKULLSPEED,slope);
+        if(newmobj->info->attacksound)S_StartSound(newmobj,newmobj->info->attacksound);
+    }else{newmobj->target = actor->target;A_SkullAttack (newmobj);}
 }
+
+void A_PainShootSkull(mobj_t *actor,angle_t angle){P_PainShootSkullCore(actor,angle,0,0);}
 
 
 //
@@ -1674,6 +1702,10 @@ A_PainShootSkull
 // 
 void A_PainAttack (mobj_t* actor)
 {
+    if(P_WeakpointFeedingAttack(actor))return;
+    if(P_WeakpointBlind(actor)){
+        angle_t yaw;fixed_t slope;P_WeakpointBlindAim(actor,&yaw,&slope);P_PainShootSkullCore(actor,yaw,1,slope);return;
+    }
     if (!actor->target)
 	return;
 
@@ -2189,7 +2221,7 @@ static int P_FoodPath(mobj_t *actor,mobj_t *food) {
     if(distance<=stop)return 1;
     double travel=distance-stop;int steps=(int)(travel/(16*FRACUNIT))+1;
     if(steps>64)return 0;
-    fixed_t x=actor->x,y=actor->y,z=actor->type==MT_HEAD?actor->floorz:actor->z;
+    fixed_t x=actor->x,y=actor->y,z=(actor->type==MT_HEAD||P_WeakpointBlind(actor))?actor->floorz:actor->z;
     int i;for(i=1;i<=steps;++i) {
         fixed_t nx=actor->x+(fixed_t)(dx/distance*travel*i/steps),ny=actor->y+(fixed_t)(dy/distance*travel*i/steps),nextZ;
         if(!P_PursuitEdge(actor,x,y,z,nx,ny,&nextZ))return 0;
@@ -2204,6 +2236,11 @@ static int P_FoodMove(mobj_t *actor) {
     P_NewChaseDir(actor);return 0;
 }
 static void P_FoodAnimate(mobj_t *actor) {
+    if(actor->type==MT_PAIN&&P_WeakpointBlind(actor)){
+        P_WeakpointFeedingAttack(actor);
+        if(actor->info->painstate)P_SetMobjState(actor,(statenum_t)actor->info->painstate);
+        return;
+    }
     statenum_t state=(statenum_t)(actor->info->meleestate?actor->info->meleestate:actor->info->missilestate);
     if(state!=S_NULL)P_SetMobjState(actor,state);else P_WeakpointStopFeeding(actor);
 }

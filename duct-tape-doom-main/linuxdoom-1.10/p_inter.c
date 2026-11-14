@@ -852,6 +852,8 @@ P_DamageMobj
     if (target->health <= 0)
 	return;
 
+    damage=P_WeakpointAdjustDamage(target,inflictor,source,damage);
+
     P_AggressiveContact(target,inflictor,source);
 
     if ( target->flags & MF_SKULLFLY )
@@ -977,7 +979,7 @@ P_DamageMobj
 			
     target->reactiontime = 0;		// we're awake now...	
 
-    if ( !P_WeakpointFrenzied(target) && !P_WeakpointFeeding(target) && (!target->threshold || target->type == MT_VILE)
+    if ( !P_WeakpointBlind(target) && !P_WeakpointFrenzied(target) && !P_WeakpointFeeding(target) && (!target->threshold || target->type == MT_VILE)
 	 && source && source != target
 	 && source->type != MT_VILE)
     {

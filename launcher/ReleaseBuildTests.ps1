@@ -29,7 +29,7 @@ Check ($engineArguments.Contains('-solidmaps') -and !$engineArguments.Contains('
 Check (!$engineArguments.Contains('-ambushsightreuse')) 'saved F4 preference controls ambush reuse by default'
 $reader=New-Object IO.StreamReader($a.GetManifestResourceStream('graphics.cfg'))
 try{$cfg=$reader.ReadToEnd()}finally{$reader.Dispose()}
-foreach($key in @('ambush_sight_reuse','sprite_frustum_filter','monster_hibernation')){
+foreach($key in @('ambush_sight_reuse','sprite_frustum_filter','monster_hibernation','eye_injuries')){
  Check ($cfg -notmatch "(?m)^\s*$key\s+1\s*$") "new profile does not force $key on"
 }
 Write-Output "PASS $script:checks normal-release packaging checks"

@@ -1389,7 +1389,7 @@ boolean PTR_ShootTraverse(intercept_t *in)
 
     la_hit = th;
     if (la_damage)
-        P_DamageMobj(th, shootthing, shootthing, hitDamage);
+        P_WeakpointDealDamage(&event);
     P_WeakpointAfterDamage(&event);
 
     // don't go any farther

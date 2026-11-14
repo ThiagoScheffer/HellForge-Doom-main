@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE
 
-**Current integration build: 2026.11.14.1** | [Release notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Current build: 2026.11.14.2** | [Eye injuries update](docs/changes/EYE-INJURIES.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
@@ -25,6 +25,7 @@ configuration, and verification notes.
 | :--- | :--- | :--- |
 | 🎯 **[Sprite-based headshots](docs/changes/CRITICAL-PARTS.md)** | 2× human headshots, per-pellet hits, and shots through transparent sprite gaps. | Uses the displayed frame, rotation, mirroring, and silhouette; shares impact coordinates with attached wounds. |
 | 👁️ **[Monster weak points](docs/changes/ENHANCED-MONSTER-COMBAT.md)** | Heads, eyes, faces, brains, and mechanical legs have distinct combat rules. Weapon choice matters. | Monster profiles, conservative region classification, projectile provenance, and damage multipliers that do not stack. |
+| 👁️ **[Eye injuries](docs/changes/EYE-INJURIES.md)** | Hitscan eye hits can blind Cacodemons/Pain Elementals until they eat a corpse, or provoke ten seconds of Spider Mastermind rage. | Fingerprint-validated visible-eye masks, one chance per discharge, normal projectiles, bounded feeding and versioned save state. |
 | 💥 **[Impact feedback & frenzy](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md)** | Metal-leg sparks, headshot confirmation, and close super-shotgun hits that can provoke infighting. | Confirmed-impact events, per-discharge bookkeeping, bounded particles, and preserved attacker attribution. |
 | 🩸 **[Progressive bleeding & survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)** | Three bleeding tiers; wounded Pinkies and Cacodemons can seek food and recover health. | Timed actor statuses, bounded food searches, collision-aware approaches, lifecycle cleanup, and versioned save extensions. |
 | 🗺️ **[Large-WAD compatibility](docs/changes/BIG-WAD-COMPATIBILITY.md)** | Larger textures and maps can load beyond original engine limits. | 32-bit texture offsets, uncompressed XNOD support, checked allocations, blockmap rebuilding, and configurable zone memory. |
@@ -36,7 +37,7 @@ configuration, and verification notes.
 | **[Safer WAD sight checks](docs/changes/SF2012-SIGHT-AND-DESTRUCTION-FIX.md)** | Avoid the identified SF2012 sight crash; keep wall destruction available. | Handles missing sectors on incorrectly flagged two-sided walls; normal launcher retains solid geometry. |
 
 **Start with F4.** Human critical parts, enhanced weak points, weapon
-vulnerabilities, injuries, bleeding, feeding, frenzy, and death-save recovery
+vulnerabilities, injuries, eye injuries, bleeding, feeding, frenzy, and death-save recovery
 are optional and default off. New ambush sight reuse, sprite filtering and idle-search
 reuse also default off in the normal build. Sprite combat additions are restricted to
 single-player sprite rendering; multiplayer, demos, and voxel targets retain

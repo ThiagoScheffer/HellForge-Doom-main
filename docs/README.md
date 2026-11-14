@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE documentation
 
-Current integration: **2026.11.14.1**. See the
+Current build: **2026.11.14.2**. See [Eye injuries](changes/EYE-INJURIES.md) for the latest update and the
 [main integration notes](changes/MAIN-INTEGRATION-2026-11-14.md) for included
 features, defaults, build identity and focused verification.
 
@@ -10,6 +10,8 @@ coverage limits. Their source is now included in the main integration; old
 statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
+
+- [Eye injuries: blindness, corpse recovery and Spider rage](changes/EYE-INJURIES.md)
 
 - [Load last save after death](changes/DEATH-SAVE-RECOVERY.md)
 

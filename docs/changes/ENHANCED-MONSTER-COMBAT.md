@@ -2,8 +2,8 @@
 
 ```yaml
 project: DOOM: HELLFORGE
-build: 2026.11.14.1
-updated_utc: 2026-11-13T19:16:57Z
+build: 2026.11.14.2
+updated_utc: 2026-11-14T08:14:27Z
 status: active
 evidence_build: 2026.11.12.1
 tests: ENHANCED-MONSTER-COMBAT-TESTS.md
@@ -43,6 +43,18 @@ Heavy monsters surviving a critical head hit below 10% of their configured spawn
 
 A confirmed mechanical rocket-leg hit has a 30% chance of immobilizing for 35 tics (one second), followed by a 175-tic cooldown. Gravity, attack states, death and boss processing continue. Disabling a corresponding rule cancels its pending injuries.
 
+## Eye injuries — build 2026.11.14.2
+
+An additional **Eye Injuries** switch defaults off and requires Enhanced Monster Weak Points. See [eye-injury behavior, tuning and focused verification](EYE-INJURIES.md).
+
+| Monster | Confirmed damaging hitscan eye hit, surviving discharge | Duration / recovery | Damage while active |
+| --- | --- | --- | --- |
+| Cacodemon | One 15% blindness roll per discharge | Until one eligible corpse bite; works with Monster Feeding off | Existing damage rules |
+| Pain Elemental | One 15% blindness roll per discharge | Until one eligible corpse bite; recovery feeding spawns no Lost Souls | Existing damage rules |
+| Spider Mastermind | One 15% rage roll per discharge | Ten seconds, refreshed by a successful retrigger | Incoming multiplier floor 2x; outgoing player damage 2x; plasma stays 3x with vulnerabilities on |
+
+Eye contact is a separate overlay: Spider brain, chassis and legs keep their primary regions. Invisible/unknown eyes do not trigger this feature. No new bleeding damage-over-time is added. The earlier matrix remains the base rules outside this optional status.
+
 ## Architecture and safe fallback
 
 `p_weakpoints.cpp` owns explicit damage categories, balance, discharge counters, player-projectile provenance, temporary status records and a bounded save trailer. `wounds.cpp` supplies the existing shared sprite-surface intersection and cached anatomical result; gameplay rules do not run inside duplicated cosmetic damage notifications.
@@ -74,7 +86,7 @@ These integer keys are saved alongside the existing graphics options. Damage val
 | `wp_leg_duration`, `wp_leg_cooldown` | 35, 175 |
 | `wp_shotgun_range`, `wp_ssg_range`, `wp_shotgun_quota`, `wp_ssg_quota`, `wp_face_majority_percent` | 96, 128, 3, 7, 50 |
 
-Damage percentages accept 100–800; chances and low-health threshold 0–100; aim 0–30 degrees; durations 1–350; cooldowns 1–3500; ranges 1–1024; quotas 1–7/1–20; required majority 1–100.
+Damage percentages accept 100â€“800; chances and low-health threshold 0â€“100; aim 0â€“30 degrees; durations 1â€“350; cooldowns 1â€“3500; ranges 1â€“1024; quotas 1â€“7/1â€“20; required majority 1â€“100.
 
 ## Verification and limitations
 

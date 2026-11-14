@@ -48,11 +48,12 @@ static std::unordered_map<const mobj_t*,critical_hit_t> bulletResults;
 struct HeadProfile { bool found;doom_joints::Head head; };
 static std::unordered_map<const Image*,HeadProfile> heads;
 static std::unordered_map<const Image*,std::map<int,doom_regions::Mask>> regionMasks;
-const std::vector<unsigned char> &weakpointRegionMask(int type,const Image &image) {
+static const doom_regions::Mask &weakpointRegions(int type,const Image &image) {
     auto &types=regionMasks[&image];auto found=types.find(type);
     if(found==types.end())found=types.emplace(type,doom_regions::build(type,image.width,image.height,image.left,image.top,image.pixels.data())).first;
-    return found->second.pixels;
+    return found->second;
 }
+const std::vector<unsigned char> &weakpointRegionMask(int type,const Image &image) {return weakpointRegions(type,image).pixels;}
 static mobj_t *bulletShooter=nullptr;
 static fixed_t bulletX,bulletY,bulletZ,bulletDx,bulletDy,bulletSlope,bulletRange;
 // Geometry supplies current placement when the target has not been drawn recently.
@@ -306,6 +307,7 @@ int criticalThing(mobj_t *target,critical_hit_t *result) {
             const auto &mask=weakpointRegionMask(target->type,im);
             int x=(int)std::floor(impact.point.u),y=(int)std::floor(impact.point.v);
             result->impact.region=(wp_region_t)mask[(size_t)y*im.width+x];
+            result->impact.eyeContact=weakpointRegions(target->type,im).eyes[(size_t)y*im.width+x]!=0;
         }
         result->impact.confidence=100;result->impact.u=impact.point.u;result->impact.v=impact.point.v;
         result->impact.sprite=surface->second.sprite;result->impact.frame=surface->second.frame;result->impact.flipped=impact.flipped;

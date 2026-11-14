@@ -1027,11 +1027,11 @@ void P_CheckMissileSpawn (mobj_t* th)
 //
 // P_SpawnMissile
 //
-mobj_t*
-P_SpawnMissile
+static mobj_t*
+P_SpawnMissileCore
 ( mobj_t*	source,
   mobj_t*	dest,
-  mobjtype_t	type )
+  mobjtype_t	type,int directed,angle_t yaw,fixed_t slope )
 {
     mobj_t*	th;
     angle_t	an;
@@ -1039,7 +1039,7 @@ P_SpawnMissile
 
     P_PhotoEvent(1,source);
     mobj_t barrageAim;
-    if(!P_WeakpointFrenzied(source)&&(P_TacticsAim(source,&barrageAim)||P_AggressiveBarrageAim(source,&barrageAim)))dest=&barrageAim;
+    if(!directed&&!P_WeakpointFrenzied(source)&&(P_TacticsAim(source,&barrageAim)||P_AggressiveBarrageAim(source,&barrageAim)))dest=&barrageAim;
     if (R_MuzzleFlash) R_MuzzleFlash(source, wp_plasma, type);
 
     th = P_SpawnMobj (source->x,
@@ -1050,10 +1050,10 @@ P_SpawnMissile
 	S_StartSound (th, th->info->seesound);
 
     th->target = source;	// where it came from
-    an = R_PointToAngle2 (source->x, source->y, dest->x, dest->y);	
+    an = directed?yaw:R_PointToAngle2 (source->x, source->y, dest->x, dest->y);
 
     // fuzzy player
-    if (dest->flags & MF_SHADOW)
+    if (!directed&&(dest->flags & MF_SHADOW))
 	an += (P_Random()-P_Random())<<20;	
 
     an+=P_WeakpointAttackOffset(source);
@@ -1062,6 +1062,8 @@ P_SpawnMissile
     th->momx = FixedMul (th->info->speed, finecosine[an]);
     th->momy = FixedMul (th->info->speed, finesine[an]);
 	
+    if(directed)th->momz=FixedMul(th->info->speed,slope);
+    else {
     dist = P_AproxDistance (dest->x - source->x, dest->y - source->y);
     dist = dist / th->info->speed;
 
@@ -1069,13 +1071,16 @@ P_SpawnMissile
 	dist = 1;
 
     th->momz = (dest->z - source->z) / dist;
+    }
     P_WeakpointMonsterMissile(th,source);
-    P_TacticsFired(source);
-    P_AggressiveMissile(th,source);
+    if(!directed){P_TacticsFired(source);P_AggressiveMissile(th,source);}
     P_CheckMissileSpawn (th);
 	
     return th;
 }
+
+mobj_t *P_SpawnMissile(mobj_t *source,mobj_t *dest,mobjtype_t type) {return P_SpawnMissileCore(source,dest,type,0,0,0);}
+mobj_t *P_SpawnMissileDirectional(mobj_t *source,mobjtype_t type,angle_t yaw,fixed_t slope) {return P_SpawnMissileCore(source,NULL,type,1,yaw,slope);}
 
 
 //

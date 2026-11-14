@@ -12,9 +12,10 @@ extern "C" {
 #include "../linuxdoom-1.10/p_weakpoints.h"
 }
 namespace doom_regions {
-struct Mask {std::vector<unsigned char> pixels;bool stock=false;};
+struct Mask {std::vector<unsigned char> pixels,eyes;bool stock=false;};
 inline Mask build(int type,int w,int h,int left,int top,const unsigned char *pixels) {
     Mask out;out.pixels.assign((size_t)w*h,WP_UNKNOWN);
+    out.eyes.assign((size_t)w*h,0);
     if(!pixels||w<=0||h<=0)return out;
     unsigned hash=2166136261u;for(size_t i=0;i<(size_t)w*h*2;++i)hash=(hash^pixels[i])*16777619u;
     const char *family=nullptr;
@@ -39,9 +40,9 @@ inline Mask build(int type,int w,int h,int left,int top,const unsigned char *pix
         return out;
     }
     std::vector<std::pair<int,int>> eyes;
-    if(stock)for(const char *p=stock->pixels;*p;) {
-        char *end;int x=(int)std::strtol(p,&end,10),y=(int)std::strtol(end+1,&end,10);
-        if(opaque(x,y))eyes.push_back({x,y});p=*end?end+1:end;
+    if(stock) {
+        auto mask=doom_stock_eye_pixels(*stock,pixels);
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x)if(mask[(size_t)y*w+x])eyes.push_back({x,y});
     }
     if(eyes.empty()&&out.stock&&(type==MT_HEAD||type==MT_PAIN)) {
         // Fullbright attack frames were absent from the old glow-eye table.
@@ -57,6 +58,12 @@ inline Mask build(int type,int w,int h,int left,int top,const unsigned char *pix
             if(type==MT_HEAD?(c>=112&&c<128):(c>=168&&c<192))eyes.push_back({x,y});
         }
     }
+    // An authored empty view is authoritative (rear/closed/hidden eyes).
+    // Keep the legacy primary-region recipe, but never use its color fallback
+    // to invent a new eye injury on a view explicitly authored without eyes.
+    if((type==MT_HEAD||type==MT_PAIN||type==MT_SPIDER)&&(!stock||stock->pixels[0]))
+        for(auto eye:eyes)for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)
+            if(opaque(eye.first+dx,eye.second+dy))out.eyes[(size_t)(eye.second+dy)*w+eye.first+dx]=255;
     if(type==MT_HEAD||type==MT_PAIN) {
         // Individual visible painted eye pixels and their immediate socket.
         // Back views and closed eyes have no landmarks and no eye region.

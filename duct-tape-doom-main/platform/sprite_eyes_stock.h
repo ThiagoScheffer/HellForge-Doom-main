@@ -687,6 +687,15 @@ static const doom_stock_eye_entry doom_stock_eye_table[] = {
 
 /* name: the lump's NUL-terminated name. When the lump is stock artwork,
    fills eyes (w*h, 255 where an eye glows) and returns true. */
+inline std::vector<unsigned char> doom_stock_eye_pixels(const doom_stock_eye_entry &e,const unsigned char *pixels) {
+    std::vector<unsigned char> eyes((size_t)e.width*e.height,0);
+    for(const char *p=e.pixels;*p;) {
+        char *end;long x=strtol(p,&end,10),y=strtol(end+1,&end,10);
+        if(x>=0&&y>=0&&x<e.width&&y<e.height&&pixels[((size_t)y*e.width+x)*2+1])eyes[(size_t)y*e.width+x]=255;
+        p=*end?end+1:end;
+    }
+    return eyes;
+}
 inline bool doom_stock_eyes(const char *name, int w, int h, const unsigned char *pixels, std::vector<unsigned char> &eyes)
 {
     for (const doom_stock_eye_entry &e : doom_stock_eye_table) {
@@ -694,13 +703,7 @@ inline bool doom_stock_eyes(const char *name, int w, int h, const unsigned char 
         unsigned hash = 2166136261u;
         for (size_t i = 0; i < (size_t)w * h * 2; ++i) hash = (hash ^ pixels[i]) * 16777619u;
         if (hash != e.hash) return false;
-        eyes.assign((size_t)w * h, 0);
-        for (const char *p = e.pixels; *p;) {
-            char *end;
-            long x = strtol(p, &end, 10), y = strtol(end + 1, &end, 10);
-            if (x >= 0 && y >= 0 && x < w && y < h) eyes[(size_t)y * w + x] = 255;
-            p = *end ? end + 1 : end;
-        }
+        eyes=doom_stock_eye_pixels(e,pixels);
         return true;
     }
     return false;
