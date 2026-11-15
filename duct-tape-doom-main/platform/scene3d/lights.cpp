@@ -474,6 +474,10 @@ void collectFlashes(float fraction,const Uniforms &camera) {
     }
     // Pickups stay dynamic even in bake-only mode: no lingering light after collection.
     std::sort(keys.begin(),keys.end(),[](const Candidate&a,const Candidate&b){return a.distance<b.distance;});
+    auto isKeyPickup=[](int sprite){
+        return sprite==SPR_RKEY||sprite==SPR_RSKU||sprite==SPR_BKEY||sprite==SPR_BSKU||
+               sprite==SPR_YKEY||sprite==SPR_YSKU;
+    };
     lightKind=I_RENDER3D_LIGHT_DECORATION;
     for(size_t n=0;n<std::min(size_t(6),keys.size());++n){
         const auto& thing=*keys[n].thing;float x,y,z;interpolatedPosition(thing,fraction,x,y,z);
@@ -488,17 +492,20 @@ void collectFlashes(float fraction,const Uniforms &camera) {
         case SPR_PMAP:color={.12f,.65f,1};break;
         default:break;
         }
-        bool key=thing.sprite==SPR_RKEY||thing.sprite==SPR_RSKU||thing.sprite==SPR_BKEY||thing.sprite==SPR_BSKU||thing.sprite==SPR_YKEY||thing.sprite==SPR_YSKU;
-        // Normalize clustered powerups locally, without dimming isolated ones.
-        float strength=key?1.5f:.65f;
-        if(!key){int neighbors=0;for(const auto& other:keys)if(other.thing!=&thing&&
+        bool key=isKeyPickup(thing.sprite);
+        // Keys mark their location without washing nearby walls or floors in
+        // saturated color. Keep the same key hue and sprite treatment, but use
+        // less light than the original 1.5-strength, 144-unit emitters.
+        float strength=.65f;
+        // Nearby keys also share a light budget; non-key pickups keep their
+        // previous normalization against all other glowing pickups.
+        int neighbors=0;
+        for(const auto& other:keys)if(other.thing!=&thing&&(!key||isKeyPickup(other.thing->sprite))&&
             std::hypot(units(other.thing->x)-x,units(other.thing->y)-y)<160)++neighbors;
-            strength/=std::sqrt(1.f+neighbors*.5f);}
-        // A low, strongly directional lamp barely lights the floor at grazing
-        // angles. Lift it into the pickup and retain a broad diffuse pool.
-        // Negative cone marker identifies pickup light for the surface tint;
-        // it remains an ordinary omnidirectional, occluded dynamic light.
-        appendLight(x,y,z+(key?16:24),key?144:112,strength*std::clamp((640-keys[n].distance)/128,0.f,1.f),color,&thing,.35f,true,0,{0,0,0,-1});
+        strength/=std::sqrt(1.f+neighbors*.5f);
+        // Raise the emitter into the pickup so the floor still catches a small,
+        // local pool. Negative cone marker keeps the existing pickup surface tint.
+        appendLight(x,y,z+(key?16:24),key?104:112,strength*std::clamp((640-keys[n].distance)/128,0.f,1.f),color,&thing,.35f,true,0,{0,0,0,-1});
     }
     std::sort(projectiles.begin(),projectiles.end(),[](const Candidate &a,const Candidate &b) {return a.distance<b.distance;});
     lightKind=I_RENDER3D_LIGHT_PROJECTILE;
@@ -758,7 +765,9 @@ extern "C" void I_TestKeyLights() {
         bakeOnlyActive=only;collectFlashes(1,camera);
         const Flash *found=nullptr;
         for(unsigned n=0;n<flashes.count;++n)if(lightSources[n]==key)found=&flashes.lights[n];
-        if(!found||found->baked!=0||flashAt(camera.eye[0]+24,camera.eye[1],units(player->floorz)+1,*found)<.5f)
+        // The subdued key light must still reach the nearby floor in both
+        // dynamic and bake-only modes, without requiring the old bright pool.
+        if(!found||found->baked!=0||flashAt(camera.eye[0]+24,camera.eye[1],units(player->floorz)+1,*found)<.25f)
             I_Error((char*)"Key %d missing useful dynamic floor light (bake-only %d)",number,only);
         int channel=(number==5||number==40)?2:0;
         if(found->color[channel]<.99f)I_Error((char*)"Wrong key light color");
