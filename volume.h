@@ -48,4 +48,16 @@ private:
  int cx=0,cy=0,cz=0;
  void setupChunks();
 };
+// Lossless indexed copy for repeated sight queries. Values are deduplicated by
+// their float bits; no quantization, triangle merging or visibility answers.
+class RayMesh {
+public:
+ bool build(const Volume&);
+ bool ray(Vec start,Vec direction,float range,Hit&)const;
+ size_t storageBytes()const;
+private:
+ struct Node {Vec lo,hi;uint32_t first=0,count=0,right=0;};
+ struct Part {Vec lo,hi;std::vector<Vec> values;std::vector<std::array<uint16_t,4>> triangles;std::vector<uint16_t> order;std::vector<Node> nodes;};
+ std::vector<Part> parts;
+};
 }

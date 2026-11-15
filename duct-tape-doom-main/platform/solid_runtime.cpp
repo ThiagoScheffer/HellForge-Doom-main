@@ -322,13 +322,13 @@ void SV_Player(player_t *p){
  p->message="SOLID GEOMETRY TEST - USE OPENS DOOR";
  SV_Refresh(p->mo);
 }
-float SV_Trace(float x,float y,float z,float dx,float dy,float dz,float *point,int *owner){
+static float solidTrace(float x,float y,float z,float dx,float dy,float dz,float *point,int *owner,bool reuseMesh){
  if(!SV_Active())return 1;
  lab::Vec delta{dx,dy,dz};float distance=lab::length(delta);if(distance<.001f)return 1;
  lab::Hit hit;int selected;
  if(SV_MapMode()){
   auto traceStart=std::chrono::steady_clock::now();
-  bool traced=mapWorld.ray({x,y,z},delta*(1/distance),distance,hit);
+  bool traced=mapWorld.ray({x,y,z},delta*(1/distance),distance,hit,reuseMesh);
   if(M_CheckParm((char*)"-profilegamesteps")){
    double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-traceStart).count();
    if(ms>2)printf("SOLID trace tic %d range %.1f %.3f ms\n",gametic,distance,ms);
@@ -340,6 +340,9 @@ float SV_Trace(float x,float y,float z,float dx,float dy,float dz,float *point,i
   point[3]=hit.normal.x;point[4]=hit.normal.y;point[5]=hit.normal.z;}
  if(owner)*owner=selected;
  return hit.distance/distance;
+}
+float SV_Trace(float x,float y,float z,float dx,float dy,float dz,float *point,int *owner){
+ return solidTrace(x,y,z,dx,dy,dz,point,owner,false);
 }
 static void impact(float *point,int owner,float radius,float depth=0){
  if(!SV_Active())return;
@@ -479,9 +482,19 @@ int SV_Sight(mobj_t *a,mobj_t *b){
 #endif
  MP_AUTO(MP_SOLIDSIGHT);
  if(!SV_Active())return -1;
+ static const bool reuseMesh=!M_CheckParm((char*)"-nosolidsightcache");
+ static const bool diagnostics=M_CheckParm((char*)"-profilesolidraycache")!=0;
+ if(diagnostics&&SV_MapMode()){
+  static int lastTic=-1;static unsigned lastLevel=~0u;
+  if(lastLevel!=r_levelserial||(leveltime<10&&leveltime!=lastTic)||leveltime-lastTic>=TICRATE){
+   auto s=mapWorld.rayMeshStats();lastTic=leveltime;lastLevel=r_levelserial;
+   fprintf(stderr,"SOLID sight meshes tic %d: hits %llu misses %llu evictions %llu tiles %zu bytes %zu\n",
+    leveltime,(unsigned long long)s.hits,(unsigned long long)s.misses,(unsigned long long)s.evictions,s.tiles,s.bytes);
+  }
+ }
  for(float factor:{.25f,.5f,.75f})
-  if(SV_Trace(unit(a->x),unit(a->y),unit(a->z)+unit(a->height)*.75f,
-     unit(b->x-a->x),unit(b->y-a->y),unit(b->z)+unit(b->height)*factor-unit(a->z)-unit(a->height)*.75f,nullptr,nullptr)>=1)return 1;
+  if(solidTrace(unit(a->x),unit(a->y),unit(a->z)+unit(a->height)*.75f,
+     unit(b->x-a->x),unit(b->y-a->y),unit(b->z)+unit(b->height)*factor-unit(a->z)-unit(a->height)*.75f,nullptr,nullptr,reuseMesh)>=1)return 1;
  return 0;
 }
 int SV_SaveSize(){

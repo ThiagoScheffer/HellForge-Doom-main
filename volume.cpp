@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <cstring>
+#include <unordered_map>
 namespace lab {
 static constexpr int cells=16;
 void Volume::create(int x,int y,int z,float step,Vec start){
@@ -133,6 +134,87 @@ bool Volume::ray(Vec start,Vec dir,float range,Hit &hit)const{
    Vec q=cross(s,e);float v=inv*dot(dir,q);if(v<-.00001f||u+v>1.00001f)continue;
    float dist=inv*dot(f,q);if(dist<.001f||dist>=hit.distance)continue;
    found=true;hit={dist,start+dir*dist,t.normal};
+  }
+ }return found;
+}
+bool RayMesh::build(const Volume& source){
+ parts.clear();
+ struct Hash {size_t operator()(const std::array<uint32_t,3>& bits)const{
+  size_t h=2166136261u;for(auto b:bits)h=(h^b)*16777619u;return h;
+ }};
+ for(const auto& original:source.chunks){
+  if(original.triangles.empty())continue;
+  if(original.triangles.size()>65535){parts.clear();return false;}
+  Part part;part.lo=original.lo;part.hi=original.hi;
+  std::unordered_map<std::array<uint32_t,3>,uint16_t,Hash> indices;
+  part.triangles.reserve(original.triangles.size());
+  for(const auto& triangle:original.triangles){
+   std::array<uint16_t,4> refs;Vec values[]={triangle.a,triangle.b,triangle.c,triangle.normal};
+   for(int i=0;i<4;++i){
+    std::array<uint32_t,3> bits;std::memcpy(&bits[0],&values[i].x,4);std::memcpy(&bits[1],&values[i].y,4);std::memcpy(&bits[2],&values[i].z,4);
+    auto it=indices.find(bits);
+    if(it==indices.end()){
+     if(part.values.size()>=65536){parts.clear();return false;}
+     uint16_t index=uint16_t(part.values.size());part.values.push_back(values[i]);
+     it=indices.emplace(bits,index).first;
+    }
+    refs[i]=it->second;
+   }
+   part.triangles.push_back(refs);
+  }
+  // Spatially split an index array; retain original triangle IDs for exact tie
+  // handling. Bounds include the exact test's barycentric edge tolerance.
+  part.order.reserve(part.triangles.size());
+  for(size_t i=0;i<part.triangles.size();++i)part.order.push_back(uint16_t(i));
+  auto buildNodes=[&](auto&& self,uint32_t first,uint32_t count)->uint32_t{
+   uint32_t index=uint32_t(part.nodes.size());part.nodes.emplace_back();
+   Node node;node.first=first;node.count=count;node.lo={INFINITY,INFINITY,INFINITY};node.hi={-INFINITY,-INFINITY,-INFINITY};
+   for(uint32_t j=first;j<first+count;++j)for(int a=0;a<3;++a){
+    Vec v=part.values[part.triangles[part.order[j]][a]];
+    node.lo={std::min(node.lo.x,v.x),std::min(node.lo.y,v.y),std::min(node.lo.z,v.z)};
+    node.hi={std::max(node.hi.x,v.x),std::max(node.hi.y,v.y),std::max(node.hi.z,v.z)};
+   }
+   Vec pad=(node.hi-node.lo)*.0001f+Vec{.01f,.01f,.01f};node.lo=node.lo-pad;node.hi=node.hi+pad;
+   node.lo={std::nextafter(node.lo.x,-INFINITY),std::nextafter(node.lo.y,-INFINITY),std::nextafter(node.lo.z,-INFINITY)};
+   node.hi={std::nextafter(node.hi.x,INFINITY),std::nextafter(node.hi.y,INFINITY),std::nextafter(node.hi.z,INFINITY)};
+   if(count>32){
+    Vec span=node.hi-node.lo;int axis=span.x>span.y?0:1;if(span.z>(axis?span.y:span.x))axis=2;
+    auto middle=part.order.begin()+first+count/2;
+    auto coordinate=[&](uint16_t id){const auto& t=part.triangles[id];Vec c=part.values[t[0]]+part.values[t[1]]+part.values[t[2]];return axis==0?c.x:axis==1?c.y:c.z;};
+    std::nth_element(part.order.begin()+first,middle,part.order.begin()+first+count,[&](uint16_t a,uint16_t b){float x=coordinate(a),y=coordinate(b);return x<y||(x==y&&a<b);});
+    self(self,first,count/2);node.right=self(self,first+count/2,count-count/2);node.count=0;
+   }
+   part.nodes[index]=node;return index;
+  };
+  buildNodes(buildNodes,0,uint32_t(part.triangles.size()));
+  part.nodes.shrink_to_fit();part.values.shrink_to_fit();parts.push_back(std::move(part));
+ }
+ return true;
+}
+size_t RayMesh::storageBytes()const{
+ size_t bytes=parts.capacity()*sizeof(Part);
+ for(const auto& p:parts)bytes+=p.values.capacity()*sizeof(Vec)+p.triangles.capacity()*sizeof(std::array<uint16_t,4>)+p.order.capacity()*sizeof(uint16_t)+p.nodes.capacity()*sizeof(Node);
+ return bytes;
+}
+bool RayMesh::ray(Vec start,Vec dir,float range,Hit& hit)const{
+ // Keep Volume::ray's intersection arithmetic and original normal bits. Original
+ // triangle IDs preserve its equal-distance tie result despite spatial traversal.
+ dir=normalized(dir);bool found=false;hit.distance=range;
+ for(const auto& part:parts){if(!boxRay(start,dir,part.lo,part.hi,hit.distance))continue;
+  bool partFound=false;uint16_t bestTriangle=0;
+  uint32_t stack[64];int pending=1;stack[0]=0;
+  while(pending){
+   uint32_t index=stack[--pending];const auto& node=part.nodes[index];
+   if(!boxRay(start,dir,node.lo,node.hi,hit.distance))continue;
+   if(!node.count){stack[pending++]=node.right;stack[pending++]=index+1;continue;}
+   for(uint32_t i=node.first;i<node.first+node.count;++i){uint16_t id=part.order[i];const auto& refs=part.triangles[id];
+   Vec a=part.values[refs[0]],b=part.values[refs[1]],c=part.values[refs[2]];
+   Vec e=b-a,f=c-a,h=cross(dir,f);float det=dot(e,h);if(std::abs(det)<1e-8f)continue;
+   float inv=1/det;Vec s=start-a;float u=inv*dot(s,h);if(u<-.00001f||u>1.00001f)continue;
+   Vec q=cross(s,e);float v=inv*dot(dir,q);if(v<-.00001f||u+v>1.00001f)continue;
+   float dist=inv*dot(f,q);if(dist<.001f||dist>hit.distance||(dist==hit.distance&&(!partFound||id>=bestTriangle)))continue;
+   found=partFound=true;bestTriangle=id;hit={dist,start+dir*dist,part.values[refs[3]]};
+   }
   }
  }return found;
 }

@@ -3,6 +3,7 @@
 #include <map>
 #include <array>
 #include <iosfwd>
+#include <unordered_map>
 namespace lab {
 using TileKey=std::array<int,3>;
 struct MapCut {
@@ -20,7 +21,9 @@ public:
  std::vector<Vec> crumble(int maximum=4,size_t anchorIndex=size_t(-1),int totalLimit=32);
  float sample(Vec p)const;
  const WorldTile& tile(TileKey key);
- bool ray(Vec start,Vec direction,float range,Hit& hit);
+ bool ray(Vec start,Vec direction,float range,Hit& hit,bool reuseMesh=false);
+ struct RayMeshStats {uint64_t hits=0,misses=0,evictions=0;size_t bytes=0,tiles=0;};
+ RayMeshStats rayMeshStats()const;
  bool fits(Vec feet,float radius,float height);
  bool edited(Vec p)const;
  float removal(Vec p)const;
@@ -45,6 +48,17 @@ private:
  std::map<std::array<int,2>,unsigned> columns;
  unsigned nextRevision=0;
  uint64_t clock=0;
+ // Sight needs triangles, not full density/base volumes. Keep its working set
+ // independently of the smaller collision-volume cache. Never cache LOS answers.
+ struct RayTile {RayMesh mesh;size_t bytes=0;uint64_t used=0;};
+ struct RayKeyHash {size_t operator()(const TileKey& key)const{size_t h=2166136261u;for(auto v:key)h=(h^uint32_t(v))*16777619u;return h;}};
+ std::unordered_map<TileKey,RayTile,RayKeyHash> rayTiles;
+ std::map<uint64_t,TileKey> rayUse;
+ uint64_t rayClock=0,rayHits=0,rayMisses=0,rayEvictions=0;
+ size_t rayBytes=0;
+ const RayMesh* rayMesh(TileKey);
+ void eraseRayMesh(TileKey);
+ void clearRayMeshes();
  Vec center(const MapCut&)const;
  float cutValue(Vec p,const MapCut&)const;
  void update(TileKey,WorldTile&,bool incremental=false,size_t firstCut=size_t(-1));

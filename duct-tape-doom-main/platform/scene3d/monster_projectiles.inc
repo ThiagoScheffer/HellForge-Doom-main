@@ -30,7 +30,14 @@ static const MonsterProjectileProfile *monsterProjectileProfile(int type){
 }
 // Enhanced monster-projectile FX are intentionally local to the player.
 // 512 world units is eight classic 64-unit map blocks.
-static constexpr float monsterProjectileFxRange=512.0f;
+/*
+Distance	Value
+8 blocks (current)	512.0f
+9 blocks	576.0f
+10 blocks	640.0f
+12 blocks	768.0f
+*/
+static constexpr float monsterProjectileFxRange=640.0f;
 static bool monsterProjectileNearPlayer(float x,float y,float z){
     const mobj_t *player=players[displayplayer].mo;
     if(!player)return false;

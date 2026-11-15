@@ -9,6 +9,7 @@ namespace lab {
 static constexpr float extent=MapSource::tileCells*MapSource::step;
 TileKey MapWorld::key(Vec p){return {int(std::floor(p.x/extent)),int(std::floor(p.y/extent)),int(std::floor(p.z/extent))};}
 void MapWorld::reset(MapSource next){
+ clearRayMeshes();rayHits=rayMisses=rayEvictions=0;
  source=std::move(next);cuts.clear();planes.clear();cache.clear();columns.clear();
  for(const auto& r:source.topology())planes[r.sector]={r.floor,r.ceiling};
 }
@@ -104,6 +105,9 @@ bool MapWorld::affected(Vec p,float radius,float height)const{
  return false;
 }
 void MapWorld::update(TileKey k,WorldTile& tile,bool incremental,size_t firstCut){
+ // Recreating an evicted volume does not change geometry. Only edits invalidate
+ // its compact mesh; height changes/reset/load invalidate globally beforehand.
+ if(incremental)eraseRayMesh(k);
  // An unchanged base does not need sampling or meshing again on each hit.
  bool fresh=!incremental||tile.volume.density.empty();
  std::vector<float> oldBase,oldDensity;
@@ -195,6 +199,20 @@ bool MapWorld::heights(int sector,float floor,float ceiling){
  if(!source.heights(sector,floor,ceiling))return false;
  planes[sector]={floor,ceiling};
  Vec lo,hi;source.bounds(sector,lo,hi);
+ // Keep distant sight geometry warm while a door/lift moves. Include the full
+ // XY footprint and narrow field band, plus any cuts anchored to this plane.
+ // All Z slices in those columns are invalidated, covering both old/new heights.
+ for(auto it=rayTiles.begin();it!=rayTiles.end();){
+  auto k=it->first;
+  bool affected=(k[0]+1)*extent>=lo.x-8&&k[0]*extent<=hi.x+8&&
+   (k[1]+1)*extent>=lo.y-8&&k[1]*extent<=hi.y+8;
+  for(const auto& cut:cuts)if(!affected&&cut.sector==sector&&previous[cut.plane]!=planes[sector][cut.plane]){
+   Vec c=center(cut);float r=cut.radius*std::max(1.f,cut.stretch)*1.06f+8;
+   affected=(k[0]+1)*extent>=c.x-r&&k[0]*extent<=c.x+r&&
+    (k[1]+1)*extent>=c.y-r&&k[1]*extent<=c.y+r;
+  }
+  if(affected){rayBytes-=it->second.bytes;rayUse.erase(it->second.used);it=rayTiles.erase(it);}else ++it;
+ }
  auto firstColumn=key(lo-Vec{8,8,0}),lastColumn=key(hi+Vec{8,8,0});
  unsigned planeRevision=++nextRevision;
  for(int y=firstColumn[1];y<=lastColumn[1];++y)for(int x=firstColumn[0];x<=lastColumn[0];++x)columns[{x,y}]=planeRevision;
@@ -293,7 +311,46 @@ std::vector<Vec> MapWorld::crumble(int maximum,size_t anchorIndex,int totalLimit
  for(auto k:dirty)update(k,cache[k],true,firstRemoval);
  return removed;
 }
-bool MapWorld::ray(Vec start,Vec direction,float range,Hit& hit){
+void MapWorld::clearRayMeshes(){rayTiles.clear();rayUse.clear();rayBytes=0;rayClock=0;}
+void MapWorld::eraseRayMesh(TileKey k){
+ auto it=rayTiles.find(k);if(it==rayTiles.end())return;
+ rayBytes-=it->second.bytes;rayUse.erase(it->second.used);rayTiles.erase(it);
+}
+MapWorld::RayMeshStats MapWorld::rayMeshStats()const{
+ return {rayHits,rayMisses,rayEvictions,rayBytes,rayTiles.size()};
+}
+const RayMesh* MapWorld::rayMesh(TileKey k){
+ auto it=rayTiles.find(k);
+ if(it!=rayTiles.end()){
+  ++rayHits;
+  // Amortize recency bookkeeping for tiles shared by nearby rays. Ordering is
+  // approximate LRU only; geometry/results never depend on eviction order.
+  uint64_t now=++rayClock;
+  if(now-it->second.used>=256){
+   auto node=rayUse.extract(it->second.used);node.key()=now;
+   it->second.used=now;rayUse.insert(std::move(node));
+  }
+  return &it->second.mesh;
+ }
+ ++rayMisses;
+ const Volume& original=tile(k).volume;
+ RayTile next;
+ // Empty chunks cannot contribute a hit. Preserve all remaining triangles and
+ // their order, including normals and tie-breaking, without resampling.
+ if(!next.mesh.build(original))return nullptr;
+ next.bytes=sizeof(RayTile)+sizeof(TileKey)+sizeof(uint64_t)+128+
+  next.mesh.storageBytes();
+ constexpr size_t byteLimit=64*1024*1024,tileLimit=16384;
+ // An unusually complex tile retains the original path without consuming the
+ // bounded mesh budget. tile()'s reference remains valid throughout this call.
+ if(next.bytes>byteLimit)return nullptr;
+ while(!rayUse.empty()&&(rayTiles.size()>=tileLimit||rayBytes+next.bytes>byteLimit)){
+  auto key=rayUse.begin()->second;eraseRayMesh(key);++rayEvictions;
+ }
+ next.used=++rayClock;rayBytes+=next.bytes;rayUse.emplace(next.used,k);
+ return &rayTiles.emplace(k,std::move(next)).first->second.mesh;
+}
+bool MapWorld::ray(Vec start,Vec direction,float range,Hit& hit,bool reuseMesh){
  if(!std::isfinite(range)||range<=0||range>65536)return false;
  Vec d=normalized(direction);if(length(d)<.5f)return false;
  TileKey k=key(start);float next[3],delta[3];int step[3];
@@ -305,7 +362,8 @@ bool MapWorld::ray(Vec start,Vec direction,float range,Hit& hit){
  float travelled=0;
  for(int n=0;n<4096&&travelled<=range;++n){
   Hit candidate;
-  if(tile(k).volume.ray(start,d,range,candidate)){
+  const RayMesh* mesh=reuseMesh?rayMesh(k):nullptr;
+  if(mesh?mesh->ray(start,d,range,candidate):tile(k).volume.ray(start,d,range,candidate)){
    float end=std::min({next[0],next[1],next[2],range});
    if(candidate.distance<=end+.001f){hit=candidate;return true;}
   }
@@ -359,7 +417,7 @@ bool MapWorld::load(std::istream& in){
  }
  // Old saves retain their format; discard only cuts now owned by shielded floors.
  next.erase(std::remove_if(next.begin(),next.end(),[&](const MapCut& c){return c.sector>=0&&c.plane==0&&source.floorShielded(c.sector);}),next.end());
- cuts=std::move(next);cache.clear();
+ cuts=std::move(next);cache.clear();clearRayMeshes();
  for(const auto& cut:cuts){
   Vec c=center(cut);float reach=cut.radius*std::max(1.f,cut.stretch)*1.06f+MapSource::step*2;
   auto lo=key(c-Vec{reach,reach,reach}),hi=key(c+Vec{reach,reach,reach});
