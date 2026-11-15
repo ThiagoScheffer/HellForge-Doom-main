@@ -358,11 +358,13 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Rooms that lamps, screens and windows light well lose part of their even light level, so the light "
                     "visibly comes from them and the far corners fall darker. Baked at level load.",
                     [](const Settings &d){return d.bakedLights!=0;}),
-                slider("unlit_darkening","Darker rooms without lamps",&s.unlitDarkening,0,0.5,0.05,
-                    "Indoor rooms nothing visibly lights lose this much of their even light level too, so they don't look "
-                    "brighter and flatter than the lamp-lit rooms around them.",
+                slider("unlit_darkening","Darker rooms without lamps",&s.unlitDarkening,0,0.85,0.05,
+                    "Remove residual even lighting from enclosed interiors. Above 50%, extra darkness applies only "
+                    "where very little steady static light reaches the room; actual lamps, windows and shots still illuminate it. "
+                    "Changing this setting re-bakes lighting.",
                     [](const Settings &d){return d.bakedLights!=0&&d.dimLitRooms!=0;},
-                    {"Off","5%","10%","15%","20%","25%","30%","35%","40%","45%","50%"}),
+                    {"Off","5%","10%","15%","20%","25%","30%","35%","40%","45%","50%",
+                     "55%","60%","65%","70%","75%","80%","85%"}),
                 check("sun_shadows","Sun shadows",&s.sun,"Shadows and sunlit patches baked at level load from the sky texture and map geometry."),
                 check("bounce_light","Bounce light",&s.bounce,
                     "Sunlit and lamp-lit surfaces tint and lift what faces them, including ceilings; baked at level load."),

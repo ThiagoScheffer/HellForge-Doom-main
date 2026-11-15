@@ -38,7 +38,8 @@ const std::vector<int> &bakeGridLights(float x,float y) {
 }
 
 // The light bake's inputs: 1 emissive textures, 2 bake-only lights.
-int lightBakeInputs() {return (settings.emissive?1:0)|(settings.bakeOnlyLights?2:0)|(settings.windowLight?4:0)|(settings.dimLitRooms?8:0)|
+int lightBakeInputs() {return (1<<15)| // Lighting model v2: invalidate old light-bake input identities.
+    (settings.emissive?1:0)|(settings.bakeOnlyLights?2:0)|(settings.windowLight?4:0)|(settings.dimLitRooms?8:0)|
     (settings.windowLight?(int)std::lround(settings.windowStrength*4)<<4:0)|
     (settings.dimLitRooms?(int)std::lround(settings.unlitDarkening*20)<<8:0)|(settings.windowLight&&settings.sun?1<<14:0);}
 // Bake-only lights: glowing liquid floors and ceilings (lava, nukage, slime,
@@ -237,9 +238,9 @@ static int nightFrameLevel(const sector_t *sector,int level) {
 // light visibly comes from its lamps, screens and windows and far corners
 // fall darker, but no further than leaves its least-lit floor point 60% of
 // the level (E1M1 and E1M2 had 6% of their indoor floors under half their
-// level). Every region drops by at least settings.unlitDarkening of its
-// level, or a room nothing visibly lights would keep its full even light and
-// look brighter and flatter than the lit rooms around it (E1M3's sector 98).
+// level). The standard unlitDarkening range applies to all indoor regions.
+// Extra darkening above 50% is reserved for regions receiving very little
+// steady baked light, preventing lit rooms from being crushed by the slider.
 // This needs no dimmer neighbor; only regions mostly open to the sky keep
 // their level. Sectors whose lamps flicker count at their low, and only
 // steady light dims a region: with the lamps out, a room is as Doom has it.
@@ -296,8 +297,15 @@ static void classifyLampSectors() {
             // Its least-lit floor point keeps at least 60% of the level: the
             // drop goes no further than the static light that point gets.
             float least=dimmest==INFINITY?0.0f:dimmest;
-            float lit=std::min({sum/count,0.6f*level[i],least+0.4f*level[i]});
-            lit=std::max(lit,settings.unlitDarkening*level[i]);
+            float average=sum/count;
+            float lit=std::min({average,0.6f*level[i],least+0.4f*level[i]});
+            // Only mostly unlit indoor regions receive the new deep range.
+            // Compare to the authored level so map-wide brightness and the
+            // number of static sources do not change this classification.
+            bool unlit=average<0.10f*level[i]&&least<0.05f*level[i];
+            float requested=std::clamp(settings.unlitDarkening,0.0f,.85f);
+            float darkening=unlit?requested:std::min(requested,.50f);
+            lit=std::max(lit,darkening*level[i]);
             regionLeast.push_back(std::max(least,lit));fixed.push_back(open*2>count);
         } else {regionLeast.push_back(dimmest);fixed.push_back(sky||dimmest==INFINITY);}
     }
@@ -588,7 +596,8 @@ void bakeLights() {
         wallDirectionCells.assign((size_t)atlasWidth*atlasHeight*4,0);
         flatDirectionCells.assign((size_t)mapWidth*mapHeight*2*4,0);
     } else {wallDirectionCells.clear();flatDirectionCells.clear();}
-    BakeCache cache("lights",{cacheChannel(flatLightCells,0,(size_t)mapWidth*mapHeight*2,3),
+    // Old disk entries were baked with the previous emitter/sector model.
+    BakeCache cache("lights_hf2",{cacheChannel(flatLightCells,0,(size_t)mapWidth*mapHeight*2,3),
         cacheWallChannel(wallBakeCells,atlasHeight,0,3),cacheField(wallDirectionCells),cacheField(flatDirectionCells)});
     if(!cache.restore()) {
     parallelFor(mapHeight,[&](int y) {for(int x=0;x<mapWidth;++x)lightCell(bakeMap,(size_t)y*mapWidth+x,directed);});

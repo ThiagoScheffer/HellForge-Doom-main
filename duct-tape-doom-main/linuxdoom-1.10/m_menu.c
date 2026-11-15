@@ -271,7 +271,7 @@ enum
     ep2,
     ep3,
     ep4,
-    ep5,
+   // ep5, <- need to check it is breaking current game doom.wad normal game start.
     ep_end
 } episodes_e;
 

@@ -151,12 +151,13 @@ std::vector<SurfaceLight> mergedSurfaceLights(std::vector<SurfaceLight> tiles) {
     }
     return mergeResult;
 }
-// How strongly a sector's glowing textures light, from its light level: the
-// mapper's stand-in for its lamps. A light strip in a 144 sector beside a 128
-// room (Doom 2 MAP02's computer room) was meant as a dim fixture, not one
-// that floods the room. Strength rises with the square of the level from 96
-// to 208 (144: 18%, 160: 33%, 192: 73%), so dim lamps barely reach past the
-// sector light and lamps from 208 up shine in full. Flickering sectors
+// How strongly a sector's glowing textures light, from its light level:
+// the mapper's stand-in for the strength of its lamps. The old 35% minimum
+// made a lamp in a very dim sector almost half strength even at level 144.
+// Keep a small 8% local contribution so emissive fixtures are visible in
+// dark rooms without letting them flood neighboring metal. Approximate
+// strengths: 96: 8%, 144: 25%, 160: 38%, 192: 76%, 208+: 100%.
+// Flickering sectors
 // count at their peak (their light thinker's maxlight), read once per level
 // with the low they drop to, so a save loaded mid-flicker lights like a
 // fresh start.
@@ -234,9 +235,9 @@ static float lampLevel(int sector) {
     readLampRanges();
     if(sector<0||sector>=numsectors)return 1;
     float f=std::clamp((lampRanges[sector].peak-96)/112.0f,0.0f,1.0f);
-    // Ambient darkness must not extinguish a visibly emissive fixture.
-    // Actual switches/strobes still use lampShine and tileDark below.
-    return .35f+.65f*f*f;
+    // The material's emissive texels are lit separately in world.frag;
+    // this factor controls the light cast into the environment, not the texels.
+    return .08f+.92f*f*f;
 }
 // Lamps in a flickering sector follow it. Blinking and strobing sectors
 // switch them, as a shot-out lamp sputters: out while the sector stands in
@@ -284,7 +285,14 @@ static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,f
     // switched off: shots still find them.
     SurfaceLight light={key,x,y,z,radius,1.65f*image.emissionWeight*lampLevel(sector)*crowd,image.emissionColor,facing,extent};
     if(image.switchIndicator) {
-        light.radius=144;light.strength=1.2f;light.extent=0;
+        // Switches change state dynamically and must not enter the static
+        // bake. Unlike the old fixed 1.2 light, their contribution follows
+        // the actual lit area, sector brightness, and emitter crowding.
+        // Keep a compact halo without painting nearby walls a solid color.
+        light.radius=88;
+        light.strength=std::min(.30f,1.15f*image.emissionWeight*
+            (.25f+.75f*lampLevel(sector))*crowd);
+        light.extent=0;
         switchLights.push_back(light);
         return;
     }
@@ -348,10 +356,16 @@ void collectSurfaceLights() {
             if(distance<1024)nearby.emplace_back(distance,i);
         }
         std::sort(nearby.begin(),nearby.end());
-        for(size_t i=0;i<std::min(size_t(8),nearby.size())&&flashes.count<maxLights;++i) {
+        // Bound the combined strength as well as each individual switch:
+        // eight clustered indicators must not flood a small control room.
+        float switchBudget=.9f;
+        for(size_t i=0;i<std::min(size_t(8),nearby.size())&&flashes.count<maxLights&&switchBudget>0;++i) {
             const auto &p=switchLights[nearby[i].second];auto n=panelNormal(p);
             float fade=std::clamp((1024-nearby[i].first)/256.0f,0.0f,1.0f);
-            appendLight(p.x,p.y,p.z,p.radius,p.strength*fade,p.color,nullptr,0.35f,true,0,{0,n[0],n[1],0});
+            float strength=std::min(p.strength*fade,switchBudget);
+            if(strength<.01f)continue;
+            appendLight(p.x,p.y,p.z,p.radius,strength,p.color,nullptr,0.35f,true,0,{0,n[0],n[1],0});
+            switchBudget-=strength;
         }
     }
     lightKind=bakeOnlyActive?I_RENDER3D_LIGHT_FOG:I_RENDER3D_LIGHT_SURFACE;
@@ -511,8 +525,10 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
         double weight=cached.weight,centerU=cached.centerU,centerV=cached.centerV;
         if(weight>0){
             float t=std::clamp(float(centerU/weight-u)/len,0.f,1.f),z=std::clamp(float(anchor-centerV/weight),bottom,top);
+            float px=a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET;
+            float py=a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET;
             surfaceLight({1,(int)(&line-lines),side,firstU,firstV,span},int(sides[line.sidenum[side]].sector-sectors),
-                a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET,a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET,z,image,facing,224,std::min(top-z,z-bottom));
+                px,py,z,image,facing,224,std::min(top-z,z-bottom),glowCrowding(px,py));
         }
         return;
     }

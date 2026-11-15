@@ -85,7 +85,8 @@ void bakeStaticGrid() {
     staticWidth=(int)std::ceil(mapWidth*mapCell/staticCell);staticHeight=(int)std::ceil(mapHeight*mapCell/staticCell);
     staticGrid.assign((size_t)staticWidth*staticHeight,{});
     static_assert(sizeof(StaticSample)==112,"Update the numeric cache layout if StaticSample changes");
-    BakeCache cache("grid",{{&staticGrid[0].used,staticGrid.size(),sizeof(StaticCell),1},
+    // The cached samples depend on baked emitter strengths (lighting model v2).
+    BakeCache cache("grid_hf2",{{&staticGrid[0].used,staticGrid.size(),sizeof(StaticCell),1},
         {&staticGrid[0].low,staticGrid.size(),sizeof(StaticCell),2*sizeof(float)},
         {&staticGrid[0].at,staticGrid.size(),sizeof(StaticCell),2*sizeof(StaticSample)}});
     std::atomic<size_t> used{0};

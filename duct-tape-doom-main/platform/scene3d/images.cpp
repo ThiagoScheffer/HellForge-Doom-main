@@ -332,17 +332,23 @@ static bool livingMonsterLump(int lump) {
     }
     return lump>=0&&lump<(int)living.size()&&living[lump];
 }
-// The 0.25 weight floor lets small fixtures (key-door strips, console
-// screens) light their rooms. Computer and tech walls merely dotted with
-// LEDs (TEKWALL*, COMPTALL, COMPWERD: under 0.6% glows) keep their glowing
-// artwork but light only as much as those LEDs; with the floor E1M2's
-// TEKWALL4 room went red from its few red LEDs. Stained glass glows over
-// most of its area but is a window, not a lamp: it lights the room softly,
-// most of its color reaching the floor as projected light (glass_light.cpp).
+// The general 0.25 emission-weight floor supports small real fixtures,
+// but is too strong for tiny switch LEDs and key-door strips. Restrict
+// those emitters using their actual glowing texel coverage. Their pixel
+// emission remains unchanged in the shader; only cast-light power drops.
+// Existing low-coverage computer-panel handling is preserved. Stained
+// glass glows softly as a window, not a strong colored point light.
 static Image &speckledPanel(Image &image,const char *name,bool flat) {
     int kind=Game_GlowKind(name,flat);
     if(image.emissionCoverage>0&&image.emissionCoverage<0.006f&&kind==DOOM_EMISSIVE_PANEL)
         image.emissionWeight=image.emissionCoverage*8.0f;
+    if(!flat&&image.emissionCoverage>0) {
+        if(doom_switch_texture(name))
+            image.emissionWeight=std::min(image.emissionWeight,image.emissionCoverage*12.0f);
+        else if(!strncmp(name,"DOORBLU",7)||!strncmp(name,"DOORRED",7)||!strncmp(name,"DOORYEL",7))
+            image.emissionWeight=std::min(image.emissionWeight,
+                std::clamp(image.emissionCoverage*5.0f,.03f,.45f));
+    }
     if(kind==DOOM_EMISSIVE_GLASS) {image.emissionWeight*=0.2f;image.leaded=!image.emission.empty();}
     if(kind==DOOM_EMISSIVE_DIFFUSE)image.emissionWeight*=0.5f;   // diffuser panels: a dim, broad light
     return image;
