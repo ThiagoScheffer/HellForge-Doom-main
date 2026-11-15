@@ -28,6 +28,34 @@ static const MonsterProjectileProfile *monsterProjectileProfile(int type){
     if(monsterProjectileEnabled())for(const auto &p:monsterProjectileProfiles)if(p.type==type)return &p;
     return nullptr;
 }
+// Enhanced monster-projectile FX are intentionally local to the player.
+// 512 world units is eight classic 64-unit map blocks.
+static constexpr float monsterProjectileFxRange=512.0f;
+static bool monsterProjectileNearPlayer(float x,float y,float z){
+    const mobj_t *player=players[displayplayer].mo;
+    if(!player)return false;
+    float dx=x-units(player->x),dy=y-units(player->y);
+    float dz=z-(units(player->z)+units(player->height)*.5f);
+    return dx*dx+dy*dy+dz*dz<=monsterProjectileFxRange*monsterProjectileFxRange;
+}
+static bool monsterProjectileTargetsPlayer(const mobj_t &mo){
+    // A missile's target is its shooter; the shooter's target is its victim.
+    // Monster-vs-monster infighting therefore keeps the stock projectile only.
+    const mobj_t *shooter=mo.target;
+    const mobj_t *victim=shooter?shooter->target:nullptr;
+    return victim&&victim->player;
+}
+static bool monsterProjectileFxAllowed(const mobj_t &mo,const MonsterProjectileProfile *p,float x,float y,float z){
+    return p&&!voxelMonster(mo)&&monsterProjectileTargetsPlayer(mo)&&monsterProjectileNearPlayer(x,y,z);
+}
+static bool monsterProjectileFxAllowed(const mobj_t &mo,const MonsterProjectileProfile *p){
+    return monsterProjectileFxAllowed(mo,p,units(mo.x),units(mo.y),units(mo.z)+units(mo.height)*.5f);
+}
+bool monsterProjectileFxManaged(int type){return monsterProjectileProfile(type)!=nullptr;}
+bool monsterProjectileFxEligible(const mobj_t &mo){
+    const auto *p=monsterProjectileProfile(mo.type);
+    return monsterProjectileFxAllowed(mo,p);
+}
 struct MonsterProjectileDraw {const MonsterProjectileProfile *profile;lab::Vec center,velocity;float phase,distance;};
 struct MoltenGlass {float x,y,z,radius,born,life;int sector;uint32_t seed;unsigned supportRevision;};
 struct MonsterImpactStamp {int type,tic;lab::Vec point;};
@@ -44,9 +72,11 @@ void clearMonsterProjectileEffects(){
 static void resetMonsterProjectileEffects(){
     if(monsterProjectileLevel!=r_levelserial||!monsterProjectileEnabled())clearMonsterProjectileEffects();
 }
+static constexpr size_t maxMonsterProjectileDraws=96;
 void beginMonsterProjectileFrame(){
+    // Allocate only when an eligible projectile is actually close enough to
+    // need the enhanced effect; distant fights keep this queue empty.
     resetMonsterProjectileEffects();monsterProjectileDraws.clear();
-    if(monsterProjectileDraws.capacity()<256)monsterProjectileDraws.reserve(256);
 }
 // Cached image is recreated with the normal image cache, never held by pointer.
 // The decal shader already supports smooth coverage and tinted emissive quads.
@@ -106,27 +136,28 @@ bool monsterProjectileVisual(const mobj_t &mo,const Uniforms &camera,float fract
     if(!p||!mo.info||!(mo.info->flags&MF_MISSILE)||camera.effects[2]!=0||voxelMonster(mo))return false;
     // Impact is rendered by the confirmed explosion hook, not by a second sprite.
     if(!(mo.flags&MF_MISSILE))return true;
-    if(monsterProjectileDraws.size()>=256)return false; // bounded, retain stock fallback
     float x,y,z;interpolatedPosition(mo,fraction,x,y,z);z+=units(mo.height)*.5f;
+    if(!monsterProjectileFxAllowed(mo,p,x,y,z))return false; // stock sprite remains as fallback
+    if(monsterProjectileDraws.size()>=maxMonsterProjectileDraws)return false;
     float distance=std::hypot(std::hypot(x-camera.eye[0],y-camera.eye[1]),z-camera.eye[2]);
     monsterProjectileDraws.push_back({p,{x,y,z},{units(mo.momx),units(mo.momy),units(mo.momz)},
         x*.037f+y*.023f+float(mo.angle)*(2.f*doomPi/4294967296.f),distance});
     return true;
 }
 bool monsterProjectileLight(const mobj_t &mo,std::array<float,3> &color,float &radius,float &strength){
-    const auto *p=monsterProjectileProfile(mo.type);if(!p||voxelMonster(mo))return false;
+    const auto *p=monsterProjectileProfile(mo.type);if(!p||!monsterProjectileFxAllowed(mo,p))return false;
     color=projectileColor(p->palette[2]);radius=p->lightRadius;strength=p->lightStrength;return true;
 }
 static void monsterMote(lab::Vec at,lab::Vec velocity,const std::array<float,3> &color,float size,float life,float gravity=0){
     if(monsterEmissionTic!=leveltime){monsterEmissionTic=leveltime;monsterEmissionCount=0;}
     if(monsterEmissionCount>=48||monsterProjectileMotes.size()>=256)return;
-    if(monsterProjectileMotes.capacity()<256)monsterProjectileMotes.reserve(256);
+    // Let the mote vector grow only when a nearby eligible projectile emits.
     monsterProjectileMotes.push_back({at.x,at.y,at.z,velocity.x,velocity.y,velocity.z,gravity,size,-size/life,.8f,0,life,15,true,color});
     ++monsterEmissionCount;
 }
 bool monsterProjectileTrail(const mobj_t &mo){
     const auto *p=monsterProjectileProfile(mo.type);
-    if(!p||!(mo.flags&MF_MISSILE)||voxelMonster(mo))return false;
+    if(!p||!(mo.flags&MF_MISSILE)||!monsterProjectileFxAllowed(mo,p))return false;
     resetMonsterProjectileEffects();
     // Only small embers/droplets persist; the smooth main tail follows the
     // interpolated actor directly, with no actor pointers to outlive removal.
@@ -161,9 +192,12 @@ static void addMoltenGlass(float x,float y,float z,float nz){
     const auto *world=SV_MapWorld();
     moltenGlass.push_back({x,y,floor,radius,gameSeconds(),2.4f,index,uint32_t(moltenGlass.size()*977+leveltime),world?world->revision():0});
 }
-bool monsterProjectileSurfaceImpact(int type,float x,float y,float z,float nx,float ny,float nz){
+bool monsterProjectileSurfaceImpact(int type,float x,float y,float z,float nx,float ny,float nz,const mobj_t *projectile){
     const auto *p=monsterProjectileProfile(type);if(!p)return false;
     resetMonsterProjectileEffects();
+    // rubbleImpact has no actor/source pointer. Consume that duplicate callback;
+    // the owner-aware monsterProjectileImpact hook creates the effect if eligible.
+    if(!projectile||!monsterProjectileFxAllowed(*projectile,p,x,y,z))return true;
     if(p->style==MonsterProjectileStyle::Molten)addMoltenGlass(x,y,z,nz);
     lab::Vec at{x,y,z};
     monsterImpactStamps.erase(std::remove_if(monsterImpactStamps.begin(),monsterImpactStamps.end(),[](const auto &s){return s.tic!=leveltime;}),monsterImpactStamps.end());
@@ -171,6 +205,7 @@ bool monsterProjectileSurfaceImpact(int type,float x,float y,float z,float nx,fl
     if(monsterImpactStamps.size()>=64)return true;
     if(monsterImpactStamps.capacity()<64)monsterImpactStamps.reserve(64);
     monsterImpactStamps.push_back({type,leveltime,at});
+    environmentBlast(x+nx*3,y+ny*3,z+nz*3,type==MT_ROCKET||type==MT_BFG?1.f:.25f);
     lab::Vec normal{nx,ny,nz};at=at+normal*1.5f;
     auto color=projectileColor(p->palette[3]);
     if(settings.emissive)sparkFlash(at.x,at.y,at.z,p->lightRadius*.7f,.65f,color);
@@ -185,7 +220,9 @@ bool monsterProjectileSurfaceImpact(int type,float x,float y,float z,float nx,fl
     return true;
 }
 bool monsterProjectileImpact(mobj_t *mo){
-    if(!mo||!monsterProjectileProfile(mo->type))return false;
+    if(!mo)return false;
+    const auto *p=monsterProjectileProfile(mo->type);if(!p)return false;
+    if(!monsterProjectileFxAllowed(*mo,p))return true; // recognized, deliberately no custom impact FX
     float x=units(mo->x),y=units(mo->y),z=units(mo->z)+units(mo->height)*.5f;
     lab::Vec v{units(mo->momx),units(mo->momy),units(mo->momz)},n=lab::normalized(v)*-1;
     // P_ExplodeMissile calls us before clearing momentum. A grounded contact
@@ -194,12 +231,14 @@ bool monsterProjectileImpact(mobj_t *mo){
     if(mo->subsector&&mo->momz==0&&mo->z==mo->floorz&&previousZ>units(mo->floorz)+.5f){
         z=units(mo->floorz);n={0,0,1};
     }
-    return monsterProjectileSurfaceImpact(mo->type,x,y,z,n.x,n.y,n.z);
+    return monsterProjectileSurfaceImpact(mo->type,x,y,z,n.x,n.y,n.z,mo);
 }
 void tickMonsterProjectileEffects(){
     resetMonsterProjectileEffects();
     for(auto &p:monsterProjectileMotes){++p.age;p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;p.vz+=p.az;p.size+=p.growth;}
-    monsterProjectileMotes.erase(std::remove_if(monsterProjectileMotes.begin(),monsterProjectileMotes.end(),[](const auto &p){return p.age>=p.life||p.size<=0;}),monsterProjectileMotes.end());
+    monsterProjectileMotes.erase(std::remove_if(monsterProjectileMotes.begin(),monsterProjectileMotes.end(),[](const auto &p){
+        return p.age>=p.life||p.size<=0||!monsterProjectileNearPlayer(p.x,p.y,p.z);
+    }),monsterProjectileMotes.end());
 }
 void drawMonsterProjectileEffects(const Uniforms &camera){
     resetMonsterProjectileEffects();float now=gameSeconds();
@@ -207,6 +246,7 @@ void drawMonsterProjectileEffects(const Uniforms &camera){
     // actor loop. Per-frame requests contain values, never actor/image pointers.
     std::sort(monsterProjectileDraws.begin(),monsterProjectileDraws.end(),[](const auto &a,const auto &b){return a.distance>b.distance;});
     for(const auto &d:monsterProjectileDraws){
+        if(!monsterProjectileNearPlayer(d.center.x,d.center.y,d.center.z))continue;
         const auto &p=*d.profile;float t=now*6+d.phase;
         bool squareFire=p.style==MonsterProjectileStyle::SquareFire;
         // Modest distance compensation: capped at 1.35x, without changing hitboxes.
@@ -240,11 +280,14 @@ void drawMonsterProjectileEffects(const Uniforms &camera){
         }
     }
     for(const auto &p:monsterProjectileMotes){float f=renderFraction-1;
-        projectileQuad(camera,{p.x+p.vx*f,p.y+p.vy*f,p.z+p.vz*f},p.size,p.size,0,p.color,p.alpha*std::clamp(1-(p.age+f)/p.life,0.f,1.f),true);
+        float x=p.x+p.vx*f,y=p.y+p.vy*f,z=p.z+p.vz*f;
+        if(!monsterProjectileNearPlayer(x,y,z))continue;
+        projectileQuad(camera,{x,y,z},p.size,p.size,0,p.color,p.alpha*std::clamp(1-(p.age+f)/p.life,0.f,1.f),true);
     }
     const auto *world=SV_MapWorld();
     moltenGlass.erase(std::remove_if(moltenGlass.begin(),moltenGlass.end(),[&](auto &p){
-        if(now<p.born||now-p.born>=p.life||p.sector<0||p.sector>=numsectors||units(sectors[p.sector].floorheight)!=p.z)return true;
+        if(now<p.born||now-p.born>=p.life||p.sector<0||p.sector>=numsectors||units(sectors[p.sector].floorheight)!=p.z||
+           !monsterProjectileNearPlayer(p.x,p.y,p.z))return true;
         if(world&&p.supportRevision!=world->revision()){
             p.supportRevision=world->revision();
             if(!moltenFloorSupported(p.x,p.y,p.z,p.radius,&sectors[p.sector]))return true;

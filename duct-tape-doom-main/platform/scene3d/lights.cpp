@@ -444,6 +444,9 @@ void collectFlashes(float fraction,const Uniforms &camera) {
         }
         if(!(thing->info->flags&MF_MISSILE)||!(thing->frame&FF_FULLBRIGHT)) continue;
         if(liquidProjectileHidden(thing))continue;
+        // Enhanced monster shots only get custom light near the player and
+        // when their shooter is actually targeting a player (not infighting).
+        if(monsterProjectileFxManaged(thing->type)&&!monsterProjectileFxEligible(*thing))continue;
         float x,y,z;interpolatedPosition(*thing,fraction,x,y,z);
         float dx=x-camera.eye[0],dy=y-camera.eye[1],dz=z-camera.eye[2];
         projectiles.push_back({thing,dx*dx+dy*dy+dz*dz});

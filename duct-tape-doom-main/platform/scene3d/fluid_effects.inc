@@ -128,8 +128,10 @@ void fluidBarrelSmoke(player_t *player,int stream,float ox,float oy,float scale,
 // Cosmetic surface bursts use a separate, small budget and no gameplay RNG.
 // They remain available when the optional Fluid weapon replacement is disabled.
 void rubbleImpact(int type,float x,float y,float z,float nx,float ny,float nz) {
-    environmentBlast(x+nx*3,y+ny*3,z+nz*3,type==MT_ROCKET||type==MT_BFG?1.f:.25f);
+    // Enhanced monster-projectile impacts are handled by the owner-aware
+    // explosion hook; do not create an unfiltered distant/infighting blast here.
     if(monsterProjectileSurfaceImpact(type,x,y,z,nx,ny,nz))return;
+    environmentBlast(x+nx*3,y+ny*3,z+nz*3,type==MT_ROCKET||type==MT_BFG?1.f:.25f);
     resetFluidEffects();
     if(std::getenv("DOOM_TEST_RUBBLE"))printf("RUBBLE hit type %d tic %d at %.1f %.1f %.1f normal %.2f %.2f %.2f\n",type,gametic,x,y,z,nx,ny,nz);
     bool rocket=type==MT_ROCKET||type==MT_TRACER;
@@ -276,6 +278,12 @@ static void rocketRoomSmoke(mobj_t *mo){
     }
 }
 void fluidProjectileImpact(mobj_t *mo) {
+    // Suppress every enhanced impact path (including liquid splashes) for
+    // distant monster shots and monster-vs-monster infighting.
+    if(mo&&monsterProjectileFxManaged(mo->type)&&!monsterProjectileFxEligible(*mo)){
+        monsterProjectileImpact(mo); // recognized and deliberately consumed without FX
+        return;
+    }
     bool liquid=liquidProjectileImpact(mo);
     if(monsterProjectileImpact(mo)||liquid)return;
     rocketRoomSmoke(mo);
