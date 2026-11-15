@@ -1022,7 +1022,7 @@ void G_ScreenShot (void)
 
 
 // DOOM Par Times
-int pars[4][10] =
+int pars[6][10] =
 {
     {0},
     {0,30,75,120,90,165,180,180,30,165},
@@ -1154,6 +1154,9 @@ void G_DoCompleted (void)
 	      case 4:
 		wminfo.next = 2;
 		break;
+        case 5:	// SIGIL: E5M9 returns to E5M7
+		wminfo.next = 6;
+		break;          
 	    }
 	}
 	else
@@ -1480,8 +1483,10 @@ boolean G_StepMap (int step, int* episode, int* map)
 	{
 	    if (m < 1) { m = 9; e--; }
 	    else if (m > 9) { m = 1; e++; }
-	    if (e < 1) e = 9;
-	    else if (e > 9) e = 1;
+	    // if (e < 1) e = 9;
+	    // else if (e > 9) e = 1;
+         if (e < 1) e = 5;
+	    else if (e > 5) e = 1;
 	}
 	if (G_MapExists (e, m))
 	{
@@ -1543,7 +1548,7 @@ G_InitNew
 
     if ( gamemode == retail )
     {
-      if (episode > 4 && (episode>9 || !G_MapExists(episode,map)))
+      if (episode > 5 || (episode == 5 && W_CheckNumForName ("E5M1") < 0))
 	episode = 4;
     }
     else if ( gamemode == shareware )
@@ -1630,6 +1635,12 @@ G_InitNew
 	    break;
 	  case 4:	// Special Edition sky
 	    skytexture = R_TextureNumForName ("SKY4");
+	    break;
+
+        case 5:	// SIGIL's own, else the fourth episode's
+	    skytexture = R_CheckTextureNumForName ("SKY5");
+	    if (skytexture < 0)
+		skytexture = R_TextureNumForName ("SKY4");
 	    break;
 	}
 

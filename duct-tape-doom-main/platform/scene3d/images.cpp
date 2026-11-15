@@ -344,6 +344,7 @@ static Image &speckledPanel(Image &image,const char *name,bool flat) {
     if(image.emissionCoverage>0&&image.emissionCoverage<0.006f&&kind==DOOM_EMISSIVE_PANEL)
         image.emissionWeight=image.emissionCoverage*8.0f;
     if(kind==DOOM_EMISSIVE_GLASS) {image.emissionWeight*=0.2f;image.leaded=!image.emission.empty();}
+    if(kind==DOOM_EMISSIVE_DIFFUSE)image.emissionWeight*=0.5f;   // diffuser panels: a dim, broad light
     return image;
 }
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */

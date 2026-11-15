@@ -1,4 +1,12 @@
-# E1M8 lag capture
+# Windows helpers
+
+From the repository root, double-click `Build-Hellforge.bat` to build the engine
+and launcher, or `Recompile-Shaders.bat` to regenerate the embedded Vulkan/Metal
+shader header. The shader batch requires glslangValidator and SPIRV-Cross;
+the regular build uses the existing header. See [BUILDING.md](../BUILDING.md)
+for prerequisites, combined builds, launcher-only builds and logs.
+
+## E1M8 lag capture
 
 Close the game, then double-click **Trace-E1M8-Lag.cmd**. It uses
 `dist/DOOM-Hellforge.exe` to select the matching engine, normal bundled resources

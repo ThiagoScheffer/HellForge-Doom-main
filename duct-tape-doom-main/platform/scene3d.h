@@ -122,6 +122,7 @@ struct Settings {
     int flashlightShadows=1; // Things in the flashlight beam cast their silhouette on the wall behind.
     int classicFlashlight=1; // A shorter, warmer beam that raises light in steps to a little past full brightness, never further.
     int stippledShadows=1; // The flashlight's shadow edges, from walls and things, break into an ordered-dither stipple instead of a clean line.
+     int softShotShadows=1; // Shots, projectiles and barrels light from a small body: shadow edges step per texel and soften into a dither.
     int softSprites=1; // Explosions and puffs stop slicing into walls; dithered toward floors.
     int heatHaze=0; // Stepped raster shimmer above lava, hot floors and flames.
     int eyeAdaptation=1; // Brief stepped over/underexposure when the light changes.

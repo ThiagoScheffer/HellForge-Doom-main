@@ -398,6 +398,8 @@ static void drawBloom(SDL_GPUCommandBuffer *render,const FrameView &view,const U
         SDL_PushGPUFragmentUniformData(render,0,direction,sizeof(direction));
         SDL_DrawGPUPrimitives(blurPass,3,1,0,0);
         SDL_EndGPURenderPass(blurPass);
+
+         SDL_GenerateMipmapsForGPUTexture(render,bloomTexture);
     }
 }
 // Profiling: submits the scene's own command buffer and times it.

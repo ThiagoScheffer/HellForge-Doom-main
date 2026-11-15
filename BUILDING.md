@@ -2,6 +2,42 @@
 
 Install Visual Studio 2022 C++ Build Tools with CMake support and the Windows SDK. The launcher uses the .NET Framework C# compiler included with Windows.
 
+## One-click Windows builds
+
+Close the game and launcher, then double-click a batch file in the repository root:
+
+| Batch file | Result |
+| --- | --- |
+| `Build-Hellforge.bat` | Builds the native project and embeds the engine in `dist/DOOM-Hellforge.exe` using the existing release script. |
+| `Recompile-Shaders.bat` | Regenerates `platform/gpu_shaders.h` with all Vulkan SPIR-V and Metal MSL variants. Run the build batch afterward to embed them. |
+
+The windows remain open to show success/errors. Logs are saved under
+`build/one-click/`. Neither batch runs game tests or changes the release version.
+Normal builds use the checked-in shader header and do not require shader tools.
+
+Shader recompilation requires **glslangValidator.exe** and **spirv-cross.exe**.
+The helper searches PATH, `VULKAN_SDK\Bin`, installed `C:\VulkanSDK` folders and
+`tools/shader-tools/`. Alternatively set `HELLFORGE_GLSLANG` and
+`HELLFORGE_SPIRV_CROSS` to their full executable paths. Failed shader compilation
+preserves the existing header. No tools are installed or downloaded automatically.
+The locally required `launcher/DiggingMaterials.wad` and bundled mod archives
+must be present before packaging; a commercial game IWAD is not needed to build.
+
+Optional commands from the repository root:
+
+```powershell
+.\Build-Hellforge.bat -LauncherOnly       # Repackage the existing engine
+.\Build-Hellforge.bat -RecompileShaders   # Shaders, native build, then launcher
+.\Build-Hellforge.bat -CheckOnly          # Check dependencies without compiling
+.\Recompile-Shaders.bat -CheckOnly       # Check shader tools without generating
+```
+
+The PowerShell implementations are under `tools/`. CMake can be selected for
+the shader helper using `HELLFORGE_CMAKE`; the full build retains the existing
+launcher script's Visual Studio/CMake selection and configuration.
+
+## Command-line builds
+
 From the repository root, run:
 
 ```powershell

@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE
 
-**Current build: 2026.11.15.5** | [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Current build: 2026.11.15.6** | [DOOM2 startup crash fix](docs/changes/DOOM2-STARTUP-LIGHT-CACHE-CRASH.md) ? [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
@@ -153,7 +153,10 @@ limits and verification evidence.
 
 ## Building
 
-Install Visual Studio 2022 C++ Build Tools, CMake, and the Windows SDK, then run:
+Install Visual Studio 2022 C++ Build Tools, CMake, and the Windows SDK, then
+double-click **Build-Hellforge.bat** in the repository root. For shader changes,
+use **Recompile-Shaders.bat** first; required tools are listed in
+[BUILDING.md](BUILDING.md). Command-line builds also work:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File launcher/build.ps1

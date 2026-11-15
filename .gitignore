@@ -14,3 +14,6 @@ test-references/Sunder 2512.wad
 
 # Local task verification memory
 /.agent/
+
+# Optional local shader compiler executables
+/tools/shader-tools/

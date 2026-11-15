@@ -246,10 +246,18 @@ void S_Start(void)
       mus_e1m9	// Tim		e4m9
     };
     
-    if (gameepisode < 4)
+     if (gameepisode < 4)
       mnum = mus_e1m1 + (gameepisode-1)*9 + gamemap-1;
-    else
+    else if (gameepisode == 4)
       mnum = spmus[gamemap-1];
+    else
+    {
+      // SIGIL's own music, else the first episode's.
+      char	name[9];
+
+      snprintf (name, sizeof name, "D_E5M%d", gamemap);
+      mnum = (W_CheckNumForName (name) >= 0 ? mus_e5m1 : mus_e1m1) + gamemap-1;
+    }
     }	
   
   // HACK FOR COMMERCIAL
