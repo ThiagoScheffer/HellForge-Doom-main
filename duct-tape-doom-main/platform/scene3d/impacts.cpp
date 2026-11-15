@@ -1,6 +1,7 @@
 /* Bullet impacts and explosions: wall and floor decals, scorches and
    debris. */
 #include "internal.h"
+#include "../wad_probe.h"
 extern "C" {
 #include "../audio/sound_options.h"
 }
@@ -85,6 +86,7 @@ bool wallSpan(const line_t &line,int side,int section,WallSpan &span) {
 #include "impact_particles.inc"
 #include "surface_glow.inc"
 #include "fluid_effects.inc"
+#include "monster_projectiles.inc"
 #include "environment_reactions.inc"
 
 void wallImpact(line_t *line,int side,fixed_t fx,fixed_t fy,fixed_t fz) {
@@ -548,7 +550,7 @@ float valueNoise(float x,float y,float cell,uint32_t seed) {
     float top=a+(b-a)*fx,bottom=c+(d-c)*fx;
     return top+(bottom-top)*fy;
 }
-void impactsShutdown() {resetEnvironment();fluidParticles.clear();fluidBursts.clear();fluidMarks.clear();wallDecals.clear();flatDecals.clear();debris.clear();scorches.clear();impactParticles.clear();gunPuffs.clear();}
+void impactsShutdown() {clearMonsterProjectileEffects();resetEnvironment();fluidParticles.clear();fluidBursts.clear();fluidMarks.clear();wallDecals.clear();flatDecals.clear();debris.clear();scorches.clear();impactParticles.clear();gunPuffs.clear();}
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER

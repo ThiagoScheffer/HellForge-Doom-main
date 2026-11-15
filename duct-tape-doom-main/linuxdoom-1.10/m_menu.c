@@ -277,6 +277,7 @@ enum
 
 menuitem_t EpisodeMenu[] =
     {
+        
         {1, "M_EPI1", M_Episode, 'k'},
         {1, "M_EPI2", M_Episode, 't'},
         {1, "M_EPI3", M_Episode, 'i'},
@@ -2070,7 +2071,6 @@ void M_Init(void)
       if (gamemode != retail || W_CheckNumForName("E5M1") < 0
 	    || W_CheckNumForName("M_EPI5") < 0)
 	    EpiDef.numitems--;
-            EpiDef.numitems = 5;
     default:
         break;
     }

@@ -6,7 +6,7 @@
 #include "../death_joints.h"
 #include "../monster_regions.h"
 extern "C" {
-#include "p_local.h"
+#include "../../linuxdoom-1.10/p_local.h"
 }
 
 namespace doom3d {

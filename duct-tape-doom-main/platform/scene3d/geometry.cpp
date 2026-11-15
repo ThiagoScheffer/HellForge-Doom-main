@@ -726,6 +726,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             return;
         if (customGunPuff(thing) || liquidProjectileHidden(thing))
             return;
+        // Reflected/voxel presentation retains the existing sprite/model path.
+        if (!mirror && monsterProjectileVisual(*thing, camera, fraction))
+            return;
         DeathView death = {thing->sprite, thing->frame, thing->angle, false, 1, 0, {}};
         bool directed = !self && settings.deathDirector && deathView(*thing, fraction, death);
         if (death.sprite < 0 || death.sprite >= numsprites)
@@ -850,7 +853,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
             Image &image = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
             float left = -(float)image.left, right = left + image.width, top = z + image.top, bottom = top - image.height;
-            if ((thing->flags & MF_COUNTKILL) && thing->health > 0)
+            // The living monster floor-fit below already corrects any art overhang.
+            // Do not apply floorOverhang() again to the same sprite.
+            const bool floorFittedMonster = (thing->flags & MF_COUNTKILL) && thing->health > 0;
+            if (floorFittedMonster)
             {
                 float floor = floorZ(&sectors[i]), ceiling = ceilZ(&sectors[i]);
                 float shift = std::max(0.f, floor - bottom);
@@ -870,8 +876,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             // float sink=!ragdoll?sinkInLiquid(thing,i,image,x,y,camera,collar):dollDown?sinkInLiquid(thing,i,image,x,y,camera,collar,true):0;top-=sink;bottom-=sink;
             float sink = !ragdoll ? sinkInLiquid(thing, i, image, x, y, camera, collar) : dollDown ? sinkInLiquid(thing, i, image, x, y, camera, collar, true)
                                                                                                    : 0;
-            if (!ragdoll && !death.fall.active && sink == 0)
-                sink = -floorOverhang(thing, i, image); // negative: lifted onto the floor
+            if (!ragdoll && !death.fall.active && sink == 0 && !floorFittedMonster)
+                sink = -floorOverhang(thing, i, image); // fallback for other sprite types
             top -= sink;
             bottom -= sink;
 
@@ -934,7 +940,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             if (death.fall.rig)
                 fallQuads(vertices, {0, 0, 0, 0, 0, light, m}, death.fall, x, y, z - sink, rx, ry, flipped(seen), cut);
             else if (posed)
-                bodyQuads(vertices, pose, {0, 0, 0, 0, 0, light, m}, x, y, z - sink, rx, ry, left, right, image.top, image.height, u0, u1, cut);
+                bodyQuads(vertices, pose, {0, 0, 0, 0, 0, light, m}, x, y, fittedFeet - sink, rx, ry, left, right, image.top, image.height, u0, u1, cut);
             else if (wounded)
                 woundedQuads(vertices, {0, 0, 0, 0, 0, light, m}, image, holes, x, y, top, rx, ry, flipped(seen), (top - bottom) / image.height);
             else
@@ -1033,6 +1039,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             visibleLeaves(camera, unused, unused, true);
         }
         retainSolidAssembly();
+        beginMonsterProjectileFrame();
         vertexSections.clear();
         voxelDraws.clear();
         voxelMirrorDraws.clear();
@@ -1139,6 +1146,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             else
                 addThing(item.thing, item.sector, camera, fraction, beam, casters, item.mirrored ? &mirror : nullptr, item);
         }
+        // addThing queues enhanced monster shots; draw them only after the
+        // actor pass, and after buildImpacts has cleared the FX batches.
+        drawMonsterProjectileEffects(camera);
         timing(7);
         profileAdd(profile.frame.spritesMs, spritesStart);
         std::sort(casters.begin(), casters.end(), [](const Caster &a, const Caster &b)

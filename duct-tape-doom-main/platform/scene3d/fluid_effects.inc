@@ -129,6 +129,7 @@ void fluidBarrelSmoke(player_t *player,int stream,float ox,float oy,float scale,
 // They remain available when the optional Fluid weapon replacement is disabled.
 void rubbleImpact(int type,float x,float y,float z,float nx,float ny,float nz) {
     environmentBlast(x+nx*3,y+ny*3,z+nz*3,type==MT_ROCKET||type==MT_BFG?1.f:.25f);
+    if(monsterProjectileSurfaceImpact(type,x,y,z,nx,ny,nz))return;
     resetFluidEffects();
     if(std::getenv("DOOM_TEST_RUBBLE"))printf("RUBBLE hit type %d tic %d at %.1f %.1f %.1f normal %.2f %.2f %.2f\n",type,gametic,x,y,z,nx,ny,nz);
     bool rocket=type==MT_ROCKET||type==MT_TRACER;
@@ -275,7 +276,8 @@ static void rocketRoomSmoke(mobj_t *mo){
     }
 }
 void fluidProjectileImpact(mobj_t *mo) {
-    if(liquidProjectileImpact(mo))return;
+    bool liquid=liquidProjectileImpact(mo);
+    if(monsterProjectileImpact(mo)||liquid)return;
     rocketRoomSmoke(mo);
     if(mo&&mo->type==MT_ROCKET&&p_diglastchanged>0){
         dropOldLevelImpacts();
@@ -318,6 +320,7 @@ void fluidProjectileImpact(mobj_t *mo) {
     else {mark(8+int(randomRange(0,1.99f)),1);mark(10+int(randomRange(0,1.99f)),1,{.5f,1,.5f},1,4);}
 }
 void fluidProjectileFlight(const mobj_t &mo) {
+    if(monsterProjectileTrail(mo))return;
     if(!settings.fluidWeapons||!(mo.flags&MF_MISSILE)||!mo.target||!mo.target->player)return;
     int type=mo.type;if(type!=MT_ROCKET&&type!=MT_PLASMA&&type!=MT_BFG)return;
     resetFluidEffects();
@@ -362,6 +365,7 @@ void fluidIndoorSmoke(mobj_t*source,int weapon){
 }
 void tickFluidEffects() {
     resetFluidEffects();tickRubbleEffects();
+    tickMonsterProjectileEffects();
     if(!settings.fluidIndoorSmoke||!settings.fluidWeapons)indoorSmoke.clear();
     for(auto &p:indoorSmoke){
         ++p.age;
