@@ -137,6 +137,7 @@ struct Settings {
     int embers=1; // A few sparks rising from flames, blown along by the game's wind.
     int authored=1; // Authored episodes (Game_Mood): hand-picked looks for the game's own maps (DOOM's E1 night in the rain); off: the derived look everywhere.
     int weather=1; // Rain under the sky: 0 never, 1 where an authored episode has it, 2 always.
+    int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int wornPlates=1; // Plain metal plates (Game_WornPlate) show years of use: grime in the seams, dull blotches, scuffs near the floor.
     int windowStreaks=1; // Dark rain runs down the outside walls below windows, rusty on metal; inside too once rain blows through a broken one.
     int playerShadow=1; // The player's own sprite shadow from the sun or a strong light.

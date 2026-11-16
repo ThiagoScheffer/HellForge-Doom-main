@@ -22,6 +22,12 @@ static void capture(const char* path,const std::vector<unsigned>& pixels){FILE*f
 static void run(){
  R_BeforeTic=nullptr;I_Render3DSettingsMenu();int root=directorIndex();check(root>=0&&panel.directorPages.size()==5,"one parent and five nested director tabs");
  for(const auto& tab:panel.tabs)check(strncmp(tab.title,"ED ",3)!=0,"ED pages absent from main sidebar");
+ int atmosphere=-1;for(size_t i=0;i<panel.tabs.size();++i)if(!strcmp(panel.tabs[i].title,"Atmosphere"))atmosphere=int(i);
+ check(atmosphere>=0,"Atmosphere category is present");selectTab(atmosphere);choose("immersive_sky");
+ auto& sky=selectedOption();check(sky.kind==OptionKind::Choice&&sky.flag==&panel.draft.immersiveSky&&sky.items.size()==6&&sky.values==std::vector<int>({0,1,2,3,4,5}),"Immersive sky exposes all six profiles in the actual F4 menu");
+ check(panel.selected>=panel.scroll&&panel.selected<panel.scroll+visibleLines,"Immersive sky row is visible");
+ for(int profile=1;profile<=6;++profile){I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.immersiveSky==profile%6,"F4 cycles every sky profile and wraps to Off");}
+ std::vector<unsigned> skyCapture(size_t(width)*height);I_Render3DSettingsDraw(skyCapture.data());capture("atmosphere-immersive-sky.ppm",skyCapture);
  selectTab(root);size_t roots=panel.tabs.size();check(panel.directorPage==-1&&selectedOption().flag==&panel.directorPage,"parent opens on Overview with page selector");
  const char* labels[]={"ED Monsters","ED Reinforcements","ED Items","ED Population","ED Advanced"};
  for(int i=0;i<5;++i){I_Render3DSettingsKey(SDL_SCANCODE_E,0);check(panel.directorPage==i&&!strcmp(currentPage().title,labels[i])&&panel.tabs.size()==roots,"Q/E selects nested page");}

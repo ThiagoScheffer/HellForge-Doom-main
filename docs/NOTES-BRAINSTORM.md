@@ -1,11 +1,12 @@
 add doc:
 
 We will be working on engine tweak and some ideas - to brainstorn and build codex prompt later.
-this main build is a separated and modifed version of the https://github.com/tuin-boop/Tuin-Doom-Enhanced - so if need to understand the base source can be used as.
+this main build is a separated and modifed version of the https://github.com/tuin-boop/Tuin-Doom-Enhanced - and https://github.com/robongrui/derp
+so if need to understand the base source can be used as.
 
-use DOOM: HELLFORGE as the primary project and Tuin-Doom-Enhanced as the upstream reference whenever we need to investigate inherited engine behavior, rendering systems, or original implementations.
+use DOOM: HELLFORGE as the primary project and Tuin-Doom-Enhanced as the upstream reference whenever we need to investigate inherited engine behavior, rendering systems, or original implementations. DERP is the more updated modern version, can be used if needed.
 
-I've reviewed the uploaded README.md. It establishes the following working context:
+It establishes the following working context:
 - Current build: 2026.11.15.6
 - Platform: Windows x64, C/C++/C#, SDL3, Vulkan.
 - Engine foundation: DERP renderer → Tuin-Doom-Enhanced → your independently modified HELLFORGE fork.
@@ -34,16 +35,13 @@ FX FEATURES:
 - same to Cacodemon, we create a new soft glow mixed blue/red that will create a deep color energy small ball from it.
 - mancubus also a new long fireball Fx that feels hot like plasma and fire. when it hit ground it looks like melted hot glass.
 - arachnotron also a new plasma small energy ball green. 
-
-
-
-
+-- all done--
 
 
 
 
 
 BUG:
-- modern hud background shadow not at same position of the current text or main headface
+- modern hud background shadow not at same position of the current text or main headface - fixed
 
-- 4000 monster map - not running anymore.
+- 4000 monster map - not running anymore. - fixed

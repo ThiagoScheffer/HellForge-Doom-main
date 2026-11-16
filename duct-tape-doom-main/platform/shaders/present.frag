@@ -36,15 +36,19 @@ void main() {
         }
     }
     if(c.materials.y>0.0) {
+        // hudTexture is a 320x600 atlas: base HUD = top third, docked
+        // widescreen HUD = middle third, speedrun = bottom third. Match the
+        // first two layers exactly to drawOverlays() in frame.cpp. Reading
+        // halves instead produces displaced negative HUD imprints in bloom.
         vec2 uv=(vUV-hudRect.xy)/hudRect.zw;
-        float coverage=all(greaterThanEqual(uv,vec2(0)))&&all(lessThanEqual(uv,vec2(1)))?textureLod(hud,vec2(uv.x,uv.y*.5),0.0).a:0.0;
+        float coverage=all(greaterThanEqual(uv,vec2(0)))&&all(lessThanEqual(uv,vec2(1)))?textureLod(hud,vec2(uv.x,uv.y/3.0),0.0).a:0.0;
         for(int group=0;group<3;++group) {
             float shift=hudDock.x*(group==0?-hudRect.x:group==2?1.0-hudRect.x-hudRect.z:0.0);
             vec2 panel=(vUV-hudRect.xy-vec2(shift,0))/hudRect.zw;
             float lo=group==0?0.0:group==1?136.0/320.0:202.0/320.0;
             float hi=group==0?136.0/320.0:group==1?202.0/320.0:1.0;
             if(panel.x>=lo&&panel.x<hi&&panel.y>=0.0&&panel.y<=1.0)
-                coverage=max(coverage,textureLod(hud,vec2(panel.x,.5+panel.y*.5),0.0).a);
+                coverage=max(coverage,textureLod(hud,vec2(panel.x,(1.0+panel.y)/3.0),0.0).a);
         }
         // Screen-like additive glow retains detail without clipping to white.
         vec3 glow=textureLod(bloom,vUV,0.0).rgb*(1.0-coverage)*0.8;

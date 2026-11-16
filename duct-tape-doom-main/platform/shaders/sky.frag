@@ -7,9 +7,13 @@
 layout(early_fragment_tests) in;
 layout(set=2,binding=0) uniform sampler2D image;
 layout(set=2,binding=1) uniform sampler2D palette;
+// Milestone A: share the existing deterministic cloud noise texture with mist.
+layout(set=2,binding=2) uniform sampler2D skyCloudPattern;
 layout(std140,set=3,binding=0) uniform Camera CAMERA_BLOCK c;
 layout(std140,set=3,binding=1) uniform Lights FLASH_BLOCK;
 layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
+// Runtime F4 mode, passed on sky fragment uniform slot 3 for all sky passes.
+layout(std140,set=3,binding=3) uniform HellforgeSky { vec4 skyEnvironment; };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
 // The flashlight beam ends at geometry; through the sky it would gather its
@@ -17,6 +21,8 @@ layout(location=0) out vec4 outColor;
 #define NO_BEAM_FOG
 #define NO_LOCAL_FOG
 #include "lighting.glsl"
+#include "sky_clouds.glsl"
+#include "sky_horizon.glsl"
 void main() {
     vec2 size=vec2(textureSize(image,0));
 #ifdef SURFACE
@@ -72,6 +78,15 @@ void main() {
     // silhouettes meet a soft band rather than a hard painted edge.
     if(c.materials.z>0.0&&c.effects.z==0.0)
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
+    // Milestone C: three virtual horizon layers compose behind the
+    // sky cloud decks. No map geometry or additional GPU drawing is created.
+    // Shared with far-plane, sky surfaces, transferred skies and reflections.
+    int hfMode=int(skyEnvironment.x+0.5);
+    float cloudCover=0.0;
+    if(hfMode>=2 && hfMode<=5) {
+        color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
+        color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
+    }
     // The sun at the baked yaw and the height the sky paints it (c.outdoor.w;
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
     // disc and a wide glow in its tint. Smooth, like the softened sky around
@@ -80,8 +95,11 @@ void main() {
         vec3 toward=vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
         float a=acos(clamp(dot(ray,toward),-1.0,1.0));
         float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;
-        float amount=saturate(disc*0.75+glow)*c.fx2.w;
-        color.rgb=mix(color.rgb,max(color.rgb,c.sun.rgb),saturate(disc*c.fx2.w))+c.sun.rgb*amount*(1.0-disc*0.5);
+        // The visible sun sits behind moving cloud layers, while baked
+        // world illumination remains unchanged in this prototype.
+        float transmission=1.0-0.80*cloudCover;
+        float amount=saturate(disc*0.75+glow)*c.fx2.w*transmission;
+        color.rgb=mix(color.rgb,max(color.rgb,c.sun.rgb),saturate(disc*c.fx2.w*transmission))+c.sun.rgb*amount*(1.0-disc*0.5);
     }
     // Far rain: weather.cpp drops rain only in the map's open sectors near
     // the eye, and the sky (ceilings and the band over lower neighbors

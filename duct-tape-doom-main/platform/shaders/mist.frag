@@ -18,19 +18,23 @@ void main() {
     float distance=length(delta);
     float transmission=exp(-heightFogTau(c.eye.z,vWorld.z,distance,c.fog.x,c.fog.y,c.fog.z));
     if((vMode&MODE_SUNBEAM)!=0u) {
-        // Sunbeam ribbon (buildShafts), added to the scene: u runs across
-        // (-1..1), v from the floor (0) to past the opening (1). Soft at the
-        // sides, the ends and where it meets geometry, faded near the eye, with
-        // cloud noise drifting up the beam a step per tic. The result keeps
-        // to 1/32 steps on an ordered dither in Doom pixels.
-        float across=1.0-vUV.x*vUV.x;
-        float along=smoothstep(0.0,0.1,vUV.y)*(1.0-smoothstep(0.55,1.0,vUV.y));
-        float near=smoothstep(16.0,80.0,distance)*saturate((sceneZ-layerZ)/24.0);
-        float tic=floor(c.fog.w*35.0);
-        float noise=textureLod(cloud,vec2(dot(vWorld.xy,vec2(0.7071)),vWorld.z-tic*0.35)/112.0,0.0).r;
-        float glow=vLight*across*across*along*near*(0.5+noise)*0.05;
-        glow=floor(glow*32.0+bayer4(ivec2(floor(gl_FragCoord.xy/max(c.fx2.x,1.0)))))/32.0;
-        outColor=vec4(vTint*c.fx.x*transmission,glow);
+        // Smooth, continuous sunbeam ribbon (buildShafts). UV.x spans the
+        // width (-1..1); UV.y runs from the floor (0) past the opening (1).
+        // Keep all attenuation in floating point: the former 1/32 alpha
+        // quantization + Bayer dither made broad shafts visibly checkerboard.
+        float across=1.0-smoothstep(0.12,1.0,abs(vUV.x));
+        float along=smoothstep(0.0,0.16,vUV.y)*(1.0-smoothstep(0.60,1.0,vUV.y));
+        // Fade smoothly into nearby geometry using the already-bound scene
+        // depth; no extra depth pass or light/shadow query is necessary.
+        float near=smoothstep(16.0,80.0,distance)*smoothstep(0.0,36.0,sceneZ-layerZ);
+        // Animate continuously at the prior average speed (35 tics/s *
+        // 0.35 world units/tic), rather than jumping on whole game tics.
+        float noise=textureLod(cloud,
+            vec2(dot(vWorld.xy,vec2(0.7071)),vWorld.z-c.fog.w*12.25)/112.0,0.0).r;
+        // Restrained density variation keeps shafts soft without introducing
+        // striped/scattered highlights. The average brightness is preserved.
+        float glow=vLight*across*along*near*(0.8+0.4*noise)*0.05;
+        outColor=vec4(vTint*c.fx.x*transmission,saturate(glow));
         return;
     }
     float soft=saturate((sceneZ-layerZ)/8.0);

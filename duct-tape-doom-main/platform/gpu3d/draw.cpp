@@ -244,18 +244,36 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
                SDL_GPUGraphicsPipeline *coverage,SDL_GPUGraphicsPipeline *cutout,bool sprites) {
     SDL_BindGPUGraphicsPipeline(pass,opaque);bindWorld(pass,reflection);
     for(const auto &batch:batches) if(opaqueBatch(batch)) {bindSurface(command,pass,batch.first,3);drawVertices(pass,batch.second);}
-    SDL_GPUTextureSamplerBinding skyImage[]={{gpu(wallImage(skytexture).texture),linearRepeat},{paletteTexture,nearestClamp}};
+    // Milestone C: F4 sky mode, kept separate from the world Camera ABI and
+    // world shader blend slot (the latter is restored by each bindSurface).
+    // 0=off, 1=auto, 2=mountains, 3=ice, 4=inferno, 5=industrial.
+    int skyMode=std::clamp(settings.immersiveSky,0,5);
+    if(skyMode==1) {
+        // Classic IWAD episode/map convention; custom WADs can override using
+        // the F4 profile or disable. This is not a texture-fingerprint check.
+        if(gamemode==commercial)
+            skyMode=gamemap<=11?2:gamemap<=20?5:4;
+        else
+            skyMode=gameepisode==2?3:gameepisode>=3?4:2;
+    }
+    float hfSkyUniform[4]={(float)skyMode,0.0f,0.0f,0.0f};
+    SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
+    SDL_GPUTextureSamplerBinding skyImage[]={{gpu(wallImage(skytexture).texture),linearRepeat},{paletteTexture,nearestClamp},
+                                         {gpu(cloudTexture),linearRepeat}};
     if(!skyVertices.empty()) {
-        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,skyImage,2);
+        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,skyImage,3);
         drawVertices(pass,skyVertices);
     }
     for(const auto &batch:transferredSkies)if(!batch.second.empty()){
-        SDL_GPUTextureSamplerBinding material[]={{gpu(wallImage(batch.first).texture),linearRepeat},{paletteTexture,nearestClamp}};
-        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,material,2);drawVertices(pass,batch.second);
+        SDL_GPUTextureSamplerBinding material[]={{gpu(wallImage(batch.first).texture),linearRepeat},{paletteTexture,nearestClamp},
+                                              {gpu(cloudTexture),linearRepeat}};
+        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,material,3);drawVertices(pass,batch.second);
     }
     SDL_BindGPUGraphicsPipeline(pass,sky);
-    SDL_BindGPUFragmentSamplers(pass,0,skyImage,2);
+    SDL_BindGPUFragmentSamplers(pass,0,skyImage,3);
     SDL_DrawGPUPrimitives(pass,3,1,0,0);
+    float skyBlendReset[36]={};
+    SDL_PushGPUFragmentUniformData(command,3,skyBlendReset,sizeof(skyBlendReset));
     auto cutouts=[&](SDL_GPUGraphicsPipeline *pipeline) {
         SDL_BindGPUGraphicsPipeline(pass,pipeline);bindWorld(pass,reflection);
         for(const auto &batch:batches) {

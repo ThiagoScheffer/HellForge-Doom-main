@@ -17,3 +17,5 @@ test-references/Sunder 2512.wad
 
 # Optional local shader compiler executables
 /tools/shader-tools/
+
+/docs/NOTES-BRAINSTORM.md
