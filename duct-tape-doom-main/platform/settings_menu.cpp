@@ -46,6 +46,7 @@ static int selectedMap=0;
 static std::vector<std::string> mapNames;
 static std::vector<std::pair<int,int>> mapNumbers;
 void closePanel();
+void resetDirectorDraft(){panel.draft.encounter=ED_DefaultConfig();}
 void openMultiplayer(){closePanel();M_OpenLanMenu();}
 void addMultiplayerTab(){
     Option lobby{};lobby.kind=OptionKind::Action;lobby.key="";lobby.title="Host / join LAN game";
@@ -249,7 +250,7 @@ std::vector<std::string> wrap(const std::string &string,int lineWidth,size_t max
 std::string valueText(const Option &option) {
     if(option.arcadeLocked())return "OFF (ARCADE)";
     if(option.kind==OptionKind::Key)return panel.binding&&panel.lines[(size_t)panel.selected].option==&option?"PRESS KEY":*option.flag?SDL_GetScancodeName((SDL_Scancode)*option.flag):"UNBOUND";
-    if(option.kind==OptionKind::Action)return "Start";
+    if(option.kind==OptionKind::Action)return option.action==resetDirectorDraft?"Reset":"Start";
     if(option.kind==OptionKind::Check)return *option.flag?"On":"Off";
     if(option.kind==OptionKind::Choice) {
         for(size_t i=0;i<option.values.size();++i)if(option.values[i]==*option.flag)return option.items[i];
@@ -372,6 +373,14 @@ void I_Render3DSettingsMenu(void) {
     if(auto *window=SDL_GetKeyboardFocus())panel.draft.fullscreen=(SDL_GetWindowFlags(window)&SDL_WINDOW_FULLSCREEN)!=0;
     panel.defaults=Settings{};fitGame(panel.defaults);
     panel.tabs=optionTabs(panel.draft);
+    for(auto& tab:panel.tabs)if(!strcmp(tab.title,"ED Advanced")){
+        Option reset{};reset.kind=OptionKind::Action;reset.key="";reset.title="Reset Director Configuration to Defaults";
+        reset.tip="Reset only Encounter Director values in this draft. Apply/close saves; F10 discards.";
+        reset.enabled=+[](const Settings&)->bool{return !netgame&&!demoplayback&&!demorecording;};
+        reset.action=resetDirectorDraft;
+        tab.sections.front().options.push_back(reset);
+    }
+
     addMapTab();
     addMultiplayerTab();
     selectTab(panel.tab);

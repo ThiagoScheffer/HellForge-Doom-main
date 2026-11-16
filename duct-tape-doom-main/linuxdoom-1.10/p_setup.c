@@ -47,6 +47,7 @@ rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_encounter.h"
 #include "p_digwall.h"
 #include "p_fluid.h"
 
@@ -857,6 +858,7 @@ P_SetupLevel
     char	lumpname[9];
     int		lumpnum;
 	
+    ED_Clear();
     P_FluidReset(); P_GlobalDigReset(); ++r_levelserial;
     P_SwarmBeginLevel();
     totalkills = totalitems = totalsecret = wminfo.maxfrags = 0;
@@ -953,6 +955,7 @@ P_SetupLevel
 
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;
+    ED_BeginMap(W_LumpLength(lumpnum+ML_THINGS)/(int)sizeof(mapthing_t));
     P_LoadThings (lumpnum+ML_THINGS);
     MP_SETUP_STAGE("map_actors_spawned");
     
@@ -973,6 +976,7 @@ P_SetupLevel
 	
     // set up world state
     P_SpawnSpecials ();
+    ED_MapReady();
 	
     // build subsector connect matrix
     //	UNUSED P_ConnectSubsectors ();

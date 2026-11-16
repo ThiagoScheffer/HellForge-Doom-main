@@ -45,6 +45,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #include "am_map.h"
 
 #include "p_local.h"
+#include "p_encounter.h"
 #include "r_state.h"
 
 #include "s_sound.h"
@@ -722,6 +723,7 @@ P_KillMobj
     mobjtype_t	item;
     mobj_t*	mo;
 	
+    ED_Died(target);
     P_WeakpointDied(target);
     Arcade_Kill(source,target);
     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);

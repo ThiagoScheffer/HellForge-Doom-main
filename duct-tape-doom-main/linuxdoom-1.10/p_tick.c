@@ -35,6 +35,7 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "m_argv.h"
 #include "z_zone.h"
 #include "p_local.h"
+#include "p_encounter.h"
 #include "p_solid.h"
 
 #include "doomstat.h"
@@ -206,6 +207,7 @@ void MP_BODY(P_Ticker) (void)
     
 		
     if(!r_photoactive)P_SessionTick(players[consoleplayer].mo&&players[consoleplayer].mo->health>0);
+    ED_Tick();
     if (R_BeforeTic) R_BeforeTic();
     if(leveltime<3)MP_STAGE("initial_tic_begin");
     for (i=0 ; i<MAXPLAYERS ; i++)

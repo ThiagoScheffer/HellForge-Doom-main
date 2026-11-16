@@ -63,6 +63,7 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "w_wad.h"
 
 #include "p_local.h"
+#include "p_encounter.h"
 #include "p_solid.h"
 #include "p_digwall.h"
 
@@ -1315,6 +1316,7 @@ void G_DoLoadGame (void)
 	playeringame[i] = *save_p++;
 
     // load a base level
+    ED_SetLoading(1);
     G_InitNew (gameskill, gameepisode, gamemap);
 
     // get the times
@@ -1328,6 +1330,7 @@ void G_DoLoadGame (void)
     P_UnArchiveWorld ();
     P_UnArchiveThinkers ();
     P_UnArchiveSpecials ();
+    length-=(int)ED_Load(savebuffer,(size_t)length);
     length-=(int)P_BoomLoad(savebuffer,(size_t)length);
     length-=(int)P_WeakpointLoad(savebuffer,(size_t)length);
 
@@ -1341,6 +1344,7 @@ void G_DoLoadGame (void)
     {int offset=(int)(save_p+1-savebuffer)+NOTICE_SAVE_BYTES+8+numsectors;
      if(length>=offset)P_GlobalDigLoad(savebuffer+offset,length-offset);}
     {int arenaBytes=P_ArenaLoad(savebuffer,length);SV_Load(savebuffer,length-arenaBytes); }
+    ED_SetLoading(0);
     Z_Free (savebuffer);
 
     if (setsizeneeded)
@@ -1381,7 +1385,7 @@ void G_DoSaveGame (void)
 	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot);
     description = savedescription;
 
-    size_t capacity = P_BoomSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
+    size_t capacity = ED_Save(NULL)+P_BoomSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
     save_p = savebuffer = calloc(1, capacity);
     if (!savebuffer) I_Error("Could not allocate savegame buffer");
 
@@ -1415,6 +1419,7 @@ void G_DoSaveGame (void)
     save_p += P_ArenaSave(save_p);
     save_p += P_WeakpointSave(save_p);
     save_p += P_BoomSave(save_p);
+    save_p += ED_Save(save_p);
     length = save_p - savebuffer;
     if ((size_t)length > capacity)
 	I_Error ("Savegame buffer overrun");

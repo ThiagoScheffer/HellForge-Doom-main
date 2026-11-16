@@ -3,6 +3,7 @@ extern "C" {
 #include "doomtype.h"
 #include "../linuxdoom-1.10/p_weakpoints.h"
 #include "m_argv.h"
+extern int netgame,demoplayback,demorecording;
 }
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -563,6 +564,60 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Only the 8 nearest lamp strips and glowing flats light their surroundings per pixel, not 24. Cheaper in rooms "
                     "full of light panels; farther ones keep their baked glow but lose their moving highlights.",
                     [](const Settings &d){return d.emissive!=0&&d.bakeOnlyLights==0;})}}}}};
+    // Independent pages use the existing tab navigation, persistence and draft.
+    auto allowed=+[](const Settings&)->bool{return !netgame&&!demoplayback&&!demorecording&&!arcade_active;};
+    auto& e=s.encounter;
+    tabs.push_back({"ENCOUNTER DIRECTOR",{{"Single-player encounter controls",{
+        check("encounter_director_enabled","Enable Encounter Director",&e.enabled,"Master control for all three modules. Off by default. Network games and demos bypass the director.",allowed),
+        check("encounter_randomize_monsters","Initial Monster Randomization",&e.monsters,"One-for-one original monsters at map start. Enable before starting/restarting a map. Population and protected encounters are preserved.",allowed),
+        check("encounter_reinforcements_enabled","Dynamic Reinforcements",&e.reinforcements,"Adds bounded, out-of-sight monsters at original map spawn locations. May be enabled during play. This adds monsters; it does not stream or reduce the original population.",allowed),
+        check("encounter_randomize_items","Item Randomization",&e.items,"One-for-one original pickups at map start, using independent category pools. Keys and unknown progression items remain intact.",allowed)
+    }}}});
+    tabs.push_back({"ED Monsters",{{"MONSTER RANDOMIZATION - next map",{
+        check("","Enable Monster Randomization",&e.monsters,"Also requires the master Encounter Director switch. Applies once before the first simulation tic of a new map.",allowed),
+        slider("encounter_randomization_strength","Randomization Strength (%)",&e.strength,0,100,1,"Probability and threat breadth of eligible substitutions; never changes original monster count.",allowed),
+        choice("encounter_preserve_bosses","Preserve Bosses",&e.bossProtection,{"Off","Bosses","Strict"},{0,1,2},"Strict also preserves minibosses. Progression/boss-death actors, unique and unrecognized scripted actors are always protected.",allowed),
+        check("encounter_threat_weighted","Threat-Weighted Selection",&e.weighted,"Prefer similar threat costs. Flying/ground and kill-count compatibility restrictions always apply.",allowed)
+    }} ,{"Original population and progression are always protected",{}}}});
+    tabs.push_back({"ED Reinforcements",{{"DYNAMIC REINFORCEMENTS",{
+        check("","Enable Reinforcements",&e.reinforcements,"Requires Encounter Director. Limits apply to additional monsters, not original map monsters.",allowed),
+        slider("encounter_min_spawn_distance","Minimum Spawn Distance",&e.minDistance,64,8191,1,"World units from every living player. Applied maximum is always greater than minimum.",allowed),
+        slider("encounter_max_spawn_distance","Maximum Spawn Distance",&e.maxDistance,65,8192,1,"World units from every living player. Cheap distance rejection precedes line-of-sight work.",allowed),
+        slider("encounter_min_group_size","Minimum Group Size",&e.minGroup,1,16,1,"Desired group minimum; blocked locations, adaptive pacing and hard budgets may produce a smaller group.",allowed),
+        slider("encounter_max_group_size","Maximum Group Size",&e.maxGroup,1,16,1,"Hard upper bound per reinforcement event.",allowed),
+        slider("encounter_min_spawn_interval","Minimum Interval (seconds)",&e.minInterval,5,600,1,"Simulation time between events; pauses and menus do not advance it.",allowed),
+        slider("encounter_max_spawn_interval","Maximum Interval (seconds)",&e.maxInterval,5,600,1,"Next interval is independently selected with the director random stream.",allowed),
+        slider("encounter_max_active_additional","Maximum Active Additional",&e.maxActive,1,64,1,"Living director monsters allowed before more may spawn. Original monsters are never removed.",allowed),
+        slider("encounter_max_total_additional","Maximum Additional per Map",&e.maxTotal,1,256,1,"Lifetime number issued this map. Killing monsters or toggling the director never resets this budget.",allowed),
+        slider("encounter_max_threat","Maximum Additional Threat",&e.maxThreat,1,256,1,"Threat budget for living additional monsters; heavy monsters cost more than Imps.",allowed),
+        check("encounter_no_spawns_behind","No Spawns Behind Player",&e.noBehind,"Uses movement direction above one unit/tic, otherwise facing. A candidate must be in the forward half-plane.",allowed),
+        check("encounter_adaptive_pacing","Adaptive Reinforcement Pacing",&e.adaptive,"Low health/armor increases delays and reduces group/threat budgets; severe distress pauses reinforcements.",allowed),
+        check("encounter_pause_for_boss","Pause During Boss Encounters",&e.pauseBoss,"Suspend additions around a living boss with an active target.",allowed)
+    }},{"Never spawn in player LOS - mandatory",{}}}});
+    tabs.push_back({"ED Items",{{"ITEM RANDOMIZER - next map",{
+        check("","Enable Item Randomization",&e.items,"Requires Encounter Director and independently selected categories. Original item count is preserved.",allowed),
+        check("encounter_randomize_ammo","Randomize Ammo",&e.ammo,"Separate ammo-family pools preserve weapon/ammo compatibility.",allowed),
+        check("encounter_randomize_armor","Randomize Armor",&e.armor,"Replace eligible armor only with available armor classes.",allowed),
+        check("encounter_randomize_health","Randomize Health",&e.health,"Replace eligible health pickups only within the health pool.",allowed),
+        check("encounter_randomize_powerups","Randomize Powerups",&e.powerups,"Compatible powerups only. Suits, invulnerability, berserk and unknown objective effects remain protected.",allowed),
+        check("encounter_randomize_weapons","Randomize Weapons",&e.weapons,"Conservative ammo/progression tiers; retain at least one of each original weapon class.",allowed),
+        check("encounter_randomize_custom_inventory","Randomize Custom Inventory",&e.customInventory,"Custom inventory randomization may produce unpredictable results with gameplay mods. Only compatible and explicitly safe inventory classes will be randomized. Unknown classes stay unchanged.",allowed),
+        check("encounter_exclude_counted_items","Exclude Counted Items",&e.excludeCounted,"Protect MF_COUNTITEM pickups from substitutions by default.",allowed),
+        slider("encounter_item_coverage","Item Randomization Coverage (%)",&e.coverage,0,100,1,"Percentage of eligible original placements considered. No items are added or deleted.",allowed)
+    }},{"Keys, quest items and progression are always protected",{}}}});
+    std::vector<Option> advanced={
+        slider("encounter_random_seed","Custom Random Seed",&e.seed,0,16777215,1,"0 uses an automatic session/map seed; positive integers reproduce selection on the same map/settings. Applies next map.",allowed),
+        slider("encounter_max_local_threat","Maximum Local Encounter Threat",&e.maxLocalThreat,1,512,1,"Nearby existing plus additional monster pressure blocks new groups when already crowded.",allowed),
+        slider("encounter_max_spawn_attempts","Maximum Attempts per Event",&e.maxAttempts,1,64,1,"Bounded candidate attempts. Failure skips the event until the next normal interval.",allowed)
+    };
+#ifndef NDEBUG
+    advanced.push_back(check("encounter_debug","Display Director Debug Information",&e.debug,"Development aggregate event statistics; no per-actor logging.",allowed));
+#endif
+    static const char* threatKeys[]={"encounter_threat_zombieman","encounter_threat_shotgun_guy","encounter_threat_chaingunner","encounter_threat_imp","encounter_threat_pinky","encounter_threat_spectre","encounter_threat_lost_soul","encounter_threat_cacodemon","encounter_threat_hell_knight","encounter_threat_baron","encounter_threat_mancubus","encounter_threat_arachnotron","encounter_threat_revenant","encounter_threat_archvile","encounter_threat_pain_elemental","encounter_threat_cyberdemon","encounter_threat_spider"};
+    static const char* threatNames[]={"Zombieman threat","Shotgun guy threat","Chaingunner threat","Imp threat","Pinky threat","Spectre threat","Lost Soul threat","Cacodemon threat","Hell Knight threat","Baron threat","Mancubus threat","Arachnotron threat","Revenant threat","Arch-vile threat","Pain Elemental threat","Cyberdemon threat","Spider Mastermind threat"};
+    std::vector<Option> threats;
+    for(int i=0;i<17;++i)threats.push_back(slider(threatKeys[i],threatNames[i],&e.threatCosts[i],1,128,1,"Director classification/budget cost only. Does not change the monster's damage, speed, health or behavior.",allowed));
+    tabs.push_back({"ED Advanced",{{"ADVANCED",std::move(advanced)},{"Threat tuning",std::move(threats)}}});
     for(auto &tab:tabs)for(auto &section:tab.sections)for(auto &option:section.options) {
         std::string key=option.key;
         if(key=="fluid_firing_smoke"||key=="fluid_reload_smoke"||key=="fluid_hot_smoke"||key=="fluid_indoor_smoke"||key=="fluid_saw_smoke"||key=="fluid_saw_blood"||key=="fluid_idle_gestures"||key=="fluid_rocket_fire"||key=="fluid_bare_hands"||key=="fluid_fast_pistol"||key=="fluid_gloves")
@@ -613,7 +668,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
 
 namespace {
 template<class Visit> void eachOption(Settings &s,Visit visit) {
-    for(OptionTab &tab:optionTabs(s))for(OptionSection &section:tab.sections)for(Option &option:section.options)visit(option);
+    for(OptionTab &tab:optionTabs(s))for(OptionSection &section:tab.sections)for(Option &option:section.options)if(option.key&&*option.key&&option.kind!=OptionKind::Action)visit(option);
 }
 }
 // graphics.cfg from before the combined Combat choices: the old switches' values, until finishReading
@@ -638,6 +693,7 @@ void readOption(Settings &s,const char *key,double value) {
     });
 }
 void finishReading(Settings &s) {
+    ED_ValidateConfig(&s.encounter);
     if(readOld[0]&&!readNew[0])s.deaths=!oldDeath[0]?0:oldDeath[2]?(oldDeath[3]?4:3):oldDeath[1]?2:1;
     if(readOld[1]&&!readNew[1])s.hitReactions=oldHit[0]||oldHit[1];
     if(readOld[2]&&!readNew[2])s.bloodLevel=!oldBlood[0]?0:oldBlood[1]||oldBlood[2]?2:1;
@@ -646,7 +702,7 @@ void finishReading(Settings &s) {
 void writeOptions(FILE *file,Settings &s) {
     P_WeakpointWriteBalance(file);
     eachOption(s,[&](Option &option) {
-        if(option.kind==OptionKind::Slider)fprintf(file,"%s %g\n",option.key,*option.number);
+        if(option.kind==OptionKind::Slider)fprintf(file,!strcmp(option.key,"encounter_random_seed")?"%s %.9g\n":"%s %g\n",option.key,*option.number);
         else fprintf(file,"%s %d\n",option.key,*option.flag);
     });
 }

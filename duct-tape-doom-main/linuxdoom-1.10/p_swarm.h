@@ -13,6 +13,7 @@ void P_SwarmConfigure(int hibernation,int debug);
 void P_SwarmBeginLevel(void);
 void P_SwarmWorldChanged(void);
 void P_SwarmPatchedDefinitions(void);
+int P_SwarmDefinitionsPatched(void);
 void P_SwarmForget(mobj_t *actor);
 int P_SwarmIdleSkip(mobj_t *actor);
 void P_SwarmIdleNegative(mobj_t *actor,int previousLook);

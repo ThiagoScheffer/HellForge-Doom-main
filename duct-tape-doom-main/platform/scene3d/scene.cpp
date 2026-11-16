@@ -150,6 +150,7 @@ void applySettings() {
     R_BeforeLevelReset=stopRelight;
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
+    ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     p_breakablewalls=settings.breakableWalls&&!netgame;
     p_throughwalls=settings.throughWalls;
     p_breachdoors=settings.breakableWalls&&settings.breachDoors;
@@ -245,6 +246,7 @@ void sceneInit(SDL_Window *window) {
     int config=M_CheckParm((char*)"-graphics");
     if(config&&config+1<myargc)graphicsConfig=myargv[config+1];
     loadSettings();if(M_CheckParm((char*)"-classic"))settings.accelerated=0;
+    ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     if(M_CheckParm((char*)"-ambushsightreuse"))settings.ambushSightReuse=1;
     P_SetAmbushSightReuse(settings.ambushSightReuse);
     if(M_CheckParm((char*)"-rendercheck"))settings.accelerated=1;

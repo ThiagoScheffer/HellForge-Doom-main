@@ -38,6 +38,7 @@ void P_SwarmBeginLevel(void){
 }
 void P_SwarmWorldChanged(void){if(enabled)++epoch;}
 void P_SwarmPatchedDefinitions(void){patchedDefinitions=1;++epoch;}
+int P_SwarmDefinitionsPatched(void){return patchedDefinitions;}
 void P_SwarmForget(mobj_t *actor){
     if(enabled&&entries[slot(actor)].actor==actor)entries[slot(actor)].actor=NULL;
 }

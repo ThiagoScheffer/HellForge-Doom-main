@@ -88,6 +88,7 @@ set(DOOM_SOURCES
     linuxdoom-1.10/p_digwall.c
     linuxdoom-1.10/p_plats.c
     linuxdoom-1.10/p_pspr.c
+    linuxdoom-1.10/p_encounter.cpp
     linuxdoom-1.10/p_weakpoints.cpp
     linuxdoom-1.10/p_saveg.c
     linuxdoom-1.10/p_setup.c
@@ -198,6 +199,9 @@ target_link_libraries(doom_headless_platform PUBLIC doom_core)
 add_executable(doom-headless platform/headless_main.c)
 target_link_libraries(doom-headless PRIVATE doom_headless_platform)
 if(BUILD_TESTING)
+    add_executable(doom-encounter-tests tests/encounter_director.cpp)
+    target_compile_features(doom-encounter-tests PRIVATE cxx_std_17)
+    target_link_libraries(doom-encounter-tests PRIVATE doom_headless_platform)
     add_executable(doom-swarm-idle-tests tests/swarm_idle.cpp)
     target_compile_features(doom-swarm-idle-tests PRIVATE cxx_std_17)
     target_link_libraries(doom-swarm-idle-tests PRIVATE doom_headless_platform)
@@ -224,6 +228,14 @@ endif()
 
   if(DOOM_COMPAT_TEST_IWAD)
       find_package(Python3 COMPONENTS Interpreter REQUIRED)
+      if(BUILD_TESTING)
+          file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/encounter-ctest")
+          add_test(NAME encounter-fixture COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/encounter_fixture.py" "${CMAKE_CURRENT_BINARY_DIR}/encounter-ctest/fixture.wad")
+          set_tests_properties(encounter-fixture PROPERTIES FIXTURES_SETUP encounter)
+          add_test(NAME encounter-native-contract COMMAND doom-encounter-tests "${DOOM_COMPAT_TEST_IWAD}" "${CMAKE_CURRENT_BINARY_DIR}/encounter-ctest/fixture.wad")
+          set_tests_properties(encounter-native-contract PROPERTIES FIXTURES_REQUIRED encounter WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/encounter-ctest" TIMEOUT 30)
+      endif()
+
       add_test(NAME bigmap-generated-regressions COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/bigmap_regressions.py"
           --engine $<TARGET_FILE:doom-headless> --iwad "${DOOM_COMPAT_TEST_IWAD}"
@@ -520,6 +532,10 @@ if(DOOM_BUILD_SDL)
                 target_compile_options(doom-wounds-tests PRIVATE -Wno-unknown-pragmas)
             endif()
             add_test(NAME wound-hit-placement COMMAND doom-wounds-tests)
+            add_executable(doom-encounter-settings-tests tests/encounter_settings.cpp platform/settings_panel.cpp)
+            target_compile_features(doom-encounter-settings-tests PRIVATE cxx_std_17)
+            target_link_libraries(doom-encounter-settings-tests PRIVATE doom_headless_platform SDL3::SDL3)
+            add_test(NAME encounter-settings-contract COMMAND doom-encounter-settings-tests)
             add_executable(doom-weakpoints-tests tests/weakpoints_rules.cpp tests/weakpoints_stubs.cpp linuxdoom-1.10/p_weakpoints.cpp)
             target_compile_features(doom-weakpoints-tests PRIVATE cxx_std_17)
             target_include_directories(doom-weakpoints-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10")

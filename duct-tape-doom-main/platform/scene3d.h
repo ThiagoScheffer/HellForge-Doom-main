@@ -2,6 +2,7 @@
    at runtime from the loaded WAD. A GPU backend uploads and draws the result. */
 #ifndef DOOM_SCENE3D_H
 #define DOOM_SCENE3D_H
+#include "../linuxdoom-1.10/p_encounter.h"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -61,6 +62,7 @@ struct FogLights { unsigned count=0,indices[4]={},padding[3]={}; };
 static_assert(sizeof(FogLights)==32,"Fog shader layout");
 bool voxelDetected();
 struct Settings {
+    encounter_config_t encounter=ED_DefaultConfig();
     int nearMissSounds=1;
     int fullscreen=0;
     int hudStyle=0,hudFace=1,hudLayout=0;

@@ -38,6 +38,7 @@ rcsid[] = "$Id: p_mobj.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #include "doomdef.h"
 #include "p_local.h"
+#include "p_encounter.h"
 #include "p_solid.h"
 #include "p_fluid.h"
 #include "m_arcade.h"
@@ -514,6 +515,7 @@ P_NightmareRespawn (mobj_t* mobj)
 	mo->flags |= MF_AMBUSH;
 
     mo->reactiontime = 18;
+    ED_Respawn(mobj,mo);
 	
     // remove the old monster,
     P_RemoveMobj (mobj);
@@ -625,7 +627,7 @@ P_SpawnMobj
     if (gameskill != sk_nightmare)
 	mobj->reactiontime = info->reactiontime;
     
-    mobj->lastlook = P_Random () % MAXPLAYERS;
+    mobj->lastlook = ED_SpawnRandom () % MAXPLAYERS;
     // do not set the state with P_SetMobjState,
     // because action routines can not be called yet
     st = &states[info->spawnstate];
@@ -669,6 +671,7 @@ int		iquetail;
 
 void P_RemoveMobj (mobj_t* mobj)
 {
+    ED_Forget(mobj);
     WA_Remove(mobj);
     P_SwarmForget(mobj);
 #ifdef DOOM_MONSTER_PROFILING
@@ -934,6 +937,7 @@ void P_SpawnMapThing (mapthing_t* mthing)
     mobj->angle = ANG45 * (mthing->angle/45);
     if (mthing->options & MTF_AMBUSH)
 	mobj->flags |= MF_AMBUSH;
+    ED_Capture(mobj);
 }
 
 

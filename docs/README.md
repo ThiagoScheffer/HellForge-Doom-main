@@ -11,6 +11,8 @@ statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
 
+- [Encounter Director: independent randomization, bounded reinforcements and item pools](changes/ENCOUNTER-DIRECTOR.md)
+
 - [Exact solid-world sight acceleration for large monster maps](changes/SOLID-SIGHT-MESH-CACHE.md)
 
 - [Speedrun X/Y controls and column/row layouts](changes/SPEEDRUN-LAYOUT.md)
