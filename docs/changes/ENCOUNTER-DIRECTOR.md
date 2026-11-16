@@ -1,6 +1,6 @@
 ---
 build: "2026.11.15.6 (local native source rebuild)"
-updated_utc: "2026-11-15T20:10:39.382681+00:00"
+updated_utc: "2026-11-16T04:17:27.369707+00:00"
 status: "implemented; two focused native checks passed; single-player only"
 tests: "../../duct-tape-doom-main/tests/encounter_director.cpp"
 settings_tests: "../../duct-tape-doom-main/tests/encounter_settings.cpp"
@@ -68,10 +68,12 @@ later gameplay spawns are not randomized.
 
 ## F4 controls and persistence
 
-The existing flat-tab framework now provides **ENCOUNTER DIRECTOR**, **ED Monsters**,
-**ED Reinforcements**, **ED Items**, and **ED Advanced** pages. They reuse normal
-keyboard/controller controls, scrolling, draft/apply/discard behavior and the
-existing graphics.cfg. Esc/F4/Apply applies; F10 discards. Initial replacements
+F4 has one **ENCOUNTER DIRECTOR** sidebar entry. **ED Monsters**, **ED
+Reinforcements**, **ED Items**, and **ED Advanced** are internal clickable tabs.
+The Page selector also selects Overview or a child page using normal Left/Right
+controls; Q/E cycles pages. Tab/Page Up/Page Down still change the main category.
+They reuse scrolling, draft/apply/discard behavior and the existing graphics.cfg.
+See [nested tab and overlap fix](F4-DIRECTOR-NESTED-TABS.md). Esc/F4/Apply applies; F10 discards. Initial replacements
 require a new/restarted map; reinforcement controls work during play. Master off
 stops future activity without deleting actors or clearing saved preferences.
 

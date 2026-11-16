@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <utility>
 extern "C" {
 #include "doomtype.h"
 #include "doomdef.h"
@@ -37,7 +38,9 @@ struct Panel {
     int aiWarning=0;
     bool binding=false;
     Settings draft,defaults; // defaults: as R sets them, for the per-option reset and marks
-    std::vector<OptionTab> tabs;
+    std::vector<OptionTab> tabs,directorPages;
+    OptionSection directorNavigation;
+    int directorPage=-1,tabScroll=0;
     std::vector<Line> lines;
     int tab=0,selected=0,scroll=0;
     
@@ -74,6 +77,24 @@ void addMapTab(){
     Option start{};start.kind=OptionKind::Action;start.key="";start.title="Start map";start.tip="Start the selected map at the current difficulty. Current level progress will be replaced.";start.action=startSelectedMap;
     panel.tabs.insert(panel.tabs.begin(),{"Game",{{"Change map",{map,start}}}});
 }
+
+// Group presentation only: optionTabs remains the flat configuration registry,
+// so setting keys, defaults and save/import behavior do not change.
+void groupDirectorPages(){
+    panel.directorPages.clear();
+    for(auto it=panel.tabs.begin();it!=panel.tabs.end();){
+        bool child=!strcmp(it->title,"ED Monsters")||!strcmp(it->title,"ED Reinforcements")||
+            !strcmp(it->title,"ED Items")||!strcmp(it->title,"ED Advanced");
+        if(child){panel.directorPages.push_back(std::move(*it));it=panel.tabs.erase(it);}else ++it;
+    }
+    Option page{};page.kind=OptionKind::Choice;page.key="";page.title="Page";
+    page.tip="Left/Right or Q/E changes the director page; the tabs above are clickable. Select Overview or click Encounter Director in the sidebar for master controls. Tab and Page Up/Down change the main category.";
+    page.flag=&panel.directorPage;page.items.push_back("Overview");page.values.push_back(-1);
+    for(size_t i=0;i<panel.directorPages.size();++i){page.items.push_back(panel.directorPages[i].title);page.values.push_back((int)i);}
+    panel.directorNavigation={"Director tabs",{std::move(page)}};
+}
+bool inDirector(){return !panel.directorPages.empty()&&!strcmp(panel.tabs[(size_t)panel.tab].title,"ENCOUNTER DIRECTOR");}
+OptionTab& currentPage(){return inDirector()&&panel.directorPage>=0?panel.directorPages[(size_t)panel.directorPage]:panel.tabs[(size_t)panel.tab];}
 
 // The image is a grid of 8x16 character cells, 80 columns by 25 rows.
 const int width=DOOM_SETTINGS_WIDTH,height=DOOM_SETTINGS_HEIGHT,cellWidth=8,cellHeight=16;
@@ -159,6 +180,14 @@ int textWidth(const std::string &string) {
     int w=0;
     for(char c:string) {const Glyph *glyph=glyphFor(c);w+=glyph?glyph->width+Game_FontSpacing():spaceWidth;}
     return w;
+}
+
+// Give long child names their natural width before sharing the spare space.
+int directorTabEdge(int index){
+    int total=0,before=0,count=(int)panel.directorPages.size();
+    for(int i=0;i<count;++i){int w=textWidth(panel.directorPages[(size_t)i].title)+12;total+=w;if(i<index)before+=w;}
+    int available=(rightColumn-leftColumn)*cellWidth;
+    return leftColumn*cellWidth+(total<=available?before+(available-total)*index/count:available*index/count);
 }
 
 std::string clipped(std::string value,int pixels) {
@@ -263,15 +292,30 @@ std::string valueText(const Option &option) {
     return value;
 }
 
+void rebuildPageLines(){
+    panel.lines.clear();
+    auto append=[&](OptionSection& section){
+        panel.lines.push_back({&section,nullptr});
+        for(Option& option:section.options)panel.lines.push_back({&section,&option});
+    };
+    if(inDirector())append(panel.directorNavigation);
+    for(auto& section:currentPage().sections)append(section);
+    panel.selected=0;while(panel.selected<(int)panel.lines.size()&&!panel.lines[(size_t)panel.selected].option)++panel.selected;
+    panel.scroll=0;
+}
 void selectTab(int tab) {
     int count=(int)panel.tabs.size();
-    panel.tab=(tab%count+count)%count;
-    panel.lines.clear();
-    for(OptionSection &section:panel.tabs[(size_t)panel.tab].sections) {
-        panel.lines.push_back({&section,nullptr});
-        for(Option &option:section.options)panel.lines.push_back({&section,&option});
-    }
-    panel.selected=1;panel.scroll=0;
+    panel.tab=(tab%count+count)%count;panel.directorPage=-1;
+    if(panel.tab<panel.tabScroll)panel.tabScroll=panel.tab;
+    if(panel.tab>=panel.tabScroll+visibleLines)panel.tabScroll=panel.tab-visibleLines+1;
+    panel.tabScroll=std::clamp(panel.tabScroll,0,std::max(0,count-visibleLines));
+    rebuildPageLines();
+}
+void selectDirectorPage(int page){
+    if(!inDirector())return;
+    int count=(int)panel.directorPages.size()+1;
+    panel.directorPage=((page+1)%count+count)%count-1;
+    rebuildPageLines();
 }
 
 void keepSelectionVisible() {
@@ -329,6 +373,7 @@ void changeOption(int direction) {
         int count=(int)option.values.size(),index=0;
         for(int i=0;i<count;++i)if(option.values[(size_t)i]==*option.flag)index=i;
         *option.flag=option.values[(size_t)(((index+direction)%count+count)%count)];
+        if(option.flag==&panel.directorPage)selectDirectorPage(panel.directorPage);
     } else setSlider(option,*option.number+direction*option.step);
     S_StartSound(NULL,Game_MenuSound(GAME_MENU_CHANGE));
 }
@@ -345,8 +390,8 @@ int sliderLeft() { return (rightColumn-valueColumns-sliderColumns)*cellWidth; }
 int sliderWidth() { return (sliderColumns-1)*cellWidth; }
 
 // A small triangle in the column right of the list, pointing where more options are.
-void drawArrow(int row,bool up) {
-    int x=(rightColumn+1)*cellWidth+cellWidth/2,y=rowY(row)+(cellHeight-4)/2;
+void drawArrow(int row,bool up,int x=(rightColumn+1)*cellWidth+cellWidth/2) {
+    int y=rowY(row)+(cellHeight-4)/2;
     for(int i=0;i<4;++i)fill(x-(up?i:3-i),y+i,2*(up?i:3-i)+1,1,dim);
 }
 
@@ -381,6 +426,7 @@ void I_Render3DSettingsMenu(void) {
         tab.sections.front().options.push_back(reset);
     }
 
+    groupDirectorPages();
     addMapTab();
     addMultiplayerTab();
     selectTab(panel.tab);
@@ -418,6 +464,8 @@ void I_Render3DSettingsKey(int scancode,int shift) {
     }
     if(panel.aiWarning){panel.aiWarning=0;return;}
     switch(scancode) {
+    case SDL_SCANCODE_Q: if(inDirector())selectDirectorPage(panel.directorPage-1);break;
+    case SDL_SCANCODE_E: if(inDirector())selectDirectorPage(panel.directorPage+1);break;
     case SDL_SCANCODE_UP: moveSelection(-1); break;
     case SDL_SCANCODE_DOWN: moveSelection(1); break;
     case SDL_SCANCODE_LEFT: changeOption(-1); break;
@@ -429,7 +477,7 @@ void I_Render3DSettingsKey(int scancode,int shift) {
     case SDL_SCANCODE_BACKSPACE: case SDL_SCANCODE_DELETE: resetOption(); break;
     case SDL_SCANCODE_R: resetOption(); break;
     case SDL_SCANCODE_HOME: panel.selected=1;panel.scroll=0;break;
-    case SDL_SCANCODE_END: panel.selected=(int)panel.lines.size()-1;keepSelectionVisible();break;
+    case SDL_SCANCODE_END: panel.selected=(int)panel.lines.size()-1;while(panel.selected>0&&!panel.lines[(size_t)panel.selected].option)--panel.selected;keepSelectionVisible();break;
     case SDL_SCANCODE_F10: paused=panel.wasPaused;panel.open=false;S_StartSound(NULL,Game_MenuSound(GAME_MENU_CLOSE));break;
     case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_F4: closePanel(); break;
     default:
@@ -459,8 +507,15 @@ void I_Render3DSettingsClick(int x,int y,int button) {
         if(x>=width-232){I_Render3DSettingsKey(SDL_SCANCODE_F10,0);return;}
     }
     if(x<(leftColumn-1)*cellWidth) {
-        if(button==1&&row>=2&&row<2+(int)panel.tabs.size()) {
-            selectTab(row-2);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));
+        if(button==1&&row>=listRow&&row<listRow+visibleLines&&panel.tabScroll+row-listRow<(int)panel.tabs.size()) {
+            selectTab(panel.tabScroll+row-listRow);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));
+        }
+        return;
+    }
+    if(inDirector()&&row==1&&button==1&&x>=leftColumn*cellWidth&&x<rightColumn*cellWidth){
+        loadFont();
+        for(size_t i=0;i<panel.directorPages.size();++i)if(x>=directorTabEdge((int)i)&&x<directorTabEdge((int)i+1)){
+            selectDirectorPage((int)i);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));break;
         }
         return;
     }
@@ -515,20 +570,32 @@ void I_Render3DSettingsDraw(unsigned *pixels) {
 
     fill(8,24,(leftColumn-2)*cellWidth,280,0xe0101010);
     drawText("SETTINGS",2,0,heading);
-    for(size_t i=0;i<panel.tabs.size();++i) {
-        bool current=(int)i==panel.tab;
-        if(current)fill(8,rowY(2+(int)i),(leftColumn-2)*cellWidth,cellHeight,tabBar);
-        drawText(clipped(panel.tabs[i].title,(leftColumn-4)*cellWidth),2,2+(int)i,current?bright:description);
+    for(int row=0;row<visibleLines&&panel.tabScroll+row<(int)panel.tabs.size();++row) {
+        int i=panel.tabScroll+row;bool current=i==panel.tab;
+        if(current)fill(8,rowY(listRow+row),(leftColumn-2)*cellWidth,cellHeight,tabBar);
+        drawText(clipped(panel.tabs[(size_t)i].title,(leftColumn-4)*cellWidth),2,listRow+row,current?bright:description);
     }
-    drawText(panel.tabs[panel.tab].title,leftColumn,0,heading);
+    if(panel.tabScroll>0)drawArrow(listRow,true,(leftColumn-2)*cellWidth+cellWidth/2);
+    if(panel.tabScroll+visibleLines<(int)panel.tabs.size())drawArrow(listRow+visibleLines-1,false,(leftColumn-2)*cellWidth+cellWidth/2);
     int item=0,total=0;
     for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option){++total;if((int)i<=panel.selected)++item;}
-    drawTextRight(std::to_string(item)+" / "+std::to_string(total),rightColumn,0,description);
-    drawSeparator(1);
+    std::string counter=std::to_string(item)+" / "+std::to_string(total);
+    std::string title=panel.tabs[(size_t)panel.tab].title;
+    if(inDirector()&&panel.directorPage>=0)title+=" / "+std::string(currentPage().title);
+    drawText(clipped(title,(rightColumn-leftColumn)*cellWidth-textWidth(counter)-16),leftColumn,0,heading);
+    drawTextRight(counter,rightColumn,0,description);
+    if(inDirector()){
+        for(size_t i=0;i<panel.directorPages.size();++i){
+            int x0=directorTabEdge((int)i),x1=directorTabEdge((int)i+1);
+            bool active=(int)i==panel.directorPage;
+            fill(x0,rowY(1),x1-x0-2,cellHeight,active?tabBar:0xff202020);
+            drawTextAt(clipped(panel.directorPages[i].title,x1-x0-8),x0+4,1,active?bright:description);
+        }
+    }else drawSeparator(1);
     for(int i=0;i<visibleLines&&panel.scroll+i<(int)panel.lines.size();++i) {
         const Line &line=panel.lines[(size_t)(panel.scroll+i)];
         int row=listRow+i;
-        if(!line.option) {drawText(line.section->title,leftColumn,row,heading);continue;}
+        if(!line.option) {drawText(clipped(line.section->title,(rightColumn-leftColumn)*cellWidth),leftColumn,row,heading);continue;}
         const Option &option=*line.option;
         bool selected=panel.scroll+i==panel.selected,enabled=option.isEnabled(panel.draft);
         if(selected)fill((leftColumn+1)*cellWidth,rowY(row),(rightColumn-leftColumn)*cellWidth,cellHeight,selectionBar);
@@ -552,7 +619,7 @@ void I_Render3DSettingsDraw(unsigned *pixels) {
     if(option.cost)detail+=" "+std::string(option.cost);
     auto lines=wrap(detail,608,3);
     for(size_t i=0;i<lines.size();++i)drawText(lines[i],2,tipRow+(int)i,description);
-    drawText("Tab: category  Arrows: adjust  R: reset item",2,helpRow,description);
+    drawText(clipped(inDirector()?"Q/E: page  Tab: category  R: reset":"Tab: category  Arrows: adjust  R: reset item",width-248),2,helpRow,description);
     fill(width-232,rowY(helpRow),100,cellHeight,0xff303030);
     drawTextAt("F10 Discard",width-228,helpRow,text);
     fill(width-128,rowY(helpRow),120,cellHeight,selectionBar);
