@@ -1,7 +1,7 @@
 ---
 build: "2026.11.15.6 (local native source rebuild)"
-updated_utc: "2026-11-16T04:17:27.369707+00:00"
-status: "implemented; two focused native checks passed; single-player only"
+updated_utc: "2026-11-16T06:19:10.154764+00:00"
+status: "implemented; focused native/settings/menu checks and population audits passed; single-player only"
 tests: "../../duct-tape-doom-main/tests/encounter_director.cpp"
 settings_tests: "../../duct-tape-doom-main/tests/encounter_settings.cpp"
 index: "../README.md"
@@ -9,14 +9,16 @@ index: "../README.md"
 
 # Encounter Director
 
-Three independent, default-off gameplay modules share a default-off master
+Four independent, default-off gameplay modules share a default-off master
 switch. This is a clean native implementation from the supplied functional
 specification, using the existing actor/collision/sight/settings/save systems.
 No Joshua Hard AI-Director code or GZDoom/ZScript API was copied.
 
 **Population boundary:** initial randomization preserves the original monster
-count. Reinforcements add bounded monsters. This feature is not monster streaming,
-AI throttling, or a reduction of the original population on large maps.
+count. Reinforcements add bounded monsters. The separate [initial population budget](INITIAL-MONSTER-POPULATION-BUDGET.md)
+can start the supplied WAD with exactly 500, 1,000 or 2,000 originals in its opt-in
+Performance mode. Compatibility may exceed the target. The module remains off
+by default; no live AI throttling or measured FPS improvement is claimed.
 
 ## Implemented modules
 
@@ -69,13 +71,14 @@ later gameplay spawns are not randomized.
 ## F4 controls and persistence
 
 F4 has one **ENCOUNTER DIRECTOR** sidebar entry. **ED Monsters**, **ED
-Reinforcements**, **ED Items**, and **ED Advanced** are internal clickable tabs.
+Reinforcements**, **ED Items**, **ED Population**, and **ED Advanced** are internal clickable tabs.
 The Page selector also selects Overview or a child page using normal Left/Right
 controls; Q/E cycles pages. Tab/Page Up/Page Down still change the main category.
 They reuse scrolling, draft/apply/discard behavior and the existing graphics.cfg.
 See [nested tab and overlap fix](F4-DIRECTOR-NESTED-TABS.md). Esc/F4/Apply applies; F10 discards. Initial replacements
 require a new/restarted map; reinforcement controls work during play. Master off
-stops future activity without deleting actors or clearing saved preferences.
+stops added reinforcement events. Active original streaming instead uses a
+bounded drain of pending originals; no living originals are deleted.
 
 The Advanced reset changes only director values in the current draft. Threat
 costs are exposed there without changing monster damage, health, speed or AI.
@@ -112,8 +115,8 @@ Threat keys have prefix `encounter_threat_` and these suffix/default pairs:
 `zombieman=1`, `shotgun_guy=2`, `chaingunner=3`, `imp=1`, `pinky=1`, `spectre=1`,
 `lost_soul=2`, `cacodemon=3`, `hell_knight=4`, `baron=6`, `mancubus=6`,
 `arachnotron=7`, `revenant=4`, `archvile=8`, `pain_elemental=5`, `cyberdemon=20`,
-`spider=18`. Each cost is adjustable from 1 to 128. Development builds additionally
-expose `encounter_debug` event summaries. Release UI omits that debug switch.
+`spider=18`. Each cost is adjustable from 1 to 128. `encounter_debug` exposes aggregate event/population summaries in Release and
+development builds. See the population document for its independent budget keys.
 
 ## Native architecture, performance and compatibility
 
@@ -132,7 +135,10 @@ Nightmare respawn transfers ownership, and a once-per-second bounded recount
 observes resurrections. No full actor scan runs each tic. Save/load may scan actors
 once to map references to their serialized thinker indices.
 
-An additive **ED01** versioned, length-checked, checksummed save trailer stores
+The **ED01** trailer remains length-checked and checksummed. Ordinary director
+saves use V1; current population saves use V3 and also read V2. Population policy,
+counts, queues and continuation are described in the linked population document.
+The original director portion stores
 completion flags, seed/RNG state, remaining timer, issued count, original population,
 spawnpoint fingerprint/use/cooldowns and additional actor IDs. It is appended
 outside existing Boom/weakpoint/arena/solid trailers and stripped before those

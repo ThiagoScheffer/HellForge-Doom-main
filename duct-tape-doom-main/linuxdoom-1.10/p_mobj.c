@@ -754,6 +754,8 @@ void P_RespawnSpecials (void)
 	    break;
     }
     
+    if (ED_DeferOriginal(mthing,i)) return;
+
     // spawn it
     if (mobjinfo[i].flags & MF_SPAWNCEILING)
 	z = ONCEILINGZ;
@@ -915,6 +917,8 @@ void P_SpawnMapThing (mapthing_t* mthing)
 	return;
     }
     
+    if (ED_DeferOriginal(mthing,i)) return;
+
     // spawn it
     x = mthing->x << FRACBITS;
     y = mthing->y << FRACBITS;

@@ -457,6 +457,7 @@ void P_LoadThings (int lump)
 	mt->type = SHORT(mt->type);
 	mt->options = SHORT(mt->options);
 	
+	ED_MapThingIndex(i);
 	P_SpawnMapThing (mt);
     }
 	

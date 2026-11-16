@@ -568,10 +568,11 @@ std::vector<OptionTab> optionTabs(Settings &s) {
     auto allowed=+[](const Settings&)->bool{return !netgame&&!demoplayback&&!demorecording&&!arcade_active;};
     auto& e=s.encounter;
     tabs.push_back({"ENCOUNTER DIRECTOR",{{"Single-player encounter controls",{
-        check("encounter_director_enabled","Enable Encounter Director",&e.enabled,"Master control for all three modules. Off by default. Network games and demos bypass the director.",allowed),
+        check("encounter_director_enabled","Enable Encounter Director",&e.enabled,"Master control for all four modules. Default off. Active streaming drains pending originals at its bounded tic budget when disabled; live originals are never deleted. Network games/demos bypass.",allowed),
         check("encounter_randomize_monsters","Initial Monster Randomization",&e.monsters,"One-for-one original monsters at map start. Enable before starting/restarting a map. Population and protected encounters are preserved.",allowed),
         check("encounter_reinforcements_enabled","Dynamic Reinforcements",&e.reinforcements,"Adds bounded, out-of-sight monsters at original map spawn locations. May be enabled during play. This adds monsters; it does not stream or reduce the original population.",allowed),
-        check("encounter_randomize_items","Item Randomization",&e.items,"One-for-one original pickups at map start, using independent category pools. Keys and unknown progression items remain intact.",allowed)
+        check("encounter_randomize_items","Item Randomization",&e.items,"One-for-one original pickups at map start, using independent category pools. Keys and unknown progression items remain intact.",allowed),
+        check("","Original Monster Streaming",&e.stream,"Fourth independent module. Configure on ED Population. Apply before restarting the map; remote dormant monsters cannot wake until activated.",allowed)
     }}}});
     tabs.push_back({"ED Monsters",{{"MONSTER RANDOMIZATION - next map",{
         check("","Enable Monster Randomization",&e.monsters,"Also requires the master Encounter Director switch. Applies once before the first simulation tic of a new map.",allowed),
@@ -605,14 +606,32 @@ std::vector<OptionTab> optionTabs(Settings &s) {
         check("encounter_exclude_counted_items","Exclude Counted Items",&e.excludeCounted,"Protect MF_COUNTITEM pickups from substitutions by default.",allowed),
         slider("encounter_item_coverage","Item Randomization Coverage (%)",&e.coverage,0,100,1,"Percentage of eligible original placements considered. No items are added or deleted.",allowed)
     }},{"Keys, quest items and progression are always protected",{}}}});
+    auto packs=+[](const Settings& d)->bool{return !netgame&&!demoplayback&&!demorecording&&!arcade_active&&d.encounter.streamPolicy!=0;};
+    auto unavailable=+[](const Settings&)->bool{return false;};
+    auto initialCount=+[](const Settings& d)->bool{return !netgame&&!demoplayback&&!demorecording&&!arcade_active&&d.encounter.initialBudgetMode==0;};
+    auto initialPercent=+[](const Settings& d)->bool{return !netgame&&!demoplayback&&!demorecording&&!arcade_active&&d.encounter.initialBudgetMode==1;};
+    tabs.push_back({"ED Population",{{"ORIGINAL MONSTERS - next map/restart",{
+        check("encounter_stream_original_monsters","Original Monster Streaming",&e.stream,"Requires Director. Default off. Performance changes encounters: dormant originals cannot hear shots or fight. Apply budget and safety mode before map restart. Master off uses a bounded drain.",allowed),
+        choice("encounter_stream_initial_budget_mode","Initial Budget Type",&e.initialBudgetMode,{"Count","Percent"},{0,1},"Next map/restart. Count filtered original monsters, not THINGS, replacements or reinforcements.",allowed),
+        slider("encounter_stream_initial_count","Initial Monster Count",&e.initialMonsterCount,0,1000000,100,"Desired initial originals. Clamp to filtered map population. Mandatory originals may exceed this target; nearest authored locations are selected first.",initialCount),
+        slider("encounter_stream_initial_percent","Initial Monster Percentage",&e.initialMonsterPercent,1,100,.5,"Next map: percentage of filtered original monsters, rounded up. Half-percent precision; 12.5% of 4317 is 540, not 500.",initialPercent),
+        choice("encounter_stream_population_policy","Population Safety Mode",&e.populationPolicy,{"Compatibility","Performance"},{0,1},"Next map. Compatibility exceeds the target without an occlusion proof. Performance stages ordinary visible monsters too: temporary absence/pop-in is possible. Never freezes gameplay.",allowed),
+        choice("encounter_stream_policy","Activation Policy",&e.streamPolicy,{"Proximity / Progress","Timed Packs","Hybrid"},{0,1,2},"Next map. Proximity responds to progress/deaths; Timed responds to its clock; Hybrid uses both. Performance never expands the budget just because a monster might be visible.",allowed),
+        slider("encounter_stream_activate_distance","Activation Distance",&e.activateDistance,128,8190,1,"Priority range for ordinary candidates; Performance still obeys packs. Compatibility loads uncertain visible regions eagerly at map start.",allowed),
+        slider("encounter_stream_prefetch_distance","Prefetch Distance",&e.prefetchDistance,129,8191,1,"Query nearby spatial bins and queue authored locations before approaching doors/corners.",allowed),
+        slider("encounter_stream_max_spawns_per_tic","Normal Spawn Budget",&e.spawnBudget,1,64,1,"Default 8 attempts per tic, including master-off drain. Initial map construction is separate; Performance never adds render-driven spawns.",allowed),
+        slider("encounter_stream_pack_size","Spawn Pack Size",&e.packSize,1,64,1,"Originals per pack; also bounded by attempts/tic. Proximity uses progress/deaths; Timed uses the interval; Hybrid uses both.",allowed),
+        slider("encounter_stream_pack_interval","Pack Interval (seconds)",&e.packInterval,.5,60,.5,"Only nearby/visited/linked encounter regions enter timed packs. Credits do not accumulate into unlimited catch-up waves.",packs),
+        slider("encounter_stream_soft_active_limit","Soft Active Target",&e.softLimit,1,8192,1,"Post-start routine packs pause at max(this value, actual initial live originals). Deaths free slots; progress can override. Never removes a living original.",allowed),
+        check("encounter_stream_safe_stasis","Safe Distant Stasis (unavailable)",&e.safeStasis,"Not implemented: no live monster AI, physics or combat is frozen.",unavailable),
+        slider("encounter_stream_stasis_distance","Stasis Distance (reserved)",&e.stasisDistance,130,8192,1,"Reserved for a separately validated safe stasis implementation.",unavailable)
+    }}}});
     std::vector<Option> advanced={
         slider("encounter_random_seed","Custom Random Seed",&e.seed,0,16777215,1,"0 uses an automatic session/map seed; positive integers reproduce selection on the same map/settings. Applies next map.",allowed),
         slider("encounter_max_local_threat","Maximum Local Encounter Threat",&e.maxLocalThreat,1,512,1,"Nearby existing plus additional monster pressure blocks new groups when already crowded.",allowed),
         slider("encounter_max_spawn_attempts","Maximum Attempts per Event",&e.maxAttempts,1,64,1,"Bounded candidate attempts. Failure skips the event until the next normal interval.",allowed)
     };
-#ifndef NDEBUG
-    advanced.push_back(check("encounter_debug","Display Director Debug Information",&e.debug,"Development aggregate event statistics; no per-actor logging.",allowed));
-#endif
+    advanced.push_back(check("encounter_debug","Display Director Debug Information",&e.debug,"Aggregate population/pack statistics in the game log once per second; no per-actor logging.",allowed));
     static const char* threatKeys[]={"encounter_threat_zombieman","encounter_threat_shotgun_guy","encounter_threat_chaingunner","encounter_threat_imp","encounter_threat_pinky","encounter_threat_spectre","encounter_threat_lost_soul","encounter_threat_cacodemon","encounter_threat_hell_knight","encounter_threat_baron","encounter_threat_mancubus","encounter_threat_arachnotron","encounter_threat_revenant","encounter_threat_archvile","encounter_threat_pain_elemental","encounter_threat_cyberdemon","encounter_threat_spider"};
     static const char* threatNames[]={"Zombieman threat","Shotgun guy threat","Chaingunner threat","Imp threat","Pinky threat","Spectre threat","Lost Soul threat","Cacodemon threat","Hell Knight threat","Baron threat","Mancubus threat","Arachnotron threat","Revenant threat","Arch-vile threat","Pain Elemental threat","Cyberdemon threat","Spider Mastermind threat"};
     std::vector<Option> threats;
@@ -689,6 +708,7 @@ void readOption(Settings &s,const char *key,double value) {
         if(option.kind==OptionKind::Check)*option.flag=value!=0;
         else if(option.kind==OptionKind::Key){if(value==0||(value==std::floor(value)&&value>0&&value<SDL_SCANCODE_COUNT&&validPeekBinding((int)value)))*option.flag=(int)value;}
         else if(option.kind==OptionKind::Choice) {for(int v:option.values)if(v==value)*option.flag=v;}
+        else if(!strcmp(option.key,"encounter_stream_initial_count"))*option.number=(float)std::clamp(std::round(value),1.,1000000.);
         else *option.number=option.snap(value);
     });
 }

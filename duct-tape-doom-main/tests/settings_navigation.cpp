@@ -20,11 +20,11 @@ static int directorIndex(){for(size_t i=0;i<panel.tabs.size();++i)if(!strcmp(pan
 static void choose(const char* key){for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option&&!strcmp(panel.lines[i].option->key,key)){panel.selected=int(i);keepSelectionVisible();return;}check(false,"option exists");}
 static void capture(const char* path,const std::vector<unsigned>& pixels){FILE*f=fopen(path,"wb");check(f!=nullptr,"capture file");fprintf(f,"P6\n%d %d\n255\n",width,height);for(unsigned p:pixels){unsigned char rgb[]={static_cast<unsigned char>(p>>16),static_cast<unsigned char>(p>>8),static_cast<unsigned char>(p)};fwrite(rgb,1,3,f);}fclose(f);}
 static void run(){
- R_BeforeTic=nullptr;I_Render3DSettingsMenu();int root=directorIndex();check(root>=0&&panel.directorPages.size()==4,"one parent and four nested director tabs");
+ R_BeforeTic=nullptr;I_Render3DSettingsMenu();int root=directorIndex();check(root>=0&&panel.directorPages.size()==5,"one parent and five nested director tabs");
  for(const auto& tab:panel.tabs)check(strncmp(tab.title,"ED ",3)!=0,"ED pages absent from main sidebar");
  selectTab(root);size_t roots=panel.tabs.size();check(panel.directorPage==-1&&selectedOption().flag==&panel.directorPage,"parent opens on Overview with page selector");
- const char* labels[]={"ED Monsters","ED Reinforcements","ED Items","ED Advanced"};
- for(int i=0;i<4;++i){I_Render3DSettingsKey(SDL_SCANCODE_E,0);check(panel.directorPage==i&&!strcmp(currentPage().title,labels[i])&&panel.tabs.size()==roots,"Q/E selects nested page");}
+ const char* labels[]={"ED Monsters","ED Reinforcements","ED Items","ED Population","ED Advanced"};
+ for(int i=0;i<5;++i){I_Render3DSettingsKey(SDL_SCANCODE_E,0);check(panel.directorPage==i&&!strcmp(currentPage().title,labels[i])&&panel.tabs.size()==roots,"Q/E selects nested page");}
  I_Render3DSettingsKey(SDL_SCANCODE_E,0);check(panel.directorPage==-1,"nested navigation wraps to Overview");
  I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.directorPage==0,"controller-compatible choice opens child page");
  loadFont();int x=(directorTabEdge(1)+directorTabEdge(2))/2;
@@ -38,11 +38,12 @@ static void run(){
  selectTab(int(panel.tabs.size())-1);check(panel.tab-panel.tabScroll<visibleLines,"main sidebar scroll keeps selected category visible");
  I_Render3DSettingsClick(24,listRow*cellHeight+8,1);check(panel.tab==panel.tabScroll,"scrolled sidebar clicks use visible category index");
  panel.tabs=std::move(original);selectTab(root);selectDirectorPage(1);I_Render3DSettingsDraw(reinforce.data());capture("director-reinforcements.ppm",reinforce);
- selectDirectorPage(3);I_Render3DSettingsKey(SDL_SCANCODE_END,0);I_Render3DSettingsDraw(extra.data());capture("director-advanced.ppm",extra);
+ selectDirectorPage(3);I_Render3DSettingsDraw(extra.data());capture("director-population.ppm",extra);
+ selectDirectorPage(4);I_Render3DSettingsKey(SDL_SCANCODE_END,0);I_Render3DSettingsDraw(extra.data());capture("director-advanced.ppm",extra);
  selectDirectorPage(-1);choose("encounter_director_enabled");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);check(panel.draft.encounter.enabled&&!settings.encounter.enabled,"nested controls edit draft only");
  I_Render3DSettingsKey(SDL_SCANCODE_F10,0);check(!panel.open&&!settings.encounter.enabled,"F10 discards nested edits");
  I_Render3DSettingsMenu();selectTab(directorIndex());choose("encounter_director_enabled");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);I_Render3DSettingsKey(SDL_SCANCODE_F4,0);check(!panel.open&&settings.encounter.enabled&&applied==1,"F4 applies nested settings through existing handler");
- I_Render3DSettingsMenu();selectTab(directorIndex());selectDirectorPage(3);panel.draft.fov=100;
+ I_Render3DSettingsMenu();selectTab(directorIndex());selectDirectorPage(4);panel.draft.fov=100;
  for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option&&panel.lines[i].option->action==resetDirectorDraft){panel.selected=int(i);break;}
  I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);check(!panel.draft.encounter.enabled&&panel.draft.fov==100,"nested reset affects director draft only");
  I_Render3DSettingsKey(SDL_SCANCODE_F10,0);check(settings.encounter.enabled,"reset remains discardable");

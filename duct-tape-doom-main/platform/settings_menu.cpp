@@ -84,7 +84,7 @@ void groupDirectorPages(){
     panel.directorPages.clear();
     for(auto it=panel.tabs.begin();it!=panel.tabs.end();){
         bool child=!strcmp(it->title,"ED Monsters")||!strcmp(it->title,"ED Reinforcements")||
-            !strcmp(it->title,"ED Items")||!strcmp(it->title,"ED Advanced");
+            !strcmp(it->title,"ED Items")||!strcmp(it->title,"ED Advanced")||!strcmp(it->title,"ED Population");
         if(child){panel.directorPages.push_back(std::move(*it));it=panel.tabs.erase(it);}else ++it;
     }
     Option page{};page.kind=OptionKind::Choice;page.key="";page.title="Page";
@@ -183,9 +183,10 @@ int textWidth(const std::string &string) {
 }
 
 // Give long child names their natural width before sharing the spare space.
+const char* directorTabTitle(size_t index){const char* title=panel.directorPages[index].title;return !strncmp(title,"ED ",3)?title+3:title;}
 int directorTabEdge(int index){
     int total=0,before=0,count=(int)panel.directorPages.size();
-    for(int i=0;i<count;++i){int w=textWidth(panel.directorPages[(size_t)i].title)+12;total+=w;if(i<index)before+=w;}
+    for(int i=0;i<count;++i){int w=textWidth(directorTabTitle((size_t)i))+12;total+=w;if(i<index)before+=w;}
     int available=(rightColumn-leftColumn)*cellWidth;
     return leftColumn*cellWidth+(total<=available?before+(available-total)*index/count:available*index/count);
 }
@@ -589,7 +590,7 @@ void I_Render3DSettingsDraw(unsigned *pixels) {
             int x0=directorTabEdge((int)i),x1=directorTabEdge((int)i+1);
             bool active=(int)i==panel.directorPage;
             fill(x0,rowY(1),x1-x0-2,cellHeight,active?tabBar:0xff202020);
-            drawTextAt(clipped(panel.directorPages[i].title,x1-x0-8),x0+4,1,active?bright:description);
+            drawTextAt(clipped(directorTabTitle(i),x1-x0-8),x0+4,1,active?bright:description);
         }
     }else drawSeparator(1);
     for(int i=0;i<visibleLines&&panel.scroll+i<(int)panel.lines.size();++i) {

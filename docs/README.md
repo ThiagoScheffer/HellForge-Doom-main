@@ -11,6 +11,10 @@ statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
 
+- [Initial monster count/percentage budgets and explicit Compatibility/Performance staging](changes/INITIAL-MONSTER-POPULATION-BUDGET.md)
+
+- [Original monster streaming: historical first-revision limits](changes/ORIGINAL-MONSTER-STREAMING.md)
+
 - [F4: nested Encounter Director tabs and text-overlap fix](changes/F4-DIRECTOR-NESTED-TABS.md)
 
 - [Encounter Director: independent randomization, bounded reinforcements and item pools](changes/ENCOUNTER-DIRECTOR.md)

@@ -1,6 +1,6 @@
 ---
 build: "2026.11.15.6 (local native rebuild)"
-updated_utc: "2026-11-16T04:17:27.369707+00:00"
+updated_utc: "2026-11-16T05:27:02.923818+00:00"
 status: "implemented; focused navigation/painter checks passed"
 feature: "ENCOUNTER-DIRECTOR.md"
 tests: "../../duct-tape-doom-main/tests/settings_navigation.cpp"
@@ -9,10 +9,10 @@ index: "../README.md"
 
 # F4 Encounter Director tabs and text overlap
 
-F4 now shows one **ENCOUNTER DIRECTOR** sidebar entry. The four ED pages are
+F4 now shows one **ENCOUNTER DIRECTOR** sidebar entry. The five ED pages are
 inside it as clickable tabs: **ED Monsters**, **ED Reinforcements**, **ED Items**
-and **ED Advanced**. Their widths use the real font metrics so the standard Doom
-labels remain readable. Overview contains the master and three module switches.
+**ED Population** and **ED Advanced**. Their widths use the real font metrics so the standard Doom
+labels remain readable; the internal tab strip omits the repeated ED prefix. Overview contains the master and four module switches.
 
 - Left/Right on the **Page** selector selects Overview or a child page, using
   the existing keyboard/controller control path.
@@ -29,12 +29,13 @@ heading, avoiding a null selected-option dereference on the ED pages.
 
 Grouping is presentation-only in `platform/settings_menu.cpp`: the flat option
 registry remains intact, preserving configuration keys, defaults, import/export,
-settings persistence and gameplay behavior. No actor/director gameplay code changed.
+settings persistence and gameplay behavior. The original nesting fix changed no actor behavior; the subsequent
+[Population module](ORIGINAL-MONSTER-STREAMING.md) is an independent gameplay experiment.
 
 ## Focused verification
 
 `doom-settings-navigation-tests` drives the real F4 handlers and CPU painter with
-fonts loaded from the original Doom II IWAD. It verifies nesting, all four pages,
+fonts loaded from the original Doom II IWAD. It verifies nesting, all five pages,
 Q/E wrap, normal choice navigation, mouse tab switching, End, sidebar scrolling
 and clicks, F4 apply, F10 discard, and reset scope. Adding 25 synthetic categories
 leaves the entire description band pixel-identical, directly checking the overlap.

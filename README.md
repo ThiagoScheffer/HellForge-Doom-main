@@ -38,6 +38,8 @@ configuration, and verification notes.
 | **[Boom conveyor and switch fixes](docs/changes/ABANDON-PLATFORM-FIX.md)** | Restore affected voodoo conveyor releases and platform switch chains. | Preserves voodoo inertia and carries actors while their footprint still touches the conveyor. |
 | **[Safer WAD sight checks](docs/changes/SF2012-SIGHT-AND-DESTRUCTION-FIX.md)** | Avoid the identified SF2012 sight crash; keep wall destruction available. | Handles missing sectors on incorrectly flagged two-sided walls; normal launcher retains solid geometry. |
 
+**Optional population staging:** [Initial monster budgets](docs/changes/INITIAL-MONSTER-POPULATION-BUDGET.md) add count/percentage controls under F4 → Encounter Director → ED Population. Performance mode starts the supplied 4,317-monster WAD with 500 originals when requested, accepting visible absence/pop-in; Compatibility retains eager safety. No FPS benchmark is claimed.
+
 **Start with F4.** Human critical parts, enhanced weak points, weapon
 vulnerabilities, injuries, eye injuries, bleeding, feeding, frenzy, and death-save recovery
 are optional and default off. Damaging elemental burns, colored notifications and the Speedrun HUD also default off. New ambush sight reuse, sprite filtering and idle-search

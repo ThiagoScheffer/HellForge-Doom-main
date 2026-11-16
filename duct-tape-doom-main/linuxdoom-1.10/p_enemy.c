@@ -1,3 +1,4 @@
+#include "p_encounter.h"
 #include "../platform/monster_profile.h"
 #include "../platform/monster_wake_audit.h"
 #include "m_argv.h"
@@ -1393,6 +1394,7 @@ void A_VileChase (mobj_t* actor)
 		    corpsehit->flags = info->flags;
 		    P_WeakpointForget(corpsehit);
 		    corpsehit->health = info->spawnhealth;
+            ED_OriginalRevived(corpsehit);
 		    corpsehit->target = NULL;
 
 		    return;

@@ -241,6 +241,15 @@ void applySettings() {
     if(bakedAuthored>=0&&bakedAuthored!=settings.authored) {sunBaked=false;lightBakeKey=-1;bounceKey=-1;ambientKey=-1;flowKey=-1;}
     bakedAuthored=settings.authored;
 }
+// Map THINGS are loaded before I_InitGraphics. Read only persisted settings;
+// GPU/renderer initialization remains in sceneInit.
+static void earlyDirectorSettings(){
+ static bool loaded=false;if(loaded)return;loaded=true;
+ int arg=M_CheckParm((char*)"-graphics");if(arg&&arg+1<myargc)graphicsConfig=myargv[arg+1];
+ loadSettings();ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
+}
+struct DirectorStartupSettings {DirectorStartupSettings(){ED_StartupSettings=earlyDirectorSettings;}};
+static DirectorStartupSettings directorStartupSettings;
 void sceneInit(SDL_Window *window) {
     gameWindow=window;
     int config=M_CheckParm((char*)"-graphics");
