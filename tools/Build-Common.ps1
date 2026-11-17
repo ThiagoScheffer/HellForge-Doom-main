@@ -1,4 +1,44 @@
 # Shared discovery/build arguments; no downloads, installs or changes to PATH.
+function Get-HellforgeConfigureArguments([string]$SourceDirectory, [string]$BuildDirectory) {
+    $arguments = @('-S', $SourceDirectory, '-B', $BuildDirectory)
+    $cache = Join-Path $BuildDirectory 'CMakeCache.txt'
+    if (Test-Path -LiteralPath $cache) {
+        $expected = @{
+            CMAKE_HOME_DIRECTORY = [IO.Path]::GetFullPath($SourceDirectory).Replace('\', '/').TrimEnd('/')
+            CMAKE_CACHEFILE_DIR = [IO.Path]::GetFullPath($BuildDirectory).Replace('\', '/').TrimEnd('/')
+        }
+        foreach ($line in Get-Content -LiteralPath $cache) {
+            if ($line -match '^(CMAKE_HOME_DIRECTORY|CMAKE_CACHEFILE_DIR):INTERNAL=(.*)$') {
+                if ($matches[2].Replace('\', '/').TrimEnd('/') -ine $expected[$matches[1]]) {
+                    Write-Host 'Checkout path changed: backing up stale CMake metadata before configuring.'
+                    $suffix = '.moved-' + [guid]::NewGuid().ToString('N')
+                    foreach ($name in @('CMakeCache.txt', 'CMakeFiles')) {
+                        $metadata = Join-Path ([IO.Path]::GetFullPath($BuildDirectory)) $name
+                        if (Test-Path -LiteralPath $metadata) {
+                            Rename-Item -LiteralPath $metadata -NewName ($name + $suffix) -ErrorAction Stop
+                        }
+                    }
+                    break
+                }
+            }
+        }
+    }
+    # FetchContent also caches absolute paths in dependency build directories.
+    $dependencies = Join-Path $BuildDirectory '_deps'
+    if (Test-Path -LiteralPath $dependencies) {
+        foreach ($directory in Get-ChildItem -LiteralPath $dependencies -Directory) {
+            $dependencyCache = Join-Path $directory.FullName 'CMakeCache.txt'
+            if (Test-Path -LiteralPath $dependencyCache) {
+                $sourceEntry = Select-String -LiteralPath $dependencyCache -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$'
+                if ($sourceEntry) {
+                    $null = Get-HellforgeConfigureArguments $sourceEntry.Matches[0].Groups[1].Value $directory.FullName
+                }
+            }
+        }
+    }
+    return $arguments
+}
+
 function Get-HellforgeNativeBuildArguments([string]$BuildDirectory, [switch]$ForceRebuild) {
     $arguments = @('--build', $BuildDirectory, '--config', 'Release', '--parallel', '8')
     if ($ForceRebuild) { $arguments += '--clean-first' }

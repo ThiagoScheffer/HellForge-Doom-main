@@ -846,18 +846,57 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // The quad for one view: that view's frame, facing along its right.
         auto emit = [&](std::map<int, std::vector<Vertex>> &out, unsigned seen, float rx, float ry, bool collar)
         {
-            if (!death.ragdoll && drawVoxel(out, *thing, death.sprite, death.frame, death.facing, x, y, z, light, baked, packedStatics, tint, camera))
+            if (!death.ragdoll && drawVoxel(out, *thing, death.sprite, death.frame, death.facing, x, y, z, light, baked, packedStatics, tint, camera)) {
+                // Voxel substitution bypasses the sprite-texture path entirely.
+                // Report it explicitly instead of falsely diagnosing missing age data.
+                if(M_CheckParm((char*)"-decaydebug")) {
+                    const int voxelDecayStage=corpseDecayStage(thing);
+                    static int lastVoxelDiagnostic=-1;
+                    if(voxelDecayStage && (lastVoxelDiagnostic<0||leveltime-lastVoxelDiagnostic>=10*TICRATE)) {
+                        lastVoxelDiagnostic=leveltime;
+                        std::fprintf(stderr,"HELLFORGE DECAY: VOXEL-SKIP actor=%d stage=%d (sprite recolor not supported on voxel models)\n",
+                                     int(thing->type),voxelDecayStage);
+                    }
+                }
                 return;
+            }
             int lump = firstspritelump + sf.lump[seen], spriteKey = -1 - lump;
             int bloodTint = thing->type == MT_BLOOD ? (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT : 0;
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
             Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
             // Keep the unmodified art authoritative for silhouette, pose, wound attachment
             // and hole-mask matching; only the sampled GPU texture changes with health.
-            Image &image = (!self && !death.ragdoll && settings.monsterSkinDamage && thing->health>0 && thing->info &&
-                            !P_CombatCharred(thing) && !thing->player)
+            Image &skinImage = (!self && !death.ragdoll && settings.monsterSkinDamage && thing->health>0 && thing->info &&
+                                !P_CombatCharred(thing) && !thing->player)
                 ? monsterSkinImage(thing->type,lump,baseImage,thing->health,thing->info->spawnhealth,spriteKey)
                 : baseImage;
+            // The age tracker alone decides whether the actor is a terminal
+            // ordinary corpse. A death presenter may retain a fall pose or a
+            // different frame well after the actor reaches its last death state;
+            // do not suppress decomposition merely for those cosmetic details.
+            // Still exclude ragdoll cards, charred actors and foreign sprite
+            // families, and keep original art for wounds and silhouette tests.
+            const int readyDecayStage = !self && !thing->player && !P_CombatCharred(thing)
+                ? corpseDecayStage(thing) : 0;
+            const int decayStage = readyDecayStage && !death.ragdoll && death.sprite==thing->sprite
+                ? readyDecayStage : 0;
+            const int decayFamily=(thing->type==MT_TROOP)?1:
+                (thing->type==MT_SERGEANT)?2:
+                (thing->type==MT_FATSO||thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?3:
+                (thing->type==MT_HEAD)?4:0;
+            Image &image=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) : skinImage;
+            // A traceable renderer hand-off is essential: isolated rule tests
+            // cannot prove that the real game selects the new GPU texture.
+            if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {
+                static int lastRenderDiagnostic=-1;
+                if(lastRenderDiagnostic<0||leveltime-lastRenderDiagnostic>=10*TICRATE) {
+                    lastRenderDiagnostic=leveltime;
+                    std::fprintf(stderr,"HELLFORGE DECAY: RENDER actor=%d stage=%d applied=%d actorSprite=%d drawnSprite=%d actorFrame=%d drawnFrame=%d fall=%d ragdoll=%d textureKey=%d\n",
+                                 int(thing->type),readyDecayStage,int(decayStage!=0),
+                                 int(thing->sprite),int(death.sprite),int(thing->frame&FF_FRAMEMASK),
+                                 int(death.frame&FF_FRAMEMASK),int(death.fall.active),int(death.ragdoll!=nullptr),spriteKey);
+                }
+            }
             float left = -(float)image.left, right = left + image.width, top = z + image.top, bottom = top - image.height;
             // The living monster floor-fit below already corrects any art overhang.
             // Do not apply floorOverhang() again to the same sprite.

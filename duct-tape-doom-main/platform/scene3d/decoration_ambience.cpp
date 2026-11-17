@@ -5,6 +5,7 @@
    Future decoration effects should extend BodyKind and the two renderers below. */
 #include "internal.h"
 #include "../decoration_ambience_rules.h"
+#include "../corpse_decomposition.h"
 #include <cstdint>
 #include <unordered_set>
 
@@ -113,6 +114,10 @@ void scan(const Uniforms &camera) {
         for(const mobj_t *thing=sectors[sector].thinglist;thing;thing=thing->snext) {
             BodyKind kind=bodyKind(*thing);
             if(kind==BodyKind::None)continue;
+            // Only *selected* aging corpses lose scavengers from Stage 2.
+            // The live sector iteration owns the actor; never dereference a
+            // pointer cached in known/selected to determine its decay stage.
+            if(kind==BodyKind::Corpse && corpseDecayStage(thing)>=2)continue;
             const float x=units(thing->x),y=units(thing->y);
             float dx=x-camera.eye[0],dy=y-camera.eye[1];
             if(dx*dx+dy*dy>track2)continue;
@@ -149,6 +154,120 @@ bool crittersReady(const Emitter &e,int preset) {
     return selected && leveltime-e.firstTic>=doom_decor::wormDelayTics(e.seed,preset,TICRATE);
 }
 } // namespace
+
+// Separate map-wide cosmetic age registry: unlike local fly emitters, its
+// timestamps do not reset when the player moves more than 768 units away.
+// Contains no owned mobj pointers: keys are compared, never dereferenced.
+namespace {
+struct DecayRecord { int firstSeen=0,type=-1; };
+std::unordered_map<const mobj_t*,DecayRecord> decayBodies;
+unsigned decayLevel=~0u;
+int lastDecayScan=-1;
+int lastDecayDiagnostic=-1;
+// Optional command-line diagnostics. -decaytest also selects all eligible
+// small corpses, only for a reproducible visual test; the default stays 40%.
+bool decayDiagnostics() {return M_CheckParm((char*)"-decaydebug")!=0;}
+bool decayTestAll() {return M_CheckParm((char*)"-decaytest")!=0;}
+
+// Only normal, terminal death frames of common small monsters. Excludes
+// x-deaths, transient death animations, decorations, and boss-sized actors.
+bool normalDecayCorpse(const mobj_t &thing) {
+    if(thing.player||thing.health>0||!thing.info||!thing.state||
+       !(thing.flags&MF_CORPSE)||!(thing.info->flags&MF_COUNTKILL))return false;
+    switch(thing.type) {
+    case MT_POSSESSED:return thing.state==&states[S_POSS_DIE5];
+    case MT_SHOTGUY:return thing.state==&states[S_SPOS_DIE5];
+    case MT_TROOP:return thing.state==&states[S_TROO_DIE5];
+    case MT_SERGEANT:return thing.state==&states[S_SARG_DIE6];
+    // Additional organic corpses: only the actual terminal stock death state.
+    // Never recolor transitional frames, gib deaths or non-stock actor types.
+    case MT_FATSO:return thing.state==&states[S_FATT_DIE10];
+    case MT_HEAD:return thing.state==&states[S_HEAD_DIE6];
+    case MT_KNIGHT:return thing.state==&states[S_BOS2_DIE7];
+    case MT_BRUISER:return thing.state==&states[S_BOSS_DIE7];
+    default:return false;
+    }
+}
+} // namespace
+
+void corpseDecayReset() {
+    decayBodies.clear();decayLevel=~0u;lastDecayScan=-1;lastDecayDiagnostic=-1;
+}
+
+void corpseDecayTick() {
+    if(decayLevel!=r_levelserial){corpseDecayReset();decayLevel=r_levelserial;}
+    if(!settings.corpseDecomposition||!settings.accelerated||
+       totalkills>=int(doom_decay::monsterLimit)) {
+        if(!decayBodies.empty())decayBodies.clear();
+        if(decayDiagnostics() && (lastDecayDiagnostic<0||leveltime-lastDecayDiagnostic>=10*TICRATE)) {
+            lastDecayDiagnostic=leveltime;
+            std::fprintf(stderr,"HELLFORGE DECAY: INACTIVE enabled=%d accelerated=%d monsters=%d (limit=%u)\n",
+                         settings.corpseDecomposition,settings.accelerated,totalkills,doom_decay::monsterLimit);
+        }
+        return;
+    }
+    if(lastDecayScan>=0&&leveltime>=lastDecayScan&&leveltime-lastDecayScan<TICRATE)return;
+    lastDecayScan=leveltime;
+    std::unordered_set<const mobj_t*> current;
+    current.reserve(decayBodies.size()+16);
+    unsigned eligible=0,selectedCount=0;
+    for(int s=0;s<numsectors;++s)for(const mobj_t *thing=sectors[s].thinglist;thing;thing=thing->snext) {
+        if(!normalDecayCorpse(*thing))continue;
+        ++eligible;
+        // Normal: same deterministic 40% selection as flies. -decaytest
+        // temporarily selects all eligible bodies to make tests reproducible.
+        auto found=decayBodies.find(thing);
+        if(found==decayBodies.end()&&!decayTestAll()&&!doom_decor::flies(thingSeed(*thing)))continue;
+        ++selectedCount;
+        current.insert(thing);
+        if(found==decayBodies.end()) {
+            if(decayBodies.size()>=doom_decay::trackedLimit)continue;
+            decayBodies.emplace(thing,DecayRecord{leveltime,thing->type});
+        } else if(found->second.type!=thing->type) {
+            found->second={leveltime,thing->type};
+        }
+    }
+    for(auto it=decayBodies.begin();it!=decayBodies.end();) {
+        if(!current.count(it->first))it=decayBodies.erase(it);
+        else ++it;
+    }
+    if(decayDiagnostics() && (lastDecayDiagnostic<0||leveltime-lastDecayDiagnostic>=10*TICRATE)) {
+        lastDecayDiagnostic=leveltime;
+        unsigned ready=0;
+        int oldest=0;
+        const int delay=settings.corpseDecayDelay;
+        const int min=(delay==2||delay==5||delay==8||delay==10)?delay:5;
+        for(const auto &pair:decayBodies) {
+            const int age=leveltime-pair.second.firstSeen;
+            oldest=std::max(oldest,age);
+            if(age>=min*60*TICRATE)++ready;
+        }
+        std::fprintf(stderr,"HELLFORGE DECAY: TRACK enabled=1 delay=%d min monsters=%d eligible=%u selected=%u tracked=%zu ready=%u oldest=%.1f sec testall=%d\n",
+                     min,totalkills,eligible,selectedCount,decayBodies.size(),ready,
+                     double(oldest)/TICRATE,int(decayTestAll()));
+    }
+}
+
+int corpseDecayStage(const mobj_t *thing) {
+    if(!thing||!settings.corpseDecomposition||!settings.accelerated||
+       totalkills>=int(doom_decay::monsterLimit)||!normalDecayCorpse(*thing)||
+       decayLevel!=r_levelserial)return 0;
+    auto it=decayBodies.find(thing);
+    if(it==decayBodies.end()||it->second.type!=thing->type)return 0;
+    // Compute the same thresholds locally so this translation unit does not
+    // depend on a doom_decay::stage declaration in the installed helper header.
+    // Keep the four presets and +45/+120-second stages aligned with the rules.
+    const int ageTics=leveltime-it->second.firstSeen;
+    if(ageTics<0)return 0;
+    const int configured=settings.corpseDecayDelay;
+    const int minutes=(configured==2||configured==5||configured==8||configured==10)?configured:5;
+    const std::int64_t age=ageTics;
+    const std::int64_t start=std::int64_t(minutes)*60*TICRATE;
+    if(age<start)return 0;
+    if(age<start+std::int64_t(45)*TICRATE)return 1;
+    if(age<start+std::int64_t(120)*TICRATE)return 2;
+    return 3;
+}
 
 void decorationAmbienceReset() {
     known.clear();selected.clear();lastScan=-1;currentLevel=~0u;
@@ -188,6 +307,9 @@ void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera) {
     auto found=known.find(thing);if(found==known.end())return;
     const Emitter &e=found->second;
     if(bodyKind(*thing)!=e.kind||!settled(*thing,e.kind))return;
+    // Stage 2 is already dry enough to stop sustaining flies, worms and the
+    // exotic corpse critters. No gameplay entities or GPU resources are spawned.
+    if(e.kind==BodyKind::Corpse && corpseDecayStage(thing)>=2)return;
     bool fly=fliesReady(e,settings.decorationDelay);
     bool worm=settings.decorationInsects>=2&&crittersReady(e,settings.decorationDelay);
     if(!fly&&!worm)return;

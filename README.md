@@ -369,6 +369,12 @@ file alone does not prove its changes are present in a running binary.
 
 ## Source and credits
 
+HELLFORGE is based on Tuin-Doom-Enhanced, which incorporates Duct-Tape DOOM /
+DERP engine and renderer contributions. Attribution for those contributions:
+
+- DERP, the DOOM Engine Remaster Project — https://github.com/robongrui/derp
+- Duct-Tape DOOM — https://github.com/robongrui/duct-tape-doom
+
 - [DERP / original engine project](https://github.com/robongrui/derp)
 - [Tuin-Doom-Enhanced source fork](https://github.com/tuin-boop/Tuin-Doom-Enhanced)
 - DOOM source by id Software; original notices are retained.
@@ -378,6 +384,17 @@ file alone does not prove its changes are present in a running binary.
 
 See [LICENSE](LICENSE), [licenses/NOTICE.txt](licenses/NOTICE.txt), and
 [licenses/THIRD_PARTY.md](licenses/THIRD_PARTY.md).
+
+The DERP notice is preserved in
+[duct-tape-doom-main/NOTICE.txt](duct-tape-doom-main/NOTICE.txt); the earlier
+Duct-Tape DOOM notice is preserved in `licenses/NOTICE.txt`. These attribution
+terms cover their respective upstream contributions. Other components retain
+their own licenses, and HELLFORGE retains its own project name.
+
+Launcher builds copy the license texts and both attribution notices into a
+`licenses` directory beside the executable. Distribute that directory with
+the executable, and provide the corresponding source for the exact build
+under GPLv3. Distributing the executable alone omits these accompanying files.
 
 ## Project status
 

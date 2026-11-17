@@ -137,6 +137,7 @@ static void beforeTic() {
     watchWeather();
     watchWear();
     watchShotLights();
+    corpseDecayTick(); // Map-wide, once-per-second corpse ageing; no camera dependency.
 }
 static void acceleratedView(player_t *player) {
     (void)player; worldPending=true; v_overlayactive=true;
@@ -295,7 +296,7 @@ void sceneShutdown() {
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
     rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
-    weatherShutdown();wearShutdown();decorationAmbienceReset();
+    weatherShutdown();wearShutdown();decorationAmbienceReset();corpseDecayReset();
 }
 // A new level, or the first after shutdown: each part forgets the last
 // level, then the map and what is built from it at level load.
@@ -309,8 +310,10 @@ static void startLevel() {
     // Active textures are uploaded lazily by the new map's preparation.
     glassLightShutdown(); // Drops Image pointers before their owners are reclaimed.
     bodyMotionShutdown(); // Includes wound/classification caches keyed by Image*.
-    decorationAmbienceReset(); // Drop all cosmetic emitters and timed corpse tracking.
+    decorationAmbienceReset(); // Drop all local cosmetic fly/worm emitters.
+    corpseDecayReset(); // Discard corpse ages on level changes and save reloads.
     monsterSkinReset(); // Variant counts and rejected-art identities are map-local.
+    corpseDecayImageReset(); // Reset the 8 MiB dry texture budget.
     bakeMap={};
     images.clear();
     oldThings.clear();oldHeights.clear();tickTime=0;

@@ -39,6 +39,7 @@ const char *effectCost(const char *key) {
         {"shore_ripples","HIGH COST: many shoreline particles. Off by default."},
         {"immersive_sky","GPU COST: adds cloud texture fetches and procedural horizon shading for sky pixels."},
         {"decoration_ambience","BOUNDED COST: only maps with fewer than 200 spawned monsters; 12 bodies, 48 flies and 24 worms maximum."},
+        {"corpse_decomposition","BOUNDED COST: under 200 map monsters, at most 199 corpse timestamps and 8 MiB cached visual variants."},
         {"reflections","HIGH GPU COST: renders the reflected scene again."},
         {"glass_reflections","HIGH GPU COST: another reflected scene when visible."},
         {"msaa","GPU COST rises with sample count and resolution."},
@@ -437,7 +438,16 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     {"Short","Normal","Long"},{0,1,2},
                     "Random delay after monster death (or from level start for placed decorations): "
                     "Normal is 15-30 seconds for flies and 30-60 for worms.",
-                    [](const Settings &d){return d.decorationAmbience!=0&&d.decorationInsects!=0;})}},
+                    [](const Settings &d){return d.decorationAmbience!=0&&d.decorationInsects!=0;}),
+                check("corpse_decomposition","Corpse decomposition",&s.corpseDecomposition,
+                    "A portion of ordinary Zombieman, Shotgun Guy, Chaingunner, Imp, Pinky and Spectre corpses gradually dry. "
+                    "Independent of insects. No bosses, gibs or hanging decorations. Disabled at 200+ monsters. Cosmetic only.",
+                    [](const Settings &d){return d.accelerated!=0;}),
+                choice("corpse_decay_delay","Decomposition begins after",&s.corpseDecayDelay,
+                    {"2 minutes","5 minutes","8 minutes","10 minutes"},{2,5,8,10},
+                    "Gameplay minutes after the corpse is first detected (scanned across the map). "
+                    "Further drying stages appear after 45 and 120 seconds. Reset on save reload or level change.",
+                    [](const Settings &d){return d.accelerated&&d.corpseDecomposition!=0;})}},
             {"Authored episodes",{
                 check("authored_episodes","Authored episodes",&s.authored,
                     "Looks picked by hand for the game's own episodes, beyond what DERP derives from the WAD: Knee-Deep in the Dead "

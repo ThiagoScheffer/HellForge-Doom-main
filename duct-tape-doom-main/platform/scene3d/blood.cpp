@@ -56,17 +56,14 @@ static byte bloodIndex(float shade) {
     const auto &shades=bloodPalette();
     return shades[std::clamp((int)std::lround(std::clamp(shade,0.0f,1.0f)*(shades.size()-1)),0,(int)shades.size()-1)];
 }
-// Derive the same blood shades/tints used by ordinary blood decals, without
-// enabling floor splats or mutating the global bloodSourceTint.
-// This is used for monster skins, which are tinted by type and shade.
+// Match the existing blood decals: normal monsters use the WAD's blood
+// shades, Cacodemons use blue blood, and Baron/Hell Knight use green.
+// The progressive skin-damage painter needs a palette INDEX, not RGB.
 byte monsterSkinBloodIndex(int type,float shade) {
-    const auto &colors=bloodPalette();
-    if(colors.empty())return 0;
-    int tint=(type==MT_BRUISER||type==MT_KNIGHT)?2:(type==MT_HEAD?1:0);
-    size_t n=(size_t)std::lround(std::clamp(shade,0.0f,1.0f)*(colors.size()-1));
-    return bloodTintIndex(colors[n],tint);
+    if(bloodPalette().empty())return 0;
+    const int tint=type==MT_HEAD?1:(type==MT_BRUISER||type==MT_KNIGHT)?2:0;
+    return bloodTintIndex(bloodIndex(shade),tint);
 }
-
 std::array<float,3> bloodColor(float shade) {
     if(bloodPalette().empty())return {0.5f,0,0};
     const byte *rgb=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE)+bloodTintIndex(bloodIndex(shade),bloodSourceTint)*3;
@@ -155,7 +152,7 @@ static int variantOf(int kind) {
 }
 struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling; };
 struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; };
-struct BloodPool { float x,y,born,size,angle;int sector,tint; };
+struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
 static std::unordered_map<const mobj_t*,bool> pooledCorpses;
 static unsigned bloodLevelSerial;
@@ -284,16 +281,35 @@ void buildBlood(const Uniforms &camera) {
     float now=gameSeconds();
     // Pools: corpses that came to rest, once each, sized to the body.
     for(auto &entry:pooledCorpses)entry.second=false;
+    // Only remove the pool actually created for the same live corpse.
+    // Other blood impacts/splats and neighboring corpse pools stay intact.
+    // Keys in BloodPool are identities only: never dereference cached pointers.
+    std::unordered_map<const mobj_t*,std::array<float,2>> driedOwners;
     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
         if(!(thing->flags&MF_CORPSE)||(thing->flags&MF_NOBLOOD))continue;
+        if(corpseDecayStage(thing)>=2) {
+            // Preserve an existing no-recreate marker without allocating an
+            // entry for corpses that never had a blood pool in the first place.
+            auto pooled=pooledCorpses.find(thing);
+            if(pooled!=pooledCorpses.end())pooled->second=true;
+            driedOwners.emplace(thing,std::array<float,2>{units(thing->x),units(thing->y)});
+            continue;
+        }
         auto seen=pooledCorpses.find(thing);
         if(seen!=pooledCorpses.end()) {seen->second=true;continue;}
         if(thing->z>thing->floorz||thing->momx||thing->momy||sectors[i].floorpic==skyflatnum)continue;
         pooledCorpses[thing]=true;
         if(bloodPools.size()>=64)bloodPools.erase(bloodPools.begin());
-        bloodPools.push_back({units(thing->x),units(thing->y),now,std::clamp(units(thing->radius)*2.4f,28.0f,64.0f),randomRange(0,2*doomPi),i,monsterBloodTint(thing)});
+        bloodPools.push_back({units(thing->x),units(thing->y),now,std::clamp(units(thing->radius)*2.4f,28.0f,64.0f),randomRange(0,2*doomPi),i,monsterBloodTint(thing),thing});
     }
     for(auto it=pooledCorpses.begin();it!=pooledCorpses.end();) it=it->second?std::next(it):pooledCorpses.erase(it);
+    // Free CPU pool records and skip their per-frame geometry. Compare owner
+    // identity AND original pool location to avoid mismatching nearby corpses.
+    bloodPools.erase(std::remove_if(bloodPools.begin(),bloodPools.end(),[&](const BloodPool &pool) {
+        auto it=driedOwners.find(pool.owner);
+        return it!=driedOwners.end() &&
+               std::abs(it->second[0]-pool.x)<0.01f && std::abs(it->second[1]-pool.y)<0.01f;
+    }),bloodPools.end());
     for(const auto &pool:bloodPools) {
         float age=now-pool.born;
         // The pool spreads over four seconds in eight steps.

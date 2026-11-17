@@ -1,5 +1,27 @@
 # Third-party code and data
 
+## HELLFORGE lineage and accompanying notices
+
+HELLFORGE is based on [Tuin-Doom-Enhanced](https://github.com/tuin-boop/Tuin-Doom-Enhanced),
+which incorporates Duct-Tape DOOM / DERP engine and renderer contributions.
+Preserve both upstream attribution lines:
+
+- DERP, the DOOM Engine Remaster Project — https://github.com/robongrui/derp
+- Duct-Tape DOOM — https://github.com/robongrui/duct-tape-doom
+
+The original Duct-Tape DOOM notice remains in `NOTICE.txt`. The DERP notice
+remains in `duct-tape-doom-main/NOTICE.txt` in source checkouts and is copied
+to `DERP-NOTICE.txt` beside this file in launcher release packages. The GPLv3
+text is supplied as `LICENSE.TXT` in that same release directory, and as
+`LICENSE` at the source repository root. These attribution terms apply to
+the respective upstream contributions; other components keep their licenses.
+
+The following upstream inventory is retained for provenance; its download
+and packaging descriptions refer to the upstream project. HELLFORGE vendors
+dependencies in `dependencies/` and `duct-tape-doom-main/third_party/`.
+
+## Upstream inventory
+
 Duct-Tape DOOM is licensed under the GNU General Public License, version 3
 ([`LICENSE.TXT`](LICENSE.TXT)), with the attribution term in
 [`NOTICE.txt`](NOTICE.txt). This file lists everything in the game that

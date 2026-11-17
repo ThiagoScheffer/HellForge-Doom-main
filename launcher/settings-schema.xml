@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="e67457a805e843f452925e5a4a87055fbb4d4d01b32945a0cc71b36bec395596">
+<settings source="platform/settings_panel.cpp" source_sha256="5f972a51b3f4aa7023a8174dd64b4d50111f5cb3ee9a1a8bfdc2b7e7f549fc40">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -161,6 +161,8 @@
   <option key="decoration_ambience" title="Decoration immersion" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="decoration_insects" title="Corpse insects" category="Atmosphere" kind="choice" choices="0=Off|1=Flies|2=Flies and worms" />
   <option key="decoration_delay" title="Decay delay" category="Atmosphere" kind="choice" choices="0=Short|1=Normal|2=Long" />
+  <option key="corpse_decomposition" title="Corpse decomposition" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="corpse_decay_delay" title="Decomposition begins after" category="Atmosphere" kind="choice" choices="2=2 minutes|5=5 minutes|8=8 minutes|10=10 minutes" />
   <option key="authored_episodes" title="Authored episodes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
   <option key="worn_plates" title="Worn plates" category="Atmosphere" kind="check" choices="0=Off|1=On" />

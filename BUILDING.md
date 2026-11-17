@@ -2,6 +2,14 @@
 
 Install Visual Studio 2022 C++ Build Tools with CMake support and the Windows SDK. The launcher uses the .NET Framework C# compiler included with Windows.
 
+Install Python 3.9+ with `python` or `py` available on PATH. Every launcher
+build, including `-LauncherOnly`, regenerates `launcher/settings-schema.xml`
+from the native F4 settings and weak-point declarations before embedding it.
+Generation failures stop the build. Full native builds also refresh the
+`platform/settings_panel.cpp` timestamp to force its compilation during
+incremental rebuilds. Launcher-only builds update the catalogue but retain
+the existing engine; use a full build to apply native F4 code changes.
+
 ## One-click Windows builds
 
 Close the game and launcher, then double-click a batch file in the repository root:

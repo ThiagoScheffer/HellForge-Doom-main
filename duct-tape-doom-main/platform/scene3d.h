@@ -141,6 +141,8 @@ struct Settings {
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.
     int decorationDelay=1; // 0 Short, 1 Normal, 2 Long.
+    int corpseDecomposition=0; // Independent cosmetic corpse drying; off by default.
+    int corpseDecayDelay=5; // Minutes until drying begins: 2, 5, 8 or 10.
     int wornPlates=1; // Plain metal plates (Game_WornPlate) show years of use: grime in the seams, dull blotches, scuffs near the floor.
     int windowStreaks=1; // Dark rain runs down the outside walls below windows, rusty on metal; inside too once rain blows through a broken one.
     int playerShadow=1; // The player's own sprite shadow from the sun or a strong light.

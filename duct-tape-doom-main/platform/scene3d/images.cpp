@@ -4,6 +4,7 @@
 #include "../monster_regions.h"
 #include "../monster_skin_damage.h"
 #include "../monster_skin_regions.h"
+#include "../corpse_decomposition.h"
 
 namespace doom3d {
 std::vector<unsigned> paletteLUTColors(const unsigned *palette) {
@@ -616,5 +617,55 @@ Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHeal
     return inserted.first->second;
 }
 
-void imagesShutdown() {monsterSkinReset();images.clear();cloudTexture=nullptr;}
+namespace {
+std::size_t decayTextureBytes=0;
+std::unordered_set<int> rejectedDecayTextures;
+}
+void corpseDecayImageReset() {decayTextureBytes=0;rejectedDecayTextures.clear();}
+
+// Each stage is a shared image, never an allocation per corpse. Work on the
+// WAD's currently loaded pixels and PLAYPAL, leaving transparency unchanged.
+Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
+    if(stage<1||stage>3||lump<0||lump>20000000||family<0||family>4)return source;
+    // Distinct image keys for five palette families and three stages.
+    // 18 slots per lump prevent cross-family cache aliasing.
+    const int variantKey=-1200000000-18*lump-3*family-stage;
+    // The lump bound above also keeps this negative key inside signed int.
+    if(rejectedDecayTextures.count(variantKey))return source;
+    auto found=images.find(variantKey);
+    if(found!=images.end()){key=variantKey;return found->second;}
+    if(source.width<1||source.height<1||source.width>256||source.height>256||
+       source.pixels.size()!=std::size_t(source.width)*source.height*2) {
+        if(rejectedDecayTextures.insert(variantKey).second && M_CheckParm((char*)"-decaydebug"))
+            std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE-SKIP lump=%d stage=%d dimensions=%dx%d (unsupported sprite)\n",
+                         lump,stage,source.width,source.height);
+        return source;
+    }
+    const std::size_t bytes=std::size_t(source.width)*source.height*6u;
+    if(bytes>doom_decay::textureBudget-decayTextureBytes) {
+        if(rejectedDecayTextures.insert(variantKey).second && M_CheckParm((char*)"-decaydebug"))
+            std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE-SKIP lump=%d stage=%d need=%zu remaining=%zu (budget exceeded)\n",
+                         lump,stage,bytes,doom_decay::textureBudget-decayTextureBytes);
+        return source;
+    }
+    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    std::vector<byte> pixels;
+    if(!doom_decay::paint(pixels,source.pixels,source.width,source.height,palette,stage,family,
+                          doom_decay::mix32(unsigned(lump)*0x79b97f4au))) {
+        rejectedDecayTextures.insert(variantKey);return source;
+    }
+    auto normals=spriteNormals(source.width,source.height,source.pixels.data());
+    Image variant=upload(source.width,source.height,pixels.data(),source.left,source.top,
+                         nullptr,normals.data());
+    variant.glow=source.glow;variant.glowWeight=source.glowWeight;variant.glowHeight=source.glowHeight;
+    auto added=images.emplace(variantKey,std::move(variant));
+    if(!added.second)return source;
+    decayTextureBytes+=bytes;
+    if(M_CheckParm((char*)"-decaydebug"))
+        std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE built lump=%d stage=%d family=%d dimensions=%dx%d bytes=%zu used=%zu key=%d\n",
+                     lump,stage,family,source.width,source.height,bytes,decayTextureBytes,variantKey);
+    key=variantKey;return added.first->second;
+}
+
+void imagesShutdown() {monsterSkinReset();corpseDecayImageReset();images.clear();cloudTexture=nullptr;}
 } // namespace doom3d
