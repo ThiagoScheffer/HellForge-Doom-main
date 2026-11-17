@@ -851,7 +851,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             int lump = firstspritelump + sf.lump[seen], spriteKey = -1 - lump;
             int bloodTint = thing->type == MT_BLOOD ? (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT : 0;
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
-            Image &image = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
+            Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
+            // Keep the unmodified art authoritative for silhouette, pose, wound attachment
+            // and hole-mask matching; only the sampled GPU texture changes with health.
+            Image &image = (!self && !death.ragdoll && settings.monsterSkinDamage && thing->health>0 && thing->info &&
+                            !P_CombatCharred(thing) && !thing->player)
+                ? monsterSkinImage(thing->type,lump,baseImage,thing->health,thing->info->spawnhealth,spriteKey)
+                : baseImage;
             float left = -(float)image.left, right = left + image.width, top = z + image.top, bottom = top - image.height;
             // The living monster floor-fit below already corrects any art overhang.
             // Do not apply floorOverhang() again to the same sprite.
@@ -886,10 +892,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             auto &vertices = out[spriteKey];
             size_t first = vertices.size();
             if (collar && !self)
-                woundView(thing, players[displayplayer].mo, image, flipped(seen), x, y, fittedFeet - sink, top, bottom, rx, ry, posed ? &pose : nullptr, (int)seen);
+                woundView(thing, players[displayplayer].mo, baseImage, flipped(seen), x, y, fittedFeet - sink, top, bottom, rx, ry, posed ? &pose : nullptr, (int)seen);
             // Wound holes (wounds.cpp): texels shot through, and their rims.
             std::vector<byte> holes;
-            bool wounded = !self && woundMask(*thing, image, flipped(seen), rx, ry, holes);
+            bool wounded = !self && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
             const std::vector<byte> *cut = wounded ? &holes : nullptr;
             auto finish = [&](std::vector<Vertex> &batch, size_t from)
             {
@@ -1139,12 +1145,17 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     memcmp(&serial.shadows, &item.shadows, sizeof(ShadowLights)))
                     I_Error((char *)"Parallel sprite lighting differs from serial lighting");
             }
+        decorationAmbienceBegin(camera);
         for (const auto &item : lightingJobs)
         {
             if (item.culled)
                 filteredWoundView(item, camera);
             else
+            {
                 addThing(item.thing, item.sector, camera, fraction, beam, casters, item.mirrored ? &mirror : nullptr, item);
+                if (!item.mirrored)
+                    decorationAmbienceThing(item.thing, camera);
+            }
         }
         // addThing queues enhanced monster shots; draw them only after the
         // actor pass, and after buildImpacts has cleared the FX batches.

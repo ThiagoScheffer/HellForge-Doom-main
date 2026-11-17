@@ -1,6 +1,9 @@
 /* Textures from the WAD: upload with palette mips (sprites with their normals), bump
    relief, emissive masks and monitor glass; average and brightest colors. */
 #include "internal.h"
+#include "../monster_regions.h"
+#include "../monster_skin_damage.h"
+#include "../monster_skin_regions.h"
 
 namespace doom3d {
 std::vector<unsigned> paletteLUTColors(const unsigned *palette) {
@@ -518,5 +521,100 @@ int translucentWallImage(int index) {
         source.emission.empty()?nullptr:source.emission.data(),nullptr,nullptr,true);
     images.emplace(key,std::move(result));return key;
 }
-void imagesShutdown() {images.clear();cloudTexture=nullptr;}
+namespace {
+constexpr size_t maxSkinPixelsBytes=32u*1024u*1024u;
+size_t skinPixelsBytes=0;
+std::unordered_map<int,bool> stockSkinArtwork;
+std::unordered_set<int> rejectedSkinVariants;
+}
+void monsterSkinReset() {skinPixelsBytes=0;stockSkinArtwork.clear();rejectedSkinVariants.clear();}
+
+// Three reusable tiers, cached per stock sprite LUMP and health band; never
+// per-monster textures. Uses original frame identity/regions; reject custom art.
+Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHealth,int &key) {
+    if(health<=0||spawnHealth<=0||health>=spawnHealth||lump<0||lump>20000000)return source;
+    // Preserve Prototype 1 exactly for the original four monster types.
+    // New types are enabled only on verified stock artwork.
+    doom_skin_regions::Kind added=doom_skin_regions::Kind::None;
+    switch(type) {
+    case MT_FATSO:added=doom_skin_regions::Kind::Mancubus;break;
+    case MT_VILE:added=doom_skin_regions::Kind::Archvile;break;
+    case MT_CYBORG:added=doom_skin_regions::Kind::Cyberdemon;break;
+    case MT_HEAD:added=doom_skin_regions::Kind::Cacodemon;break;
+    case MT_KNIGHT:added=doom_skin_regions::Kind::HellKnight;break;
+    case MT_POSSESSED:added=doom_skin_regions::Kind::Zombieman;break;
+    default:break;
+    }
+    const bool legacy=type==MT_TROOP||type==MT_BRUISER||type==MT_SERGEANT||type==MT_SHADOWS;
+    if(!legacy && added==doom_skin_regions::Kind::None)return source;
+    // Preserve pristine artwork above 75% health; stages 1/2/3 are
+    // 51-75%, 26-50%, and 1-25% respectively.
+    if((int64_t)health*4>(int64_t)spawnHealth*3)return source;
+    int tier=(int64_t)health*2>spawnHealth?1:(int64_t)health*4>spawnHealth?2:3;
+    // Keys do not intersect original WAD image keys or existing blood/charred art.
+    int variantKey=-800000000-4*lump-tier;
+    if(rejectedSkinVariants.count(variantKey))return source;
+    auto found=images.find(variantKey);
+    if(found!=images.end()) {key=variantKey;return found->second;}
+    if(source.width<8||source.height<8||source.pixels.empty()||
+       size_t(source.width)*source.height>maxSkinPixelsBytes/6)return source;
+    auto known=stockSkinArtwork.find(lump);
+    if(known!=stockSkinArtwork.end()&&!known->second)return source;
+    // Fingerprint-verified stock artwork ONLY. No guessed annotations on PWAD skins.
+    doom_regions::Mask regions=doom_regions::build(type,source.width,source.height,
+        source.left,source.top,source.pixels.data());
+    if(!regions.stock) {stockSkinArtwork[lump]=false;return source;}
+    stockSkinArtwork[lump]=true;
+    if(bloodPalette().empty())return source;
+    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    std::vector<byte> allowed((size_t)source.width*source.height,0);
+    for(int y=0;y<source.height;++y)for(int x=0;x<source.width;++x) {
+        size_t at=(size_t)y*source.width+x;
+        if(!source.pixels[at*2+1]||regions.pixels[at]!=WP_BODY)continue;
+        const byte *rgb=palette+source.pixels[at*2]*3;
+        if(legacy) {
+            // Approved Prototype 1 mask: intentionally byte-for-byte identical.
+            float part=float(y+0.5f)/source.height;
+            if(part<(type==MT_SERGEANT||type==MT_SHADOWS?0.43f:0.32f)||part>0.89f)continue;
+            if(rgb[0]<28||rgb[0]<rgb[1]*1.055f||rgb[0]<rgb[2]*0.95f)continue;
+        } else {
+            // Cacodemon has no distinct head: avoid its central face and eye;
+            // permit only orb flanks, except on the authored rear view.
+            const bool cacoRear=type==MT_HEAD&&lumpinfo[lump].name[5]=='5';
+            if(!doom_skin_regions::permit(added,x,y,source.width,source.height,
+                                        source.pixels[at*2],rgb[0],rgb[1],rgb[2],cacoRear))continue;
+        }
+        allowed[at]=1;
+    }
+    if(std::none_of(allowed.begin(),allowed.end(),[](byte b){return b!=0;})) {
+        stockSkinArtwork[lump]=false;return source;
+    }
+    size_t bytes=(size_t)source.width*source.height*6;
+    if(bytes>maxSkinPixelsBytes-skinPixelsBytes)return source;
+    auto pixels=source.pixels;
+    const uint32_t seed=(uint32_t)type*0x79b97f4au;
+    if(!doom_skin_damage::paint(pixels,source.pixels,allowed,source.width,source.height,tier,seed,
+         monsterSkinBloodIndex(type,0.06f),monsterSkinBloodIndex(type,0.38f),monsterSkinBloodIndex(type,0.69f))) {
+        rejectedSkinVariants.insert(variantKey);return source;
+    }
+    // Rebuild normals from SOURCE art, not the dark stains. Preserve stock
+    // eye-glow flags which spriteNormals alone cannot reconstruct.
+    auto normals=spriteNormals(source.width,source.height,source.pixels.data());
+    if(livingMonsterLump(lump)) {
+        char name[9];memcpy(name,lumpinfo[lump].name,8);name[8]=0;
+        std::vector<byte> eyes;
+        if(!doom_stock_eyes(name,source.width,source.height,source.pixels.data(),eyes))
+            eyes=doom_sprite_eyes(source.width,source.height,source.pixels.data(),palette);
+        for(size_t i=0;i<eyes.size();++i)if(eyes[i]) {normals[2*i]=255;normals[2*i+1]=(byte)(192+eyes[i]*63/255);}
+    }
+    Image variant=upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,normals.data());
+    variant.glow=source.glow;variant.glowWeight=source.glowWeight;variant.glowHeight=source.glowHeight;
+    auto inserted=images.emplace(variantKey,std::move(variant));
+    if(!inserted.second)return source;
+    skinPixelsBytes+=bytes;
+    key=variantKey;
+    return inserted.first->second;
+}
+
+void imagesShutdown() {monsterSkinReset();images.clear();cloudTexture=nullptr;}
 } // namespace doom3d

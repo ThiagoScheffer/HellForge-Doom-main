@@ -1,6 +1,8 @@
-param([switch]$LauncherOnly, [string]$OutputPath, [string]$EnginePath, [switch]$Experimental)
+param([switch]$LauncherOnly, [string]$OutputPath, [string]$EnginePath, [switch]$Experimental, [switch]$ForceRebuild)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+if ($LauncherOnly -and $ForceRebuild) { throw '-ForceRebuild cannot be combined with -LauncherOnly.' }
+. (Join-Path $root 'tools\Build-Common.ps1')
 if (-not $LauncherOnly) {
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -8,7 +10,9 @@ if (-not $vs) { throw 'Visual Studio 2022 C++ Build Tools are required.' }
 $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 & $cmake -S "$root\duct-tape-doom-main" -B "$root\build" -G 'Visual Studio 17 2022' -A x64 -DDOOM_BUILD_SDL=ON -DDOOM_RENDER3D=ON -DDOOM_SOUNDFONT=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_TESTING=ON -DDOOM_GAME_DATA= -DDOOM_TEST_GPU=OFF -DDOOM_MONSTER_PROFILING=OFF -DDOOM_MONSTER_PROFILE_ARGUMENTS=OFF -DDOOM_MONSTER_BENCHMARK=OFF
 if ($LASTEXITCODE) { throw 'Configure failed' }
-& $cmake --build "$root\build" --config Release --parallel 8
+$nativeBuildArguments = Get-HellforgeNativeBuildArguments (Join-Path $root 'build') -ForceRebuild:$ForceRebuild
+if ($ForceRebuild) { Write-Host 'Cleaning native build outputs before recompiling all code (ignoring source timestamps).' }
+& $cmake @nativeBuildArguments
 if ($LASTEXITCODE) { throw 'Engine build failed' }
 }
 if (-not $OutputPath) {

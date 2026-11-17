@@ -38,6 +38,13 @@ FX FEATURES:
 -- all done--
 
 
+first: we do have - Wound holes - that damage and make monsters with a permanent hole like.
+
+- can we use the same idea, for add blood fx on monsters? the more they get hurt we can visually see blood and scratches on the body - ignore head part-&#x20;
+- we can focus only on more monsters like: Barons,imps,mancubus,archville,cyberdemon,pinkdemons. - these have a visual body that can expose as skin.
+- This will be a separated option that can display bloodfx on skin
+
+
 
 
 

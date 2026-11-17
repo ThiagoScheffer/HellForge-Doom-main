@@ -1,4 +1,10 @@
-# Shared discovery only; no downloads, installs or changes to the user's PATH.
+# Shared discovery/build arguments; no downloads, installs or changes to PATH.
+function Get-HellforgeNativeBuildArguments([string]$BuildDirectory, [switch]$ForceRebuild) {
+    $arguments = @('--build', $BuildDirectory, '--config', 'Release', '--parallel', '8')
+    if ($ForceRebuild) { $arguments += '--clean-first' }
+    return $arguments
+}
+
 function Find-HellforgeCMake {
     if ($env:HELLFORGE_CMAKE) {
         return (Get-Command $env:HELLFORGE_CMAKE -CommandType Application -ErrorAction Stop).Source

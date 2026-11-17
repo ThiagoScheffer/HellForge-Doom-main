@@ -1,9 +1,10 @@
-param([switch]$LauncherOnly, [switch]$RecompileShaders, [switch]$CheckOnly)
+param([switch]$LauncherOnly, [switch]$RecompileShaders, [switch]$CheckOnly, [switch]$ForceRebuild)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Build-Common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
 $transcribing = $false
 try {
+    if ($LauncherOnly -and $ForceRebuild) { throw 'A full native rebuild cannot use -LauncherOnly. Use Build-Hellforge.bat -LauncherOnly to repackage an existing engine.' }
     if ($LauncherOnly -and $RecompileShaders) { throw 'Use -RecompileShaders without -LauncherOnly so the regenerated shaders are compiled into the engine.' }
     $logDirectory = Join-Path $root 'build\one-click'
     New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
@@ -34,11 +35,13 @@ try {
         & powershell.exe @shaderArguments
         if ($LASTEXITCODE) { throw 'Shader step failed. Engine and launcher build skipped.' }
     }
-    if ($CheckOnly) { Write-Host 'PASS: build prerequisites found. No compilation performed.' }
+    if ($ForceRebuild) { Write-Host 'Mode: forced full native rebuild (--clean-first), then launcher. Source timestamps do not skip compilation.' }
+    if ($CheckOnly) { Write-Host 'PASS: build prerequisites found. No cleaning or compilation performed.' }
     else {
         Write-Host 'Building HELLFORGE. Close the game and launcher before compiling.'
         $arguments = @{}
         if ($LauncherOnly) { $arguments.LauncherOnly = $true }
+        if ($ForceRebuild) { $arguments.ForceRebuild = $true }
         & (Join-Path $root 'launcher\build.ps1') @arguments
         if ($LASTEXITCODE) { throw "Build failed (exit $LASTEXITCODE)." }
         Write-Host 'SUCCESS: dist\DOOM-Hellforge.exe'

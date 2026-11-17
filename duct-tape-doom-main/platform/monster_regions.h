@@ -7,6 +7,7 @@
 #include "death_joints.h"
 #include "sprite_eyes_stock.h"
 #include "monster_regions_stock.h"
+#include "monster_zombieman_stock.h"
 #include <queue>
 extern "C" {
 #include "../linuxdoom-1.10/p_weakpoints.h"
@@ -23,6 +24,7 @@ inline Mask build(int type,int w,int h,int left,int top,const unsigned char *pix
     case MT_TROOP:family="TROO";break;case MT_UNDEAD:family="SKEL";break;case MT_VILE:family="VILE";break;
     case MT_KNIGHT:family="BOS2";break;case MT_BRUISER:family="BOSS";break;case MT_FATSO:family="FATT";break;
     case MT_CYBORG:family="CYBR";break;case MT_SERGEANT:case MT_SHADOWS:family="SARG";break;
+    case MT_POSSESSED:family="POSS";break;
     case MT_HEAD:family="HEAD";break;case MT_PAIN:family="PAIN";break;case MT_BABY:family="BSPI";break;case MT_SPIDER:family="SPID";break;
     default:break;
     }
@@ -30,7 +32,11 @@ inline Mask build(int type,int w,int h,int left,int top,const unsigned char *pix
     for(const auto &entry:doom_stock_eye_table)if(family&&!std::strncmp(entry.name,family,4)&&entry.width==w&&entry.height==h&&entry.hash==hash){stock=&entry;break;}
     const doom_region_stock_entry *extra=nullptr;
     for(const auto &entry:doom_region_stock_table)if(family&&!std::strncmp(entry.name,family,4)&&entry.width==w&&entry.height==h&&entry.hash==hash){extra=&entry;break;}
-    out.stock=stock!=nullptr||extra!=nullptr;
+    // The existing stock anatomy tables do not carry POSS entries. An owned
+    // IWAD can provide exact artwork fingerprints in a compact generated header;
+    // an unverified Zombieman or replacement sprite fails closed.
+    out.stock=stock!=nullptr||extra!=nullptr||
+        (type==MT_POSSESSED&&doom_zombieman_stock::matches(w,h,hash));
     auto opaque=[&](int x,int y){return x>=0&&y>=0&&x<w&&y<h&&pixels[((size_t)y*w+x)*2+1]!=0;};
     for(int y=0;y<h;++y)for(int x=0;x<w;++x)if(opaque(x,y))out.pixels[(size_t)y*w+x]=WP_BODY;
     if(type==MT_VILE&&extra&&extra->mode!=2) {

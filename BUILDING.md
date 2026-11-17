@@ -9,11 +9,20 @@ Close the game and launcher, then double-click a batch file in the repository ro
 | Batch file | Result |
 | --- | --- |
 | `Build-Hellforge.bat` | Builds the native project and embeds the engine in `dist/DOOM-Hellforge.exe` using the existing release script. |
+| `Build-Hellforge-V2.bat` | Forces a clean rebuild of all native code and dependencies, then rebuilds the launcher. Use when copied/restored source timestamps are older than existing objects or binaries. |
 | `Recompile-Shaders.bat` | Regenerates `platform/gpu_shaders.h` with all Vulkan SPIR-V and Metal MSL variants. Run the build batch afterward to embed them. |
 
 The windows remain open to show success/errors. Logs are saved under
-`build/one-click/`. Neither batch runs game tests or changes the release version.
+`build/one-click/`. These batches do not run game tests or change the release version.
 Normal builds use the checked-in shader header and do not require shader tools.
+
+V2 always uses CMake `--clean-first`; it does not rely on detecting modified file
+timestamps. It cleans build products, preserves source/settings and the CMake
+cache, and takes longer than the incremental build. Close the game and launcher
+first. A failed native rebuild stops before repackaging the launcher. V2 does not
+change the release version or run tests. Shader source compilation remains a
+separate step unless `-RecompileShaders` is supplied. `-LauncherOnly` is rejected
+by V2 because it would skip the promised native rebuild.
 
 Shader recompilation requires **glslangValidator.exe** and **spirv-cross.exe**.
 The helper searches PATH, `VULKAN_SDK\Bin`, installed `C:\VulkanSDK` folders and
@@ -29,6 +38,9 @@ Optional commands from the repository root:
 .\Build-Hellforge.bat -LauncherOnly       # Repackage the existing engine
 .\Build-Hellforge.bat -RecompileShaders   # Shaders, native build, then launcher
 .\Build-Hellforge.bat -CheckOnly          # Check dependencies without compiling
+.\Build-Hellforge-V2.bat                 # Clean native rebuild, then launcher
+.\Build-Hellforge-V2.bat -RecompileShaders # Shader regeneration, clean native rebuild, launcher
+.\Build-Hellforge-V2.bat -CheckOnly      # Check V2 prerequisites; no cleaning/building
 .\Recompile-Shaders.bat -CheckOnly       # Check shader tools without generating
 ```
 

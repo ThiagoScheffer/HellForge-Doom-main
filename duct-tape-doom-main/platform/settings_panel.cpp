@@ -38,6 +38,7 @@ const char *effectCost(const char *key) {
         {"electrical_damage","BOUNDED COST: 16 faults, at most two flashes per tic."},
         {"shore_ripples","HIGH COST: many shoreline particles. Off by default."},
         {"immersive_sky","GPU COST: adds cloud texture fetches and procedural horizon shading for sky pixels."},
+        {"decoration_ambience","BOUNDED COST: only maps with fewer than 200 spawned monsters; 12 bodies, 48 flies and 24 worms maximum."},
         {"reflections","HIGH GPU COST: renders the reflected scene again."},
         {"glass_reflections","HIGH GPU COST: another reflected scene when visible."},
         {"msaa","GPU COST rises with sample count and resolution."},
@@ -46,6 +47,7 @@ const char *effectCost(const char *key) {
         {"sun_shadows","LOAD-TIME COST: sunlight is baked, not rebuilt every frame."},
         {"decoration_shadows","LOAD-TIME COST: changing this re-bakes lighting."},
         {"wounds","VARIABLE COST: rises with wounded monsters in view."},
+        {"monster_skin_damage","ONE-TIME GPU TEXTURE COST: caches recognized stock sprite damage tiers (bounded to 16 MiB)."},
         {"death_falls","VARIABLE COST: rises with simultaneous visible deaths."},
         {"varied_deaths","VARIABLE COST: rises during large fights."},
         {"hit_flinch","LOW TYPICAL COST: rises with monsters reacting at once."},
@@ -211,6 +213,11 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("blood_spray","Blood spray and trails",&s.bloodSpray,"Flying blood droplets, wound drips and smears. Cosmetic only."),
                 check("blood_shine","Wet blood shine",&s.bloodShine,"Fresh blood on the floor glints in a brighter palette red under dynamic lights, then dries matte.",
                     [](const Settings &d){return d.blood!=0;}),
+                check("monster_skin_damage","Monster skin damage",&s.monsterSkinDamage,
+                    "Purely cosmetic health-based scratches and blood on the body of stock Imps, Barons, Pinkies and Spectres. "
+                    "No impact tracking, no gameplay changes. Keeps heads untouched, excludes replacement sprites and voxel models. "
+                    "Independent of Wound holes and Monster Bleeding; Off by default.",
+                    [](const Settings &d){return d.accelerated!=0;}),
                 check("wounds","Wound holes",&s.wounds,
                     "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "
                     "The marks follow the monster's animation. Close hits widen a hole; seen from the side it closes. "
@@ -418,6 +425,19 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("dust_motes","Dust motes",&s.dust,"Specks that glint in indoor sunbeams and the flashlight beam."),
                 check("embers","Embers",&s.embers,"A few sparks rise from torches and fires and cool as they climb; where the game's wind blows, it carries them off."),
                 check("heat_haze","Heat haze",&s.heatHaze,"Rows of pixels shimmer above lava, hot damaging floors and flames.")}},
+            {"Decoration Immersion",{
+                check("decoration_ambience","Decoration immersion",&s.decorationAmbience,
+                    "Purely cosmetic flies and worms around corpses and organic decorations, after a delay. "
+                    "Automatically disabled on maps with 200 or more monsters."),
+                choice("decoration_insects","Corpse insects",&s.decorationInsects,
+                    {"Off","Flies","Flies and worms"},{0,1,2},
+                    "Flies may circle corpses or hanging and impaled remains. Worms crawl only over settled ground-level remains.",
+                    [](const Settings &d){return d.decorationAmbience!=0;}),
+                choice("decoration_delay","Decay delay",&s.decorationDelay,
+                    {"Short","Normal","Long"},{0,1,2},
+                    "Random delay after monster death (or from level start for placed decorations): "
+                    "Normal is 15-30 seconds for flies and 30-60 for worms.",
+                    [](const Settings &d){return d.decorationAmbience!=0&&d.decorationInsects!=0;})}},
             {"Authored episodes",{
                 check("authored_episodes","Authored episodes",&s.authored,
                     "Looks picked by hand for the game's own episodes, beyond what DERP derives from the WAD: Knee-Deep in the Dead "

@@ -138,6 +138,9 @@ struct Settings {
     int authored=1; // Authored episodes (Game_Mood): hand-picked looks for the game's own maps (DOOM's E1 night in the rain); off: the derived look everywhere.
     int weather=1; // Rain under the sky: 0 never, 1 where an authored episode has it, 2 always.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
+    int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
+    int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.
+    int decorationDelay=1; // 0 Short, 1 Normal, 2 Long.
     int wornPlates=1; // Plain metal plates (Game_WornPlate) show years of use: grime in the seams, dull blotches, scuffs near the floor.
     int windowStreaks=1; // Dark rain runs down the outside walls below windows, rusty on metal; inside too once rain blows through a broken one.
     int playerShadow=1; // The player's own sprite shadow from the sun or a strong light.
@@ -174,6 +177,7 @@ struct Settings {
     int elementalCombatFX=0,advancedMonsterReactions=0;
     int eyeInjuries=0;
     int monsterBleeding=0,headshotFrenzy=0,monsterMetalSparks=1,headshotFeedback=2,headshotSound=1,monsterFeeding=0;
+    int monsterSkinDamage=0; // Optional stock-art-only cosmetic torso/limb damage, derived from current HP.
     int breakableWalls=1;
     int throughWalls=0;
     int breachDoors=0;

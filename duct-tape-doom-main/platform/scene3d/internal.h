@@ -417,6 +417,11 @@ void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
                     float x,float y,float z,const Uniforms &camera,const ShadowLight *light=nullptr,bool anyThing=false,const RagdollCard *card=nullptr);
 void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card=nullptr);
 
+// decoration_ambience.cpp
+void decorationAmbienceReset();
+void decorationAmbienceBegin(const Uniforms &camera);
+void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera);
+
 // atmosphere.cpp
 void buildShafts(const Uniforms &camera);
 void buildMist(const Uniforms &camera);
@@ -478,6 +483,9 @@ bool bloodOn();
 int monsterBloodTint(const mobj_t *thing);
 Image &playerColourImage(Image &,int,int,int &,const byte *voxelNormals=nullptr);
 Image &bloodSpriteImage(int lump,int tint,int &key);
+byte monsterSkinBloodIndex(int type,float shade); // Uses monster-specific blood tint and the WAD's blood palette.
+Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHealth,int &key);
+void monsterSkinReset(); // Before image atlas/map resources are destroyed.
 extern int bloodSourceTint;
 struct BloodSourceScope {
     int previous;

@@ -56,6 +56,17 @@ static byte bloodIndex(float shade) {
     const auto &shades=bloodPalette();
     return shades[std::clamp((int)std::lround(std::clamp(shade,0.0f,1.0f)*(shades.size()-1)),0,(int)shades.size()-1)];
 }
+// Derive the same blood shades/tints used by ordinary blood decals, without
+// enabling floor splats or mutating the global bloodSourceTint.
+// This is used for monster skins, which are tinted by type and shade.
+byte monsterSkinBloodIndex(int type,float shade) {
+    const auto &colors=bloodPalette();
+    if(colors.empty())return 0;
+    int tint=(type==MT_BRUISER||type==MT_KNIGHT)?2:(type==MT_HEAD?1:0);
+    size_t n=(size_t)std::lround(std::clamp(shade,0.0f,1.0f)*(colors.size()-1));
+    return bloodTintIndex(colors[n],tint);
+}
+
 std::array<float,3> bloodColor(float shade) {
     if(bloodPalette().empty())return {0.5f,0,0};
     const byte *rgb=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE)+bloodTintIndex(bloodIndex(shade),bloodSourceTint)*3;
