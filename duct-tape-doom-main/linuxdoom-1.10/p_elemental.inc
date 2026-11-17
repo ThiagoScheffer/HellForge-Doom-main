@@ -123,7 +123,7 @@ static void combatExpansionTick(mobj_t *actor) {
         it=runtime.find(actor);
     }
     if(it!=runtime.end()&&P_CombatVisualKind(actor)&&P_CombatVisual){int visual=P_CombatVisualKind(actor);P_CombatVisual(actor,p_wp_elemental?visual:visual+3);}
-    if(!p_wp_reactions||!p_wp_bleeding||!allowed(actor)||actor->type!=MT_VILE)return;
+    if(!p_wp_reactions||!p_wp_bleeding||!allowed(actor)||actor->type!=MT_VILE||P_WeakpointFeeding(actor))return;
     if(it!=runtime.end()&&it->second.siphonUntil){
         auto &r=it->second;
         if(leveltime>r.siphonUntil||!P_WeakpointBleeding(actor)||!compatible(actor)||actor->health>=actor->info->spawnhealth){

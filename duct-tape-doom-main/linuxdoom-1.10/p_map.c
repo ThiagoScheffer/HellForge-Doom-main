@@ -410,7 +410,7 @@ boolean PIT_CheckThing(mobj_t *thing)
                 return true;
 
             // A DEHACKED patch can let a species fight itself.
-            if (thing->type != MT_PLAYER && !deh_species_infighting && !P_WeakpointFriendlyMissile(tmthing))
+            if (thing->type != MT_PLAYER && !deh_species_infighting && !P_WeakpointCanHitSpecies(tmthing,thing))
             {
                 // Explode, but do no damage.
                 p_missile_hit_actor = 1;

@@ -2239,8 +2239,15 @@ static int P_FoodMove(mobj_t *actor) {
     if(P_Move(actor))return 1;
     P_NewChaseDir(actor);return 0;
 }
+static int P_FoodRetreat(mobj_t* actor,mobj_t* danger){
+    static const int turns[8]={0,1,-1,2,-2,3,-3,4};
+    int dir=danger?((R_PointToAngle2(danger->x,danger->y,actor->x,actor->y)+ANG45/2)>>29)&7:actor->movedir;
+    if(dir<0||dir>7)dir=(int)(actor->angle>>29)&7;
+    for(int i=0;i<(danger?5:8);++i){actor->movedir=(dir+turns[i]+8)&7;if(P_Move(actor))return 1;}
+    actor->movedir=DI_NODIR;return 0;
+}
 static void P_FoodAnimate(mobj_t *actor) {
-    if(actor->type==MT_PAIN&&P_WeakpointBlind(actor)){
+    if(actor->type==MT_VILE||(actor->type==MT_PAIN&&P_WeakpointBlind(actor))){
         P_WeakpointFeedingAttack(actor);
         if(actor->info->painstate)P_SetMobjState(actor,(statenum_t)actor->info->painstate);
         return;
@@ -2325,6 +2332,6 @@ static mobj_t *P_CombatDonorNative(mobj_t *actor,int corpse){
 
 void P_WeakpointInitFeedingHooks(void) {
     P_CombatCompatible=P_CombatCompatibleNative;P_CombatStagger=P_CombatStaggerNative;P_CombatDonor=P_CombatDonorNative;
-    P_WeakpointFoodPath=P_FoodPath;P_WeakpointFoodMove=P_FoodMove;P_WeakpointFoodAnimate=P_FoodAnimate;
+    P_WeakpointFoodPath=P_FoodPath;P_WeakpointFoodMove=P_FoodMove;P_WeakpointFoodRetreat=P_FoodRetreat;P_WeakpointFoodAnimate=P_FoodAnimate;
     P_WeakpointFoodWake=P_FoodWake;P_WeakpointFoodConsume=P_RemoveMobj;P_WeakpointPainVoice=P_FoodVoice;
 }

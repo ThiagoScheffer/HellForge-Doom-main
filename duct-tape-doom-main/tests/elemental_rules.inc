@@ -32,7 +32,7 @@ static void elementalRules(){
     check(P_CombatVisualKind(&target)==initial,"Arch-vile direct and radius damage cannot repeat ignition chance");P_CombatFireEnd();
     check(!P_CombatDamageKind(&flame,&arch),"visual-only Arch-vile fire cannot ignite");
     target.health=0;P_CombatConfirmed(&target,&source,0,5,1);check(P_CombatCharred(&target),"death while burning leaves cosmetic charred corpse");
-    std::vector<unsigned char> data(P_WeakpointSave(nullptr));P_WeakpointSave(data.data());check(data[0]==6,"new expansion uses save trailer v6");
+    std::vector<unsigned char> data(P_WeakpointSave(nullptr));P_WeakpointSave(data.data());check(data[0]==7,"elemental state retains its prefix in save trailer v7");
     P_WeakpointClear();P_WeakpointLoad(data.data(),data.size());check(P_CombatCharred(&target),"charred corpse survives indexed save load");
     std::vector<unsigned char> legacy(data.begin(),data.begin()+168);legacy[0]=4;uint32_t legacySize=176;
     for(int i=0;i<4;++i)legacy.push_back((unsigned char)(legacySize>>(i*8)));for(char c:{'W','P','0','1'})legacy.push_back(c);

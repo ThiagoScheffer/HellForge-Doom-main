@@ -24,7 +24,7 @@ static void link(mobj_t *m) {
 }
 static void reset(int type=MT_TROOP) {
     P_WeakpointClear();P_CombatConfigureDot(0);P_HudConfigure(0);P_SessionReset();P_CombatConfigure(0,0);P_CombatCompatible=nullptr;P_CombatStagger=nullptr;P_CombatDonor=nullptr;P_WeakpointConfigureEyes(0);P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);
-    P_WeakpointFoodPath=nullptr;P_WeakpointFoodMove=nullptr;P_WeakpointFoodAnimate=nullptr;P_WeakpointFoodWake=nullptr;P_WeakpointFoodConsume=nullptr;P_WeakpointPainVoice=nullptr;
+    P_WeakpointFoodPath=nullptr;P_WeakpointFoodMove=nullptr;P_WeakpointFoodRetreat=nullptr;P_WeakpointFoodAnimate=nullptr;P_WeakpointFoodWake=nullptr;P_WeakpointFoodConsume=nullptr;P_WeakpointPainVoice=nullptr;
     for(auto &p:players)p={};wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
     source={};target={};info={};player={};source.player=&player;
     target.type=(mobjtype_t)type;target.flags=MF_SHOOTABLE;target.health=1000;info.spawnhealth=1000;target.info=&info;

@@ -11,6 +11,8 @@ statements that main was untouched describe their original investigation dates.
 
 ## Current feature and behavior documents
 
+- [Survival escape, Arch-vile life hunting and Mancubus frenzy retaliation fix](changes/SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md)
+
 - [Initial monster count/percentage budgets and explicit Compatibility/Performance staging](changes/INITIAL-MONSTER-POPULATION-BUDGET.md)
 
 - [Original monster streaming: historical first-revision limits](changes/ORIGINAL-MONSTER-STREAMING.md)

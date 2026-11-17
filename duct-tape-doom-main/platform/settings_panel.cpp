@@ -197,7 +197,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("monster_bleeding","Monster Bleeding",&s.monsterBleeding,
                     "Player bullets and pellets: 30% bleeding chance on Imp, Hell Knight, Mancubus and Pinky; enabled criticals guarantee bleeding. Repeated discharges raise severity: 2/3/4 HP per second for 6/8/10 seconds. Walking remains 20% slower.",[](const Settings &d){return d.accelerated!=0;}),
                 check("monster_feeding","Monster Feeding",&s.monsterFeeding,
-                    "Injured Cacodemons and Pinkies approach nearby biological corpses or weak living prey to feed. Starts at 30% health; stops at 60%. Single-player sprites only.",[](const Settings &d){return d.accelerated!=0;}),
+                    "Cacodemons/Pinkies below 30% health search faster and retreat to eat; after 10 seconds without recovery they return aggressively to combat. Arch-viles below 50% hunt living biological prey to steal health. Stops at 60%. Single-player sprites only.",[](const Settings &d){return d.accelerated!=0;}),
                 check("headshot_sound","Headshot Sound",&s.headshotSound,
                     "Short confirmation on a damaging anatomical headshot, once per discharge. Headshot Feedback Off also silences it.",[](const Settings &d){return d.accelerated!=0;}),
                 check("headshot_frenzy","Headshot Frenzy",&s.headshotFrenzy,

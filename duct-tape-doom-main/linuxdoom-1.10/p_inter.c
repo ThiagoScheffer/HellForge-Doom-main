@@ -976,7 +976,7 @@ P_DamageMobj
 
     P_CombatConfirmed(target,source,elementKind,damage,-1);
     if(p_wp_bleed_damage||p_wp_dot_damage)return;
-    if(damage>0)P_WeakpointFeedingHurt(target);
+    if(damage>0){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}
 
     if ( (P_Random () < target->info->painchance)
 	 && !(target->flags&MF_SKULLFLY) )

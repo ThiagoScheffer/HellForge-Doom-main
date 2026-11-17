@@ -50,6 +50,8 @@ Aggression grants deterministic extra passes through existing chase/attack-decis
 
 Tier two emits heavier droplets and occasional pain vocals; tier three adds more frequent/larger loss and limited pooling under stationary monsters. Vocals are cooldown-limited (3 s / 2 s by default) and never restart an animation. Visual blood uses existing budgets/settings. Tier-three pooling is bounded floor-splat accumulation, not a new fluid simulation. Bleed ticks preserve normal deaths and original player attribution, including after source-body replacement and save/load. Disabling bleeding immediately cancels damage, severity, slowing, aggression and vocal timers.
 
+> **Current survival update:** [Escape, life hunting and frenzy retaliation](SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md) supersedes the original feeding-only matrix and timeout behavior below. Cacodemons/Pinkies now use a ten-second search window with retreat and faster walking; Arch-viles can hunt living prey. Current status saves use V7. Earlier evidence and balance history remain preserved here.
+
 ## Feeding behavior and monster matrix
 
 | Monster/group | Progressive bleed | Feeding predator | Eligible living prey | Eligible corpse |

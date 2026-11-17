@@ -94,7 +94,7 @@ static void survivalIntegration() {
     // A real wall forbids selection even when the food is inside search range.
     clearActors();actor=P_SpawnMobj(0,fx(128),ONFLOORZ,MT_SERGEANT);actor->health=45;
     auto *blocked=P_SpawnMobj(0,fx(192),ONFLOORZ,MT_TROOP);
-    P_WeakpointTick(actor);check(!P_WeakpointFeeding(actor),"feeding cannot select food behind a real blocking wall");P_RemoveMobj(blocked);
+    P_WeakpointTick(actor);check(P_WeakpointFeeding(actor)&&actor->target!=blocked,"survival search cannot select food behind a real blocking wall");P_RemoveMobj(blocked);
     // Shared native save boundaries with active new state and severity.
     clearActors();actor=P_SpawnMobj(0,0,ONFLOORZ,MT_SERGEANT);actor->health=45;
     auto *prey=P_SpawnMobj(0,fx(96),ONFLOORZ,MT_TROOP);prey->health=100;prey->tics=-1;P_WeakpointTick(actor);

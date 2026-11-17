@@ -42,14 +42,14 @@ static void survivalRules() {
         if(scenario==1)++target.health;if(scenario==2)foodPath=0;if(scenario==3)wp_test_sight=0;
         if(scenario==4)prey.x=385*FRACUNIT;if(scenario==5)prey.type=MT_BRUISER;
         if(scenario==6){players[0].mo=&source;source.health=100;}if(scenario==7)P_WeakpointConfigureFeeding(0);
-        P_WeakpointTick(&target);check((bool)P_WeakpointFeeding(&target)==(scenario==0),"feeding threshold, path, sight, radius, species, player threat and toggle gates");
+        P_WeakpointTick(&target);check((bool)P_WeakpointFeeding(&target)==(scenario!=1&&scenario!=7),"low-health search survives missing food, blockers and threat; health/toggle gates remain");
         if(scenario==0){
             check(P_WeakpointFeedingChase(&target)&&foodAnimations==1,"feeding enters an existing attack animation");
             int hp=target.health;P_WeakpointFeedingAttack(&target);
             int heal=species==MT_HEAD?16:7;check(prey.health==84&&target.health==hp+heal,"feeding bite uses sixteen damage and actual-damage-bounded five-percent healing");
             P_WeakpointFeedingAttack(&target);check(prey.health==84,"one bite per animation action");
-            P_WeakpointFeedingHurt(&target);check(!P_WeakpointFeeding(&target),"incoming damage cancels feeding action");
-            P_WeakpointTick(&target);check(!P_WeakpointFeeding(&target),"feeding cooldown prevents immediate restart");
+            P_WeakpointFeedingHurt(&target);check(P_WeakpointFeeding(&target)&&target.target==nullptr,"incoming damage cancels the bite and returns to survival search");
+            P_WeakpointTick(&target);check(P_WeakpointFeeding(&target)&&target.target==nullptr,"hurt search delay prevents immediate repeat bite");
         }
     }
     for(auto type:{MT_TROOP,MT_POSSESSED,MT_SHOTGUY,MT_CHAINGUY,MT_WOLFSS,MT_SHADOWS,MT_HEAD,MT_SERGEANT,MT_BRUISER,MT_CYBORG,MT_BABY,MT_SPIDER}){
@@ -88,7 +88,7 @@ static void survivalRules() {
     // Timing/cancellation and deterministic disabled behavior.
     feedingFixture();prey={};prey.info=&corpseInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.height=56*FRACUNIT;prey.x=100*FRACUNIT;link(&prey);
     P_WeakpointTick(&target);check(P_WeakpointFeeding(&target),"pursuit starts for reachable nearby prey");leveltime+=105;P_WeakpointTick(&target);
-    check(!P_WeakpointFeeding(&target),"three-second pursuit/animation timeout");
+    check(P_WeakpointFeeding(&target),"failed three-second approach can retry inside the ten-second window");leveltime+=p_wp_balance.feedWindow-105;P_WeakpointTick(&target);check(!P_WeakpointFeeding(&target)&&(target.flags&MF_JUSTHIT),"ten-second failed search returns to aggressive combat");
     feedingFixture();prey={};prey.info=&corpseInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.height=56*FRACUNIT;prey.x=16*FRACUNIT;link(&prey);
     P_WeakpointTick(&target);P_WeakpointConfigureFeeding(0);check(!P_WeakpointFeeding(&target)&&target.target==nullptr,"disabling feeding immediately releases target and overrides");
     check(wp_test_rng_calls==0,"feeding decisions use no additional random values");
@@ -100,8 +100,8 @@ static void survivalRules() {
     check(target.health==90&&!P_WeakpointFeeding(&target),"repeated earned bites stop exactly at sixty percent, never maximum-health regeneration");
     // Search periods, damage interruption and nearby player threats.
     feedingFixture();P_WeakpointTick(&target);prey={};prey.info=&corpseInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.height=56*FRACUNIT;prey.x=16*FRACUNIT;link(&prey);
-    P_WeakpointTick(&target);check(!P_WeakpointFeeding(&target),"food search is periodic instead of rescanning every tic");leveltime+=35;P_WeakpointTick(&target);check(P_WeakpointFeeding(&target),"next search interval can discover new prey");
-    players[0].mo=&source;source.health=100;P_WeakpointTick(&target);check(!P_WeakpointFeeding(&target),"an immediate visible player threat interrupts recovery");
+    P_WeakpointTick(&target);check(P_WeakpointFeeding(&target)&&target.target==nullptr,"food search is periodic while the seek episode remains active");leveltime+=35;P_WeakpointTick(&target);check(P_WeakpointFeeding(&target),"next search interval can discover new prey");
+    players[0].mo=&source;source.health=100;P_WeakpointTick(&target);check(P_WeakpointFeeding(&target)&&target.target==nullptr,"an immediate visible player threat interrupts eating and starts retreat");
     for(int mode=0;mode<4;++mode){
         feedingFixture();prey={};prey.info=&corpseInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.x=16*FRACUNIT;link(&prey);
         if(mode==0)netgame=true;else if(mode==1)demoplayback=true;else if(mode==2)demorecording=true;else P_WeakpointTargetAllowed=+[](const mobj_t*)->int{return 0;};
@@ -128,5 +128,15 @@ static void survivalRules() {
     P_WeakpointConfigureExtras(1,0);p_wp_balance.bleedChance=100;P_WeakpointBeginShot(&source,wp_pistol);auto bodyHit=event(WP_BULLET,WP_BODY,1);P_WeakpointApply(&bodyHit);P_WeakpointEndShot();P_WeakpointTick(&target);
     save.resize(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);P_WeakpointLoad(save.data(),save.size());
     P_WeakpointConfigureFeeding(1);P_WeakpointConfigureExtras(1,0);check(!P_WeakpointBleedTier(&target)&&!P_WeakpointFeeding(&target),"loading with features off cannot re-arm saved bleeding/feeding when toggled back on");
+    // V6 retains the 220-byte prefix; older active pursuits receive one bounded
+    // survival window, while V7 preserves the exact remaining window.
+    feedingFixture();prey={};prey.info=&corpseInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.height=56*FRACUNIT;prey.x=100*FRACUNIT;link(&prey);P_WeakpointTick(&target);
+    save.resize(P_WeakpointSave(nullptr));P_WeakpointSave(save.data());
+    auto word=[&](size_t at){return uint32_t(save[at])|(uint32_t(save[at+1])<<8)|(uint32_t(save[at+2])<<16)|(uint32_t(save[at+3])<<24);};
+    std::vector<unsigned char> v6(save.begin(),save.begin()+8);v6[0]=6;
+    for(uint32_t i=0;i<word(4);++i)v6.insert(v6.end(),save.begin()+8+i*236,save.begin()+8+i*236+220);
+    uint32_t legacyBytes=uint32_t(v6.size()+8);for(int i=0;i<4;++i)v6.push_back((unsigned char)(legacyBytes>>(i*8)));for(char c:{'W','P','0','1'})v6.push_back(c);
+    P_WeakpointLoad(v6.data(),v6.size());check(P_WeakpointFeeding(&target)&&target.target==&prey,"V6 feeding prefix remains readable after V7 survival extension");
+    leveltime+=p_wp_balance.feedWindow;P_WeakpointTick(&target);check(!P_WeakpointFeeding(&target),"migrated V6 pursuit has a bounded search window");
     p_wp_balance=balance;P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);
 }
