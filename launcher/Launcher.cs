@@ -19,13 +19,13 @@ internal static class Data {
 #if HELLFORGE_EXPERIMENTAL
     internal const string ProductName = "DOOM: HELLFORGE — Experimental";
     internal const string ProductShortName = "DOOM-Hellforge-Experimental";
-    internal const string BuildLabel = "MONSTER PERFORMANCE   /   EXPERIMENTAL BUILD";
+    internal const string BuildLabel = "DESTRUCTION  /  WEAK POINTS  /  SURVIVAL AI  /  ENCOUNTER DIRECTOR";
     internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOOM-HellforgeLauncher-Experimental");
     internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DOOM Hellforge Experimental");
 #else
     internal const string ProductName = "DOOM: HELLFORGE";
     internal const string ProductShortName = "DOOM-Hellforge";
-    internal const string BuildLabel = "SOLID GEOMETRY   /   DESTRUCTION BUILD";
+    internal const string BuildLabel = "DESTRUCTION  /  WEAK POINTS  /  SURVIVAL AI  /  ENCOUNTER DIRECTOR";
     internal static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOOM-HellforgeLauncher");
     internal static readonly string Profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Local Games","DOOM Hellforge");
 #endif
@@ -449,14 +449,18 @@ internal sealed class ParallaxHero : Control {
     private readonly string versionMark="BUILD  "+Data.BuildVersion.Split('|')[0].Trim();
     private float x,y,targetX,targetY;
     private bool sleeping;
+    private readonly WadMascot mascot=new WadMascot();
+    private string monsterPath;
+    private int animationTick;
 
     internal ParallaxHero() {
         SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
         TabStop=false;Cursor=Cursors.Default;BackColor=Palette.Background;
-        animation=new System.Windows.Forms.Timer { Interval=33 };
+        animation=new System.Windows.Forms.Timer { Interval=66 };
         animation.Tick+=(s,e)=>Step();
         LoadArt();
     }
+    internal void LoadMonster(string path){monsterPath=path;if(!sleeping){mascot.Load(path);if(mascot.Animated)animation.Start();Invalidate();}}
     void LoadArt() {
         if(image!=null)return;
         using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("hero.png"))
@@ -490,12 +494,12 @@ internal sealed class ParallaxHero : Control {
         base.OnMouseLeave(e);
     }
     void Step() {
-        if(sleeping || !Visible || FindForm()==null || FindForm().WindowState==FormWindowState.Minimized) {
-            animation.Stop();return;
-        }
+        if(sleeping){animation.Stop();return;}
+        if(!Visible || FindForm()==null || FindForm().WindowState==FormWindowState.Minimized)return;
+        animationTick++;
         x+=(targetX-x)*0.22f;y+=(targetY-y)*0.22f;
         if(Math.Abs(targetX-x)<0.15f && Math.Abs(targetY-y)<0.15f) {
-            x=targetX;y=targetY;animation.Stop();
+            x=targetX;y=targetY;if(!mascot.Animated)animation.Stop();
         }
         Invalidate();
     }
@@ -517,10 +521,13 @@ internal sealed class ParallaxHero : Control {
             g.DrawString("THE MODERN CLASSIC DOOM EXPERIENCE",eyebrow,accent,33,48);
             g.DrawString("DOOM:",heading,pale,29,75);
             g.DrawString("HELLFORGE",heading,pale,29,125);
-            g.DrawString(Data.BuildLabel,subtitle,muted,33,197);
+            var features=Data.BuildLabel.Split(new[]{"  /  "},StringSplitOptions.None);
+            g.DrawString(features[0]+"  /  "+features[1],eyebrow,accent,33,191);
+            g.DrawString(features[2]+"  /  "+features[3],eyebrow,muted,33,211);
             if(Width>790) {
                 var size=g.MeasureString(versionMark,mono);
                 g.DrawString(versionMark,mono,muted,Math.Max(530,Width-(int)size.Width-27),20);
+                mascot.Draw(g,new Rectangle(Width-200,53,145,163),animationTick);
             }
         }
         using(var border=new Pen(Palette.Border))g.DrawRectangle(border,0,0,Width-1,Height-1);
@@ -528,16 +535,16 @@ internal sealed class ParallaxHero : Control {
     // Called as soon as the child game process successfully launches.
     // The WinForms UI remains in memory, but bitmap/GDI overlay + all animation stop.
     internal void EnterGameMode() {
-        sleeping=true;animation.Stop();x=y=targetX=targetY=0;
+        sleeping=true;animation.Stop();mascot.Dispose();x=y=targetX=targetY=0;
         if(image!=null){image.Dispose();image=null;}
         if(overlay!=null){overlay.Dispose();overlay=null;}
         Invalidate();
     }
     internal void LeaveGameMode() {
-        sleeping=false;LoadArt();Invalidate();
+        sleeping=false;LoadArt();LoadMonster(monsterPath);Invalidate();
     }
     protected override void Dispose(bool disposing) {
-        if(disposing){animation.Stop();animation.Dispose();if(image!=null)image.Dispose();if(overlay!=null)overlay.Dispose();heading.Dispose();eyebrow.Dispose();subtitle.Dispose();mono.Dispose();}
+        if(disposing){animation.Stop();animation.Dispose();mascot.Dispose();if(image!=null)image.Dispose();if(overlay!=null)overlay.Dispose();heading.Dispose();eyebrow.Dispose();subtitle.Dispose();mono.Dispose();}
         base.Dispose(disposing);
     }
 }
@@ -558,7 +565,7 @@ internal sealed class Launcher : Form {
     private readonly Font listMono=new Font("Consolas",9f);
     private Surface libraryCard,modsCard,footer;
     private ParallaxHero hero;
-    private ModernButton scan,play,lan,browseGame,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache;
+    private ModernButton scan,play,lan,browseGame,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll;
     private bool scanning,launching,gameRunning;
     private CancellationTokenSource scanCancellation;
 
@@ -577,7 +584,8 @@ internal sealed class Launcher : Form {
 
     public Launcher() {
         Text=Data.ProductName+"  •  "+Data.BuildVersion.Split('|')[0].Trim();
-        ClientSize=new Size(1150,774);MinimumSize=new Size(940,710);
+        ClientSize=new Size(1150,830);MinimumSize=new Size(940,770);
+        using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("hellforge.ico"))if(stream!=null)using(var icon=new Icon(stream))Icon=(Icon)icon.Clone();
         StartPosition=FormStartPosition.CenterScreen;AutoScaleMode=AutoScaleMode.Dpi;
         Font=new Font("Segoe UI",9.5f);BackColor=Palette.Background;ForeColor=Palette.Text;
         SetStyle(ControlStyles.OptimizedDoubleBuffer,true);
@@ -585,7 +593,7 @@ internal sealed class Launcher : Form {
         var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(18),BackColor=Palette.Background,ColumnCount=1,RowCount=3};
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,252));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute,94));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,140));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));Controls.Add(root);
         hero=new ParallaxHero { Dock=DockStyle.Fill,Margin=new Padding(0,0,0,14) };root.Controls.Add(hero,0,0);
         var two=new TableLayoutPanel {Dock=DockStyle.Fill,Margin=Padding.Empty,ColumnCount=2,RowCount=1};
@@ -598,6 +606,7 @@ internal sealed class Launcher : Form {
         footer=new Surface {Dock=DockStyle.Fill,Margin=new Padding(0,14,0,0)};root.Controls.Add(footer,0,2);
 
         BuildLibrary();BuildMods();BuildFooter();
+        games.SelectedIndexChanged+=(s,e)=>hero.LoadMonster(games.SelectedItem as string);
         libraryCard.Resize+=(s,e)=>LayoutLibrary();
         modsCard.Resize+=(s,e)=>LayoutMods();
         footer.Resize+=(s,e)=>LayoutFooter();
@@ -674,7 +683,7 @@ internal sealed class Launcher : Form {
     void LayoutMods() {
         if(modsCard==null)return;int w=modsCard.ClientSize.Width,h=modsCard.ClientSize.Height;
         int inner=Math.Max(240,w-44);
-        var labels=modsCard.Controls.OfType<Label>().Where(c=>c!=modHint).ToArray();
+        var labels=modsCard.Controls.OfType<Label>().Where(c=>c!=modHint&&c!=emptyMods).ToArray();
         if(labels.Length>=2){labels[0].SetBounds(22,20,inner,28);labels[1].SetBounds(22,54,inner,20);}
         mods.SetBounds(22,92,inner,Math.Max(80,h-218));
         emptyMods.SetBounds(mods.Left,mods.Top,mods.Width,mods.Height);
@@ -720,15 +729,23 @@ internal sealed class Launcher : Form {
         tips.SetToolTip(lowFx,"Starting preset for new profiles only. Existing profiles are unchanged. Your F4 Apply/close choices are always saved and used on the next launch.");
         lan=CreateButton("LAN / CO-OP",PlayLan);footer.Controls.Add(lan);
         play=CreateButton("▶  PLAY GAME",Play,primary:true);footer.Controls.Add(play);
+        openLog=CreateButton("OPEN LAST LOG",()=>OpenFile(Path.Combine(Data.Home,"last-game.log")),quiet:true);
+        openConfig=CreateButton("OPEN GRAPHICS.CFG",()=>OpenFile(Path.Combine(Data.Profile,"graphics.cfg")),quiet:true);
+        gameSettings=CreateButton("GAME SETTINGS / TABS",EditGameSettings);
+        resetAll=CreateButton("CLEAR ALL / FRESH START",ResetAll,quiet:true);
+        foreach(var button in new[]{openLog,openConfig,gameSettings,resetAll})footer.Controls.Add(button);
+        tips.SetToolTip(resetAll,"Back up and reset settings and add-ons. Save games and installed IWADs are kept.");
         AcceptButton=play;
     }
     void LayoutFooter() {
         if(footer==null)return;int w=footer.ClientSize.Width;
-        status.SetBounds(18,7,282,22);
-        clearCache.SetBounds(318,5,180,25);
-        export.SetBounds(18,38,138,30);import.SetBounds(166,38,138,30);
-        lowFx.SetBounds(318,40,Math.Max(150,w-720),25);
-        lan.SetBounds(w-380,14,142,50);play.SetBounds(w-226,14,208,50);
+        gameSettings.SetBounds(18,7,180,30);openLog.SetBounds(208,7,130,30);
+        openConfig.SetBounds(348,7,170,30);resetAll.SetBounds(528,7,210,30);
+        status.SetBounds(18,47,282,22);
+        clearCache.SetBounds(318,45,180,25);
+        export.SetBounds(18,78,138,30);import.SetBounds(166,78,138,30);
+        lowFx.SetBounds(318,80,Math.Max(150,w-720),25);
+        lan.SetBounds(w-380,54,142,50);play.SetBounds(w-226,54,208,50);
     }
     void UpdateInfo() {
         if(libraryInfo==null || IsDisposed)return;
@@ -810,6 +827,35 @@ internal sealed class Launcher : Form {
         try {Directory.CreateDirectory(Data.Home);CurrentSettings().Save(settings);}
         catch(Exception e){if(!IsDisposed)status.Text="Settings not saved: "+e.Message;}
     }
+    void OpenFile(string path) {
+        try {
+            if(!File.Exists(path)){MessageBox.Show(this,"This file has not been created yet:\n"+path,Data.ProductName);return;}
+            Process.Start(new ProcessStartInfo("notepad.exe",Data.Quote(path)){UseShellExecute=true});
+        }catch(Exception e){MessageBox.Show(this,e.Message,Data.ProductName);}
+    }
+    string BackupSettings() {
+        string folder=Path.Combine(Data.Home,"backups");Directory.CreateDirectory(folder);
+        string path=Path.Combine(folder,"before-edit-"+DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")+"-"+Guid.NewGuid().ToString("N")+".zip");
+        SettingsBackup.Export(path,CurrentSettings(),Data.Profile);return path;
+    }
+    void EditGameSettings() {
+        if(launching||gameRunning)return;
+        try {
+            string path=GraphicsPerformance.PrepareConfig(Path.Combine(Data.Profile,"graphics.cfg"),Data.BundledResource("graphics.cfg"),lowFx.Checked);
+            using(var dialog=new LauncherSettingsDialog(path,()=>BackupSettings()))if(dialog.ShowDialog(this)==DialogResult.OK)status.Text="Settings saved for the next launch.";
+        }catch(Exception e){MessageBox.Show(this,e.Message,"Cannot edit settings");}
+    }
+    void ResetAll() {
+        if(launching||gameRunning)return;
+        if(MessageBox.Show(this,"Back up and reset launcher/game settings and remove all selected add-ons?\n\nSaves, installed IWADs, screenshots, logs and backups are kept.","Fresh start",MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)!=DialogResult.OK)return;
+        try {
+            string backup=BackupSettings();
+            LauncherConfig.ResetProfile(Data.Profile);
+            mods.Items.Clear();lowFx.Checked=true;Save();UpdateInfo();
+            status.Text="Fresh defaults ready. Saves kept; settings backed up.";
+            MessageBox.Show(this,"Settings reset. New defaults apply on next launch.\n\nBackup:\n"+backup,"Fresh start complete");
+        }catch(Exception e){MessageBox.Show(this,e.Message,"Reset incomplete; recovery backup retained",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+    }
     void ClearLightingCache() {
         if(gameRunning||launching)return;
         try {
@@ -858,7 +904,7 @@ internal sealed class Launcher : Form {
     }
     void SetLaunching(bool value) {
         launching=value;
-        foreach(Control control in new Control[]{games,mods,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,lowFx,lan,play})
+        foreach(Control control in new Control[]{games,mods,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll,lowFx,lan,play})
             control.Enabled=!value;
         if(!value){scan.Enabled=!scanning;scanFolder.Enabled=!scanning;removeMod.Enabled=upMod.Enabled=downMod.Enabled=mods.SelectedIndex>=0;}
     }
@@ -931,4 +977,185 @@ internal sealed class Launcher : Form {
         if(disposing){sectionFont.Dispose();tagFont.Dispose();listFont.Dispose();listMono.Dispose();tips.Dispose();}
         base.Dispose(disposing);
     }
+}
+
+// Launcher-only editing: preserve unrecognised keys/comments and never guess engine defaults.
+internal static class LauncherConfig {
+    internal static string Read(string path){return File.Exists(path)?File.ReadAllText(path):"";}
+    internal static string Merge(string text,IDictionary<string,string> edits) {
+        var pending=new Dictionary<string,string>(edits,StringComparer.Ordinal);
+        var lines=new List<string>();
+        foreach(string line in text.Replace("\r\n","\n").Split('\n')) {
+            string key=line.TrimStart('\uFEFF',' ','\t').Split(new[]{' ','\t'},StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if(key!=null&&edits.ContainsKey(key))continue;
+            lines.Add(line);
+        }
+        foreach(var entry in pending)if(!String.IsNullOrWhiteSpace(entry.Value)) {
+            double number;
+            if(!Double.TryParse(entry.Value,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out number)||Double.IsNaN(number)||Double.IsInfinity(number))throw new InvalidDataException("Invalid numeric value for "+entry.Key);
+            lines.Add(entry.Key+" "+number.ToString("R",System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return String.Join(Environment.NewLine,lines).TrimEnd()+Environment.NewLine;
+    }
+    internal static void ResetProfile(string profile) {
+        foreach(string name in SettingsBackup.ConfigFiles) {
+            string path=Path.Combine(profile,name);if(File.Exists(path))File.Delete(path);
+        }
+    }
+    internal static void Write(string path,string original,string content) {
+        if(Read(path)!=original)throw new IOException("Configuration changed outside this window. Close and reopen settings before saving.");
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        string temp=path+".saving-"+Guid.NewGuid().ToString("N")+".tmp";
+        try {
+            using(var f=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None)) {
+                byte[] bytes=new UTF8Encoding(false).GetBytes(content);f.Write(bytes,0,bytes.Length);f.Flush(true);
+            }
+            if(File.Exists(path))File.Replace(temp,path,null);else File.Move(temp,path);
+        } finally {if(File.Exists(temp))File.Delete(temp);}
+    }
+}
+
+internal sealed class LauncherSettingsDialog : Form {
+    readonly string path,original;
+    readonly Action backup;
+    readonly List<DataGridView> grids=new List<DataGridView>();
+    readonly Dictionary<string,string> initial=new Dictionary<string,string>();
+    internal LauncherSettingsDialog(string config,Action createBackup) {
+        path=config;backup=createBackup;original=LauncherConfig.Read(path);
+        Text="HELLFORGE / GAME SETTINGS";Size=new Size(1000,700);MinimumSize=new Size(760,480);
+        StartPosition=FormStartPosition.CenterParent;BackColor=Palette.Background;ForeColor=Palette.Text;Font=new Font("Segoe UI",9f);
+        var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=3,ColumnCount=1,Padding=new Padding(12)};
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,65));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,48));Controls.Add(layout);
+        layout.Controls.Add(new Label{Dock=DockStyle.Fill,Text="Edit values, then Apply. Blank removes an override; legacy keys may still apply. Choices show numeric codes.\nChanges apply on the next game launch; engine validation and compatibility restrictions still apply. A settings backup is created before writing.",ForeColor=Palette.Subtle},0,0);
+        var tabs=new TabControl{Dock=DockStyle.Fill,Multiline=true};layout.Controls.Add(tabs,0,1);
+        foreach(string line in original.Split('\n')) {
+            string clean=line.TrimStart('\uFEFF').Split('#',';')[0].Trim();
+            string[] pair=clean.Split(new[]{' ','\t'},StringSplitOptions.RemoveEmptyEntries);
+            if(pair.Length==2)initial[pair[0]]=pair[1];
+        }
+        var options=new List<XElement>();
+        using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("settings-schema.xml"))if(resource!=null)options.AddRange(XDocument.Load(resource).Root.Elements("option"));
+        var known=new HashSet<string>(options.Select(o=>(string)o.Attribute("key")));
+        foreach(string key in initial.Keys.Where(k=>!known.Contains(k)))options.Add(new XElement("option",new XAttribute("key",key),new XAttribute("title",key),new XAttribute("category","Advanced / tuning")));
+        foreach(var group in options.GroupBy(o=>(string)o.Attribute("category"))) {
+            var page=new TabPage(group.Key){BackColor=Palette.Card};tabs.TabPages.Add(page);
+            var grid=new DataGridView{Dock=DockStyle.Fill,BackgroundColor=Palette.Input,BorderStyle=BorderStyle.None,AllowUserToAddRows=false,AllowUserToDeleteRows=false,RowHeadersVisible=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,AutoSizeRowsMode=DataGridViewAutoSizeRowsMode.AllCells};
+            grid.DefaultCellStyle.BackColor=Palette.Input;grid.DefaultCellStyle.ForeColor=Palette.Text;grid.DefaultCellStyle.SelectionBackColor=Palette.AccentDark;grid.DefaultCellStyle.SelectionForeColor=Palette.Text;
+            grid.DefaultCellStyle.WrapMode=DataGridViewTriState.True;grid.ColumnHeadersDefaultCellStyle.BackColor=Palette.Card;grid.ColumnHeadersDefaultCellStyle.ForeColor=Palette.Text;grid.EnableHeadersVisualStyles=false;
+            grid.Columns.Add("setting","Setting");grid.Columns.Add("value","Value");grid.Columns.Add("help","Choices / range / config key");grid.Columns[0].ReadOnly=grid.Columns[2].ReadOnly=true;grid.Columns[1].FillWeight=30;
+            foreach(var option in group) {
+                string key=(string)option.Attribute("key"),value;initial.TryGetValue(key,out value);
+                string help=(string)option.Attribute("choices")??"";
+                if(option.Attribute("min")!=null)help+="  min "+(string)option.Attribute("min");
+                if(option.Attribute("max")!=null)help+="  max "+(string)option.Attribute("max");
+                int row=grid.Rows.Add((string)option.Attribute("title"),value??"",help+"  ["+key+"]");grid.Rows[row].Tag=option;
+                string choices=(string)option.Attribute("choices");
+                if(choices!=null) {
+                    var cell=new DataGridViewComboBoxCell{FlatStyle=FlatStyle.Flat,DisplayStyle=DataGridViewComboBoxDisplayStyle.DropDownButton,DisplayMember="Value",ValueMember="Key"};
+                    var items=new List<KeyValuePair<string,string>>{new KeyValuePair<string,string>("","Default (no override)")};
+                    items.AddRange(choices.Split('|').Select(c=>new KeyValuePair<string,string>(c.Substring(0,c.IndexOf('=')),c.Substring(c.IndexOf('=')+1))));
+                    if(!String.IsNullOrEmpty(value)&&!items.Any(item=>item.Key==value))items.Add(new KeyValuePair<string,string>(value,"Saved: "+value));
+                    cell.DataSource=items;grid.Rows[row].Cells[1]=cell;cell.Value=value??"";
+                }
+            }
+            grids.Add(grid);page.Controls.Add(grid);
+        }
+        foreach(string name in new[]{"doom.cfg","heretic.cfg"}) {
+            string file=Path.Combine(Data.Profile,name);if(!File.Exists(file))continue;
+            var page=new TabPage(name);tabs.TabPages.Add(page);
+            var open=new Button{Text="Open "+name+" in text editor (advanced controls / bindings)",Dock=DockStyle.Top,Height=42};
+            open.Click+=(s,e)=>{try{Process.Start(new ProcessStartInfo("notepad.exe",Data.Quote(file)){UseShellExecute=true});}catch(Exception ex){MessageBox.Show(this,ex.Message);}};
+            page.Controls.Add(new Label{Text="This native configuration uses its own text format. Save in the editor before starting the game.",Dock=DockStyle.Top,Height=48});page.Controls.Add(open);
+        }
+        var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft};layout.Controls.Add(buttons,0,2);
+        var cancel=new Button{Text="CANCEL",DialogResult=DialogResult.Cancel,Width=110,Height=32};buttons.Controls.Add(cancel);CancelButton=cancel;
+        var apply=new Button{Text="APPLY SETTINGS",Width=150,Height=32};buttons.Controls.Add(apply);apply.Click+=(s,e)=>Apply();
+    }
+    void Apply() {
+        try {
+            var edits=new Dictionary<string,string>();
+            foreach(var grid in grids) {grid.EndEdit();foreach(DataGridViewRow row in grid.Rows) {
+                var option=(XElement)row.Tag;string key=(string)option.Attribute("key"),old;
+                string value=Convert.ToString(row.Cells[1].Value).Trim();initial.TryGetValue(key,out old);
+                if(value==(old??""))continue;
+                if(value.Length!=0) {
+                    double n;
+                    if(!Double.TryParse(value,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out n)||Double.IsInfinity(n)||Double.IsNaN(n))throw new InvalidDataException(key+": enter a finite numeric value.");
+                    string choices=(string)option.Attribute("choices");
+                    if(choices!=null&&!choices.Split('|').Any(c=>c.Split('=')[0]==value))throw new InvalidDataException(key+": use a listed numeric choice.");
+                    foreach(string bound in new[]{"min","max"}) {
+                        double limit;var attr=option.Attribute(bound);
+                        if(attr!=null&&Double.TryParse(attr.Value,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out limit)&&(bound=="min"?n<limit:n>limit))throw new InvalidDataException(key+": value outside the displayed range.");
+                    }
+                }
+                edits[key]=value;
+            }}
+            if(edits.Count!=0){string content=LauncherConfig.Merge(original,edits);backup();LauncherConfig.Write(path,original,content);}
+            DialogResult=DialogResult.OK;Close();
+        } catch(Exception e){MessageBox.Show(this,e.Message,"Settings not saved",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+    }
+}
+
+// Decode a handful of stock patches from the user's IWAD; commercial artwork is never bundled.
+internal sealed class WadMascot : IDisposable {
+    readonly List<Bitmap> actors=new List<Bitmap>(),fire=new List<Bitmap>();
+    internal bool Animated {get{return actors.Count>0;}}
+    internal void Load(string path) {
+        Dispose();if(String.IsNullOrEmpty(path)||!File.Exists(path))return;
+        try {
+            using(var stream=File.OpenRead(path))using(var reader=new BinaryReader(stream)) {
+                if(stream.Length<12)return;reader.ReadInt32();int count=reader.ReadInt32(),offset=reader.ReadInt32();
+                if(count<1||count>100000||offset<12||(long)offset+count*16L>stream.Length)return;
+                var entries=new Dictionary<string,Tuple<int,int>>();stream.Position=offset;
+                for(int i=0;i<count;i++){int start=reader.ReadInt32(),length=reader.ReadInt32();string name=Encoding.ASCII.GetString(reader.ReadBytes(8)).TrimEnd('\0');if(start>=0&&length>=0&&(long)start+length<=stream.Length)entries[name]=Tuple.Create(start,length);}
+                Tuple<int,int> palette;if(!entries.TryGetValue("PLAYPAL",out palette)||palette.Item2<768)return;
+                stream.Position=palette.Item1;byte[] colors=reader.ReadBytes(768);
+                foreach(string name in new[]{"VILEA1","VILEB1","VILEC1","VILED1","FIREA0","FIREB0","FIREC0","FIRED0","FIREE0","FIREF0"}) {
+                    Tuple<int,int> entry;bool mirrored=false;
+                    if(!entries.TryGetValue(name,out entry)) {
+                        var combined=entries.FirstOrDefault(p=>p.Key.StartsWith(name,StringComparison.Ordinal));
+                        if(combined.Key==null){combined=entries.FirstOrDefault(p=>p.Key.Length==8&&p.Key.StartsWith("VILE",StringComparison.Ordinal)&&p.Key.Substring(6,2)==name.Substring(4));mirrored=combined.Key!=null;}
+                        if(combined.Key==null)continue;entry=combined.Value;
+                    }
+                    if(entry.Item2<8||entry.Item2>1048576)continue;
+                    stream.Position=entry.Item1;byte[] patch=reader.ReadBytes(entry.Item2);Bitmap frame=Decode(patch,colors);
+                    if(frame!=null){if(mirrored)frame.RotateFlip(RotateFlipType.RotateNoneFlipX);(name.StartsWith("VILE",StringComparison.Ordinal)?actors:fire).Add(frame);}
+                }
+            }
+        }catch(IOException){Dispose();}catch(ArgumentException){Dispose();}
+    }
+    internal static Bitmap Decode(byte[] bytes,byte[] colors) {
+        if(bytes.Length<8||colors.Length<768)return null;
+        int w=BitConverter.ToUInt16(bytes,0),h=BitConverter.ToUInt16(bytes,2);
+        if(w<1||h<1||w>512||h>512||8+w*4>bytes.Length)return null;
+        var image=new Bitmap(w,h,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        for(int x=0;x<w;x++) {
+            int at=BitConverter.ToInt32(bytes,8+x*4),last=-1;
+            if(at<8+w*4||at>=bytes.Length){image.Dispose();return null;}
+            int posts=0;
+            while(at<bytes.Length&&bytes[at]!=255&&posts++<512) {
+                if(at+3>=bytes.Length){image.Dispose();return null;}
+                int top=bytes[at++],length=bytes[at++];at++;
+                if(top<=last)top+=last;last=top;
+                if(at+length>=bytes.Length){image.Dispose();return null;}
+                for(int y=0;y<length;y++)if(top+y<h){int color=bytes[at+y]*3;image.SetPixel(x,top+y,Color.FromArgb(255,colors[color],colors[color+1],colors[color+2]));}
+                at+=length+1;
+            }
+        }
+        return image;
+    }
+    internal void Draw(Graphics g,Rectangle bounds,int tick) {
+        if(actors.Count==0) {
+            using(var brush=new SolidBrush(Palette.Subtle))using(var font=new Font("Consolas",8f))g.DrawString("ARCH-VILE FX\nSelect a Doom II IWAD",font,brush,bounds);
+            return;
+        }
+        var mode=g.InterpolationMode;g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        var actor=actors[(tick/4)%actors.Count];float scale=Math.Min(bounds.Width/(float)Math.Max(actor.Width,100),bounds.Height/(float)actor.Height);
+        int w=(int)(actor.Width*scale),h=(int)(actor.Height*scale),left=bounds.Left+(bounds.Width-w)/2,top=bounds.Bottom-h;
+        using(var glow=new SolidBrush(Color.FromArgb(45+(tick%4)*9,Palette.Accent)))g.FillEllipse(glow,bounds.Left,bounds.Bottom-19,bounds.Width,18);
+        g.DrawImage(actor,new Rectangle(left,top,w,h));
+        if(fire.Count>0){var flame=fire[tick%fire.Count];int fw=Math.Min(bounds.Width,(int)(flame.Width*scale));g.DrawImage(flame,new Rectangle(bounds.Left+(bounds.Width-fw)/2,bounds.Bottom-(int)(flame.Height*scale),fw,(int)(flame.Height*scale)));}
+        g.InterpolationMode=mode;
+    }
+    public void Dispose(){foreach(var frame in actors)frame.Dispose();foreach(var frame in fire)frame.Dispose();actors.Clear();fire.Clear();}
 }

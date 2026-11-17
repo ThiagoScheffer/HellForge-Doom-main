@@ -42,7 +42,13 @@ if ($Experimental) {
     $lines += @('monster_hibernation 1', 'swarm_debug 0', 'sprite_frustum_filter 1')
     $lines | Set-Content -LiteralPath $graphicsResource -Encoding UTF8
 }
-$compilerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:x64','/optimize+',"/out:$OutputPath",
+# The checked-in catalogue keeps normal builds independent of Python.
+$catalogue = [xml](Get-Content -LiteralPath "$PSScriptRoot\settings-schema.xml" -Raw)
+$nativeSettingsHash = (Get-FileHash -LiteralPath "$root\duct-tape-doom-main\platform\settings_panel.cpp" -Algorithm SHA256).Hash
+if ($nativeSettingsHash -ne $catalogue.settings.source_sha256) {
+    Write-Warning 'Launcher settings catalogue is older than the F4 source. Run python tools/Generate-LauncherSettings.py to refresh it.'
+}
+$compilerArgs = @("/win32icon:$PSScriptRoot\hellforge.ico", "/resource:$PSScriptRoot\hellforge.ico,hellforge.ico", "/resource:$PSScriptRoot\settings-schema.xml,settings-schema.xml", '/nologo','/codepage:65001','/target:winexe','/platform:x64','/optimize+',"/out:$OutputPath",
     "/resource:$EnginePath,doom.exe", "/resource:$PSScriptRoot\hero.png,hero.png", "/resource:$graphicsResource,graphics.cfg",
     "/resource:$PSScriptRoot\DiggingMaterials.wad,DiggingMaterials.wad", "/resource:$PSScriptRoot\mods\FluidWeapons.pk3,FluidWeapons.pk3",
     "/resource:$PSScriptRoot\mods\FluidWeapons-SFX.pk3,FluidWeapons-SFX.pk3", "/resource:$PSScriptRoot\mods\FluidMonsters.pk3,FluidMonsters.pk3",

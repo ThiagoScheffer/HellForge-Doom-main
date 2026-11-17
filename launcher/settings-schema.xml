@@ -1,0 +1,358 @@
+<?xml version='1.0' encoding='utf-8'?>
+<settings source="platform/settings_panel.cpp" source_sha256="e67457a805e843f452925e5a4a87055fbb4d4d01b32945a0cc71b36bec395596">
+  <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
+  <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
+  <option key="msaa" title="Anti-aliasing (MSAA)" category="Display" kind="slider" min="0" step="1" />
+  <option key="fov" title="Field of view" category="Display" kind="slider" min="60" max="120" step="5" />
+  <option key="widescreen" title="Widescreen" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="hud_style" title="HUD style" category="Display" kind="choice" choices="0=Classic|1=Modern compact|2=Modern tactical" />
+  <option key="hud_face" title="Modern HUD face" category="Display" kind="choice" choices="0=Hidden|1=Left|2=Center" />
+  <option key="hud_background_opacity" title="HUD background opacity" category="Display" kind="slider" min="0" max="100" step="5" />
+  <option key="hud_scale" title="Modern HUD size" category="Display" kind="slider" min="50" max="100" step="5" />
+  <option key="hud_layout" title="Modern HUD layout" category="Display" kind="choice" choices="0=Bottom corners|1=Bottom centered|2=Top corners" />
+  <option key="look" title="Mouse look" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="invert_look" title="Invert mouse look" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="classic_aim" title="Classic aim" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="crosshair" title="Crosshair" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="key_pickup_hands" title="Key pickup hands" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="helmet_face" title="Doomguy portrait" category="Display" kind="choice" choices="0=Original|3=Silver helmet|4=Tan helmet|1=Silver helmet 2.0|2=Tan helmet 2.0" />
+  <option key="combat_notices" title="Combat achievements" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="fps" title="Show FPS and frame time" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="quick_confirm" title="Confirm quicksave and quickload" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="ps2_style" title="PS2-style filter" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="retro" title="Retro scanlines" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="palette" title="Doom palette colors" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="monster_hibernation" title="Idle monster hibernation" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="swarm_debug" title="Swarm diagnostics" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="death_load_last_save" title="Load last save on death" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="boost_chaingun" title="Enhanced chaingun" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="monster_recovery" title="Stuck monster recovery" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="key_arena" title="Key pickup lockdown arenas" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="arena_radius" title="Arena radius" category="Gameplay" kind="choice" choices="384=Compact|512=Standard|768=Large" />
+  <option key="environment_effects" title="Environmental reactions" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="environment_budget" title="Particle budget" category="Environment" kind="choice" choices="64=Low|128=Balanced|256=High" />
+  <option key="rocket_chunks" title="Rocket voxel chunks" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="pressure_waves" title="Blast pressure waves" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="settling_dust" title="Destruction dust and settling" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="debris_liquids" title="Debris liquid reactions" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="outdoor_wind" title="Outdoor wind dust" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="outdoor_wind_density" title="Wind dust density" category="Environment" kind="slider" min="0.25" max="2" step="0.25" />
+  <option key="electrical_damage" title="Damaged machinery sputtering" category="Environment" kind="check" choices="0=Off|1=On" />
+  <option key="breakable_walls" title="Breakable surfaces (experimental)" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="wall_damage" title="Wall damage" category="Destruction" kind="choice" choices="100=100%|150=150%|200=200%|250=250%|300=300%|350=350%|400=400%|450=450%|500=500%" />
+  <option key="through_walls" title="Through-wall breaches (experimental)" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="player_surface_damage" title="Player weapon surface damage" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="monster_surface_damage" title="Monster projectile damage" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="deeper_digging" title="Deeper digging (up to 4096 units)" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="door_blowout" title="Third-rocket door blowout" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="key_door_shield" title="Key-locked door shields" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="switch_door_shield" title="Switch-operated door shields" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="breach_doors" title="Breachable doors (can break maps)" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="door_sparks" title="Opening door sparks" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="chain_collapses" title="Local chain collapses" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="hanging_fragments" title="Delay before fragments fall" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="collapse_size" title="Largest detached fragment" category="Destruction" kind="choice" choices="4=Small|12=Medium|24=Large" />
+  <option key="critical_parts" title="Critical parts" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="enhanced_weak_points" title="Enhanced Monster Weak Points" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="monster_weapon_vulnerabilities" title="Monster Weapon Vulnerabilities" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="localized_injury_effects" title="Localized Injury Effects" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="elemental_damage_over_time" title="Elemental Damage Over Time" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="combat_event_messages" title="Colored Combat Notifications" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="elemental_combat_fx" title="Elemental Combat FX" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="advanced_monster_reactions" title="Advanced Monster Reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="eye_injuries" title="Eye Injuries" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="monster_bleeding" title="Monster Bleeding" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="monster_feeding" title="Monster Feeding" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="headshot_sound" title="Headshot Sound" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="headshot_frenzy" title="Headshot Frenzy" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="monster_metal_sparks" title="Monster Metal Sparks" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="headshot_feedback" title="Headshot Feedback" category="Destruction" kind="choice" choices="0=Off|1=HS Indicator|2=Impact Effect|3=Both" />
+  <option key="material_rubble" title="Match rubble to surface" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gun_impacts" title="Gun impacts" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="blood" title="Blood splats and pools" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="blood_spray" title="Blood spray and trails" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="blood_shine" title="Wet blood shine" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="monster_skin_damage" title="Monster skin damage" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="wounds" title="Wound holes" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="varied_deaths" title="Varied deaths" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="death_falls" title="Procedural falls" category="Destruction" kind="choice" choices="0=Off|1=By the hit|2=Legs swept|3=Chest blast|4=Head shot" />
+  <option key="death_face_viewer" title="Dying turn to face you" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="death_motion" title="Death reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="hit_flinch" title="Hit flinches" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="body_motion_strength" title="Reaction strength" category="Destruction" kind="slider" min="0.5" max="3" step="0.25" />
+  <option key="soft_effects" title="Soft effect sprites" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="shootable_lights" title="Shootable lights" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="kill_shots_carry" title="Kill shots carry on" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="filter" title="Walls and floors" category="Textures" kind="choice" choices="0=Crisp pixels|1=Smooth (bilinear)|2=Sharp bilinear" />
+  <option key="sharp_softness" title="Edge softness" category="Textures" kind="slider" min="0" max="1" step="0.05" />
+  <option key="palette_mipmaps" title="Palette mipmaps" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="sprite_filter" title="Sprites" category="Textures" kind="choice" choices="0=Crisp pixels|1=Soft (bilinear)" />
+  <option key="surface_detail" title="Bump detail and metal gloss" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="varied_highlights" title="Varied highlights" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="uneven_tiles" title="Uneven floor tiles" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="uneven_walls" title="Uneven wall and ceiling tiles" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="weapon_lighting" title="Relit weapon" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="window_glass" title="Window glass" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="progressive_glass" title="Progressive glass damage" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="glass_reflections" title="Glass reflections" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="emissive" title="Emissive textures" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="glossy_screens" title="Glossy monitor screens" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="live_readouts" title="Live readouts" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="glowing_eyes" title="Glowing eyes" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="advanced_tactics" title="Advanced tactics" category="Monster AI" kind="check" choices="0=Off|1=On" />
+  <option key="aggressive_ai" title="Aggressive AI" category="Monster AI" kind="check" choices="0=Off|1=On" />
+  <option key="persistent_pursuit" title="Persistent pursuit" category="Monster AI" kind="check" choices="0=Off|1=On" />
+  <option key="voxel_models" title="Voxel models" category="Bundled mods" kind="check" choices="0=Off|1=On" />
+  <option key="voxel_eyes" title="Voxel glowing eyes" category="Bundled mods" kind="check" choices="0=Off|1=On" />
+  <option key="mod_fluid_weapons" title="FluidWeapons" category="Bundled mods" kind="check" choices="0=Off|1=On" />
+  <option key="mod_fluid_sounds" title="FluidWeapons SFX add-on" category="Bundled mods" kind="check" choices="0=Off|1=On" />
+  <option key="mod_fluid_monsters" title="FluidMonsters" category="Bundled mods" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_firing_smoke" title="Muzzle smoke" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_reload_smoke" title="Reload smoke" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_hot_smoke" title="Hot barrel smoke" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_smoke_duration" title="Barrel fume duration" category="Fluid Weapons" kind="slider" min="1" max="5" step=".5" />
+  <option key="fluid_smoke_bio" title="Original Bio smoke texture" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_indoor_smoke" title="Indoor smoke buildup" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_saw_smoke" title="Chainsaw exhaust" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_saw_blood" title="Chainsaw blade blood" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_idle_gestures" title="Idle gestures" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_rocket_fire" title="Rocket fire effect" category="Fluid Weapons" kind="choice" choices="0=Soft glow|1=Grainy fire" />
+  <option key="fluid_bare_hands" title="Bare fists" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_fast_pistol" title="Fast pistol" category="Fluid Weapons" kind="check" choices="0=Off|1=On" />
+  <option key="fluid_gloves" title="Glove color" category="Fluid Weapons" kind="choice" choices="0=Classic tan|1=Black|2=Brown|3=Green|4=Red|5=Grey|6=Blue|7=Custom" />
+  <option key="fluid_glove_red" title="Highlight red" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="fluid_glove_green" title="Highlight green" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="fluid_glove_blue" title="Highlight blue" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="fluid_shade_red" title="Shadow red" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="fluid_shade_green" title="Shadow green" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="fluid_shade_blue" title="Shadow blue" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
+  <option key="map_light_cache" title="Cache map lighting" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="baked_lights" title="Baked static lights" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="window_light" title="Window light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="window_strength" title="Window light strength" category="Lighting" kind="slider" min="0.5" max="2" step="0.25" />
+  <option key="dim_lit_rooms" title="Darker rooms around lamps and windows" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="unlit_darkening" title="Darker rooms without lamps" category="Lighting" kind="slider" min="0" max="0.85" step="0.05" />
+  <option key="sun_shadows" title="Sun shadows" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="bounce_light" title="Bounce light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="bounce_tint" title="Room color from bounce" category="Lighting" kind="slider" min="0" max="4" step="0.5" />
+  <option key="sky_light" title="Sky light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="baked_occlusion" title="Ambient occlusion" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="decoration_shadows" title="Decoration shadows" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="texel_lighting" title="Texel-aligned baked light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="soft_light" title="Light seams and contact shading" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="light_flow" title="Sector light flow" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="door_light" title="Door light spill" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="moving_relight" title="Moving doors re-light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="eye_adaptation" title="Eye adaptation" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="flashlight_tint" title="Flashlight tint" category="Lighting" kind="slider" min="0" max="2" step="0.5" />
+  <option key="classic_flashlight" title="Classic flashlight" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="stippled_shadows" title="Stippled shadow edges" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="flashlight_shadows" title="Flashlight silhouettes" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="player_shadow" title="Player shadow" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="fog" title="Atmospheric fog" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="sun_shafts" title="Sunbeams" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="sun_scatter" title="Sunbeam scattering" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="immersive_sky" title="Immersive sky environment" category="Atmosphere" kind="choice" choices="0=Off (original sky)|1=Auto (DOOM episodes)|2=Rocky mountains|3=Ice mountains|4=Inferno|5=Burning city" />
+  <option key="sun_disc" title="Sun in the sky" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="dust_motes" title="Dust motes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="embers" title="Embers" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="heat_haze" title="Heat haze" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="decoration_ambience" title="Decoration immersion" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="decoration_insects" title="Corpse insects" category="Atmosphere" kind="choice" choices="0=Off|1=Flies|2=Flies and worms" />
+  <option key="decoration_delay" title="Decay delay" category="Atmosphere" kind="choice" choices="0=Short|1=Normal|2=Long" />
+  <option key="authored_episodes" title="Authored episodes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
+  <option key="worn_plates" title="Worn plates" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="window_streaks" title="Window streaks" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="reflections" title="Reflections" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="retro_reflections" title="Retro reflections (PS1 style)" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics" title="Caustics" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="ceiling_caustics" title="Caustics on ceilings" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_computed" title="Computed caustics" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_grow" title="Caustics grow with distance" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_angle" title="Flashlight reflection angle" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_sway" title="Caustic sway" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_sprites" title="Caustics on monsters and things" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="caustics_shots" title="Caustics from shots" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="shore_ripples" title="Shore ripples [High cost]" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="glow_edges" title="Glowing liquid edges" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="damp_shores" title="Damp shores" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="liquid_projectile_impacts" title="Liquid projectile bursts" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="splashes" title="Splashes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="music_device" title="Music" category="Sound" kind="choice" choices="0=SoundFont|1=OPL (FM)|2=Mac synthesizer" />
+  <option key="sfx_resampling" title="Sample playback" category="Sound" kind="choice" choices="0=Original|1=Smooth|2=Clean" />
+  <option key="sfx_treble" title="Made-up treble" category="Sound" kind="slider" min="0" max="2" step="0.25" />
+  <option key="made_impacts" title="Sparks, dying lights and glass" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="glass_sound" title="Breaking glass" category="Sound" kind="choice" choices="0=Shatter|1=Fracture" />
+  <option key="footsteps" title="Footsteps and splashes" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="ambience" title="Ambience" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="hidden_machinery" title="Machinery behind walls" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="adjacent_reverb" title="Echoes from adjoining halls" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="alternative_computer_sounds" title="Alternative computer sounds" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="ambience_amount" title="Ambience volume" category="Sound" kind="slider" min="0.25" max="2" step="0.25" />
+  <option key="near_miss_sounds" title="Near-miss bullet sounds" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="room_acoustics" title="Room acoustics" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="reverb_amount" title="Echo and reverb" category="Sound" kind="slider" min="0.25" max="2" step="0.25" />
+  <option key="muffle_walls" title="Muffled behind walls" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="muffle_distance" title="Duller with distance" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="natural_falloff" title="Natural distance falloff" category="Sound" kind="check" choices="0=Off|1=On" />
+  <option key="ambush_sight_reuse" title="Ambush sight reuse" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="sprite_frustum_filter" title="Conservative sprite filtering" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="bake_only_lights" title="Bake-only static lights" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="grid_sprite_light" title="Grid lighting for monsters" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="unoccluded_surface_lights" title="Unblocked glowing-texture light" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="fewer_surface_lights" title="Fewer glowing-texture lights" category="Performance" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_director_enabled" title="Enable Encounter Director" category="ENCOUNTER DIRECTOR" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_monsters" title="Initial Monster Randomization" category="ENCOUNTER DIRECTOR" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_reinforcements_enabled" title="Dynamic Reinforcements" category="ENCOUNTER DIRECTOR" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_items" title="Item Randomization" category="ENCOUNTER DIRECTOR" kind="check" choices="0=Off|1=On" />
+  <option key="" title="Original Monster Streaming" category="ENCOUNTER DIRECTOR" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomization_strength" title="Randomization Strength (%)" category="ED Monsters" kind="slider" min="0" max="100" step="1" />
+  <option key="encounter_preserve_bosses" title="Preserve Bosses" category="ED Monsters" kind="choice" choices="0=Off|1=Bosses|2=Strict" />
+  <option key="encounter_threat_weighted" title="Threat-Weighted Selection" category="ED Monsters" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_min_spawn_distance" title="Minimum Spawn Distance" category="ED Reinforcements" kind="slider" min="64" max="8191" step="1" />
+  <option key="encounter_max_spawn_distance" title="Maximum Spawn Distance" category="ED Reinforcements" kind="slider" min="65" max="8192" step="1" />
+  <option key="encounter_min_group_size" title="Minimum Group Size" category="ED Reinforcements" kind="slider" min="1" max="16" step="1" />
+  <option key="encounter_max_group_size" title="Maximum Group Size" category="ED Reinforcements" kind="slider" min="1" max="16" step="1" />
+  <option key="encounter_min_spawn_interval" title="Minimum Interval (seconds)" category="ED Reinforcements" kind="slider" min="5" max="600" step="1" />
+  <option key="encounter_max_spawn_interval" title="Maximum Interval (seconds)" category="ED Reinforcements" kind="slider" min="5" max="600" step="1" />
+  <option key="encounter_max_active_additional" title="Maximum Active Additional" category="ED Reinforcements" kind="slider" min="1" max="64" step="1" />
+  <option key="encounter_max_total_additional" title="Maximum Additional per Map" category="ED Reinforcements" kind="slider" min="1" max="256" step="1" />
+  <option key="encounter_max_threat" title="Maximum Additional Threat" category="ED Reinforcements" kind="slider" min="1" max="256" step="1" />
+  <option key="encounter_no_spawns_behind" title="No Spawns Behind Player" category="ED Reinforcements" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_adaptive_pacing" title="Adaptive Reinforcement Pacing" category="ED Reinforcements" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_pause_for_boss" title="Pause During Boss Encounters" category="ED Reinforcements" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_ammo" title="Randomize Ammo" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_armor" title="Randomize Armor" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_health" title="Randomize Health" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_powerups" title="Randomize Powerups" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_weapons" title="Randomize Weapons" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_randomize_custom_inventory" title="Randomize Custom Inventory" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_exclude_counted_items" title="Exclude Counted Items" category="ED Items" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_item_coverage" title="Item Randomization Coverage (%)" category="ED Items" kind="slider" min="0" max="100" step="1" />
+  <option key="encounter_stream_original_monsters" title="Original Monster Streaming" category="ED Population" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_stream_initial_budget_mode" title="Initial Budget Type" category="ED Population" kind="choice" choices="0=Count|1=Percent" />
+  <option key="encounter_stream_initial_count" title="Initial Monster Count" category="ED Population" kind="slider" min="0" max="1000000" step="100" />
+  <option key="encounter_stream_initial_percent" title="Initial Monster Percentage" category="ED Population" kind="slider" min="1" max="100" step=".5" />
+  <option key="encounter_stream_population_policy" title="Population Safety Mode" category="ED Population" kind="choice" choices="0=Compatibility|1=Performance" />
+  <option key="encounter_stream_policy" title="Activation Policy" category="ED Population" kind="choice" choices="0=Proximity / Progress|1=Timed Packs|2=Hybrid" />
+  <option key="encounter_stream_activate_distance" title="Activation Distance" category="ED Population" kind="slider" min="128" max="8190" step="1" />
+  <option key="encounter_stream_prefetch_distance" title="Prefetch Distance" category="ED Population" kind="slider" min="129" max="8191" step="1" />
+  <option key="encounter_stream_max_spawns_per_tic" title="Normal Spawn Budget" category="ED Population" kind="slider" min="1" max="64" step="1" />
+  <option key="encounter_stream_pack_size" title="Spawn Pack Size" category="ED Population" kind="slider" min="1" max="64" step="1" />
+  <option key="encounter_stream_pack_interval" title="Pack Interval (seconds)" category="ED Population" kind="slider" min=".5" max="60" step=".5" />
+  <option key="encounter_stream_soft_active_limit" title="Soft Active Target" category="ED Population" kind="slider" min="1" max="8192" step="1" />
+  <option key="encounter_stream_safe_stasis" title="Safe Distant Stasis (unavailable)" category="ED Population" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_stream_stasis_distance" title="Stasis Distance (reserved)" category="ED Population" kind="slider" min="130" max="8192" step="1" />
+  <option key="encounter_random_seed" title="Custom Random Seed" category="ED Advanced" kind="slider" min="0" max="16777215" step="1" />
+  <option key="encounter_max_local_threat" title="Maximum Local Encounter Threat" category="ED Advanced" kind="slider" min="1" max="512" step="1" />
+  <option key="encounter_max_spawn_attempts" title="Maximum Attempts per Event" category="ED Advanced" kind="slider" min="1" max="64" step="1" />
+  <option key="encounter_debug" title="Display Director Debug Information" category="ED Advanced" kind="check" choices="0=Off|1=On" />
+  <option key="corner_peek" title="Corner peeking" category="Controls" kind="check" choices="0=Off|1=On" />
+  <option key="peek_left" title="Peek left" category="Controls" kind="key" />
+  <option key="peek_right" title="Peek right" category="Controls" kind="key" />
+  <option key="speedrun_hud" title="Enable Speedrun HUD" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_background_opacity" title="Background opacity" category="SPEEDRUN" kind="slider" min="0" max="100" step="5" />
+  <option key="speedrun_layout" title="Info layout" category="SPEEDRUN" kind="choice" choices="0=Column|1=Row" />
+  <option key="speedrun_x" title="X adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
+  <option key="speedrun_y" title="Y adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
+  <option key="speedrun_anchor" title="Overlay position" category="SPEEDRUN" kind="choice" choices="0=Upper left|1=Upper right|2=Lower left|3=Lower right" />
+  <option key="speedrun_attempts" title="Map Attempts" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_deaths" title="Map Deaths" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_killstreak" title="Killstreak" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_attempt_time" title="Current Attempt Time" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_runtime" title="Gameplay Runtime" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_damage_dealt" title="Total Damage Dealt" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_damage_taken" title="Total Damage Taken" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="encounter_threat_zombieman" title="Zombieman threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_shotgun_guy" title="Shotgun Guy threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_chaingunner" title="Chaingunner threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_imp" title="Imp threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_pinky" title="Pinky threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_spectre" title="Spectre threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_lost_soul" title="Lost Soul threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_cacodemon" title="Cacodemon threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_hell_knight" title="Hell Knight threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_baron" title="Baron threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_mancubus" title="Mancubus threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_arachnotron" title="Arachnotron threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_revenant" title="Revenant threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_archvile" title="Archvile threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_pain_elemental" title="Pain Elemental threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_cyberdemon" title="Cyberdemon threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="encounter_threat_spider" title="Spider threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
+  <option key="wp_humanoid_head" title="Humanoid Head" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_heavy_head" title="Heavy Head" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_cyber_head" title="Cyber Head" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_face_pellet" title="Face Pellet" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_eye_bullet" title="Eye Bullet" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_brain_pellet" title="Brain Pellet" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_heavy_plasma" title="Heavy Plasma" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_cyber_plasma" title="Cyber Plasma" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_floating_plasma" title="Floating Plasma" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_mechanical_plasma" title="Mechanical Plasma" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_heavy_rocket" title="Heavy Rocket" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_brain_rocket" title="Brain Rocket" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_leg_rocket" title="Leg Rocket" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_eye_execution_chance" title="Eye Execution Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_aim_chance" title="Aim Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_aim_degrees" title="Aim Degrees" category="Combat tuning" kind="slider" min="0" max="30" step="1" />
+  <option key="wp_aim_duration" title="Aim Duration" category="Combat tuning" kind="slider" min="1" max="350" step="1" />
+  <option key="wp_aim_cooldown" title="Aim Cooldown" category="Combat tuning" kind="slider" min="1" max="3500" step="1" />
+  <option key="wp_leg_chance" title="Leg Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_leg_duration" title="Leg Duration" category="Combat tuning" kind="slider" min="1" max="350" step="1" />
+  <option key="wp_leg_cooldown" title="Leg Cooldown" category="Combat tuning" kind="slider" min="1" max="3500" step="1" />
+  <option key="wp_shotgun_range" title="Shotgun Range" category="Combat tuning" kind="slider" min="1" max="1024" step="1" />
+  <option key="wp_ssg_range" title="Ssg Range" category="Combat tuning" kind="slider" min="1" max="1024" step="1" />
+  <option key="wp_shotgun_quota" title="Shotgun Quota" category="Combat tuning" kind="slider" min="1" max="7" step="1" />
+  <option key="wp_ssg_quota" title="Ssg Quota" category="Combat tuning" kind="slider" min="1" max="20" step="1" />
+  <option key="wp_bleed_chance" title="Bleed Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_bleed_duration" title="Bleed Duration" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_bleed_damage" title="Bleed Damage" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+  <option key="wp_bleed_slow" title="Bleed Slow" category="Combat tuning" kind="slider" min="0" max="90" step="1" />
+  <option key="wp_frenzy_chance" title="Frenzy Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_frenzy_duration" title="Frenzy Duration" category="Combat tuning" kind="slider" min="1" max="3500" step="1" />
+  <option key="wp_frenzy_range" title="Frenzy Range" category="Combat tuning" kind="slider" min="1" max="1024" step="1" />
+  <option key="wp_frenzy_search" title="Frenzy Search" category="Combat tuning" kind="slider" min="1" max="2048" step="1" />
+  <option key="wp_bleed_damage_2" title="Bleed Damage 2" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+  <option key="wp_bleed_damage_3" title="Bleed Damage 3" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+  <option key="wp_bleed_duration_2" title="Bleed Duration 2" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_bleed_duration_3" title="Bleed Duration 3" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_bleed_attack_2" title="Bleed Attack 2" category="Combat tuning" kind="slider" min="0" max="50" step="1" />
+  <option key="wp_bleed_attack_3" title="Bleed Attack 3" category="Combat tuning" kind="slider" min="0" max="50" step="1" />
+  <option key="wp_bleed_voice_2" title="Bleed Voice 2" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_bleed_voice_3" title="Bleed Voice 3" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_feed_start" title="Feed Start" category="Combat tuning" kind="slider" min="1" max="50" step="1" />
+  <option key="wp_feed_stop" title="Feed Stop" category="Combat tuning" kind="slider" min="51" max="100" step="1" />
+  <option key="wp_feed_radius" title="Feed Radius" category="Combat tuning" kind="slider" min="64" max="1024" step="1" />
+  <option key="wp_feed_bite" title="Feed Bite" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+  <option key="wp_feed_window" title="Feed Window" category="Combat tuning" kind="slider" min="35" max="1050" step="1" />
+  <option key="wp_feed_speed" title="Feed Speed" category="Combat tuning" kind="slider" min="100" max="150" step="1" />
+  <option key="wp_feed_failure_cooldown" title="Feed Failure Cooldown" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_feed_vile_start" title="Feed Vile Start" category="Combat tuning" kind="slider" min="1" max="50" step="1" />
+  <option key="wp_feed_vile_damage" title="Feed Vile Damage" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+  <option key="wp_feed_vile_reach" title="Feed Vile Reach" category="Combat tuning" kind="slider" min="32" max="128" step="1" />
+  <option key="wp_feed_live_heal" title="Feed Live Heal" category="Combat tuning" kind="slider" min="1" max="20" step="1" />
+  <option key="wp_feed_corpse_heal" title="Feed Corpse Heal" category="Combat tuning" kind="slider" min="1" max="25" step="1" />
+  <option key="wp_feed_search" title="Feed Search" category="Combat tuning" kind="slider" min="7" max="350" step="1" />
+  <option key="wp_feed_pursuit" title="Feed Pursuit" category="Combat tuning" kind="slider" min="35" max="350" step="1" />
+  <option key="wp_feed_cooldown" title="Feed Cooldown" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_feed_threat" title="Feed Threat" category="Combat tuning" kind="slider" min="0" max="256" step="1" />
+  <option key="wp_metal_sparks_bullet" title="Metal Sparks Bullet" category="Combat tuning" kind="slider" min="1" max="32" step="1" />
+  <option key="wp_metal_sparks_pellet" title="Metal Sparks Pellet" category="Combat tuning" kind="slider" min="1" max="16" step="1" />
+  <option key="wp_metal_sparks_cap" title="Metal Sparks Cap" category="Combat tuning" kind="slider" min="1" max="64" step="1" />
+  <option key="wp_metal_spark_scale" title="Metal Spark Scale" category="Combat tuning" kind="slider" min="100" max="300" step="1" />
+  <option key="wp_head_blood_scale" title="Head Blood Scale" category="Combat tuning" kind="slider" min="100" max="300" step="1" />
+  <option key="wp_head_wall_reach" title="Head Wall Reach" category="Combat tuning" kind="slider" min="1" max="96" step="1" />
+  <option key="wp_head_wall_marks" title="Head Wall Marks" category="Combat tuning" kind="slider" min="0" max="3" step="1" />
+  <option key="wp_eye_injury_chance" title="Eye Injury Chance" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_eye_rage_duration" title="Eye Rage Duration" category="Combat tuning" kind="slider" min="35" max="3500" step="1" />
+  <option key="wp_blind_fire_interval" title="Blind Fire Interval" category="Combat tuning" kind="slider" min="35" max="350" step="1" />
+  <option key="wp_blind_fire_pitch" title="Blind Fire Pitch" category="Combat tuning" kind="slider" min="0" max="30" step="1" />
+  <option key="wp_eye_rage_incoming" title="Eye Rage Incoming" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_eye_rage_player_damage" title="Eye Rage Player Damage" category="Combat tuning" kind="slider" min="100" max="800" step="1" />
+  <option key="wp_eye_rage_search" title="Eye Rage Search" category="Combat tuning" kind="slider" min="64" max="2048" step="1" />
+  <option key="wp_low_health_percent" title="Low Health Percent" category="Combat tuning" kind="slider" min="0" max="100" step="1" />
+  <option key="wp_face_majority_percent" title="Face Majority Percent" category="Combat tuning" kind="slider" min="1" max="100" step="1" />
+</settings>
