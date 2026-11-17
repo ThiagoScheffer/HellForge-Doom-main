@@ -21,6 +21,7 @@ layout(location=0) out vec4 outColor;
 #define NO_BEAM_FOG
 #define NO_LOCAL_FOG
 #include "lighting.glsl"
+#include "sky_storm.glsl"
 #include "sky_clouds.glsl"
 #include "sky_horizon.glsl"
 void main() {
@@ -78,6 +79,14 @@ void main() {
     // silhouettes meet a soft band rather than a hard painted edge.
     if(c.materials.z>0.0&&c.effects.z==0.0)
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
+    // Lightning is behind the three virtual horizon layers and clouds.
+    // The skyline therefore masks the bolt rather than being lit on top.
+    if(c.style.z>0.0) {
+        float stroke=hellforgeBoltMask(angle,rise,c.style.y,c.style.w);
+        float halo=hellforgeBoltHalo(angle,rise,c.style.y);
+        color.rgb=mix(color.rgb,max(color.rgb,vec3(0.72,0.81,1.0)),
+                      clamp(stroke*c.style.z*1.7+halo*c.style.z*0.10,0.0,0.85));
+    }
     // Milestone C: three virtual horizon layers compose behind the
     // sky cloud decks. No map geometry or additional GPU drawing is created.
     // Shared with far-plane, sky surfaces, transferred skies and reflections.
@@ -86,6 +95,13 @@ void main() {
     if(hfMode>=2 && hfMode<=5) {
         color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
         color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
+        // Electrical glow scatters through the soft cloud layers; the
+        // bolt itself stays beneath the silhouettes and cloud shading.
+        if(c.weather.w>0.0) {
+            float halo=hellforgeBoltHalo(angle,rise,c.style.y);
+            color.rgb+=vec3(0.18,0.23,0.34)*
+                       (c.weather.w*cloudCover*(0.12+0.34*halo));
+        }
     }
     // The sun at the baked yaw and the height the sky paints it (c.outdoor.w;
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
@@ -131,6 +147,12 @@ void main() {
     // An episode whose outdoors lie dark (Game_Mood) dims its sky with them,
     // and its hour can tint it.
     color.rgb*=c.mood.x*c.mood.yzw;
+    // Brief diffuse electrical illumination of the visible sky only.
+    // No full-screen flash: underground rooms and closed ceilings stay dark.
+    if(c.weather.w>0.0) {
+        float pulse=clamp(c.weather.w,0.0,0.75);
+        color.rgb=mix(color.rgb,max(color.rgb,vec3(0.60,0.72,0.96)),pulse);
+    }
     vec4 fog=fogAlong(c.eye.xyz+ray*2000.0);
     color.rgb=(color.rgb*fog.a+fog.rgb)*c.fx.x;
     // Mirror pass (world.frag): the sky is far, but stays a faint reflection.

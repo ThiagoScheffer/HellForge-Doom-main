@@ -385,6 +385,7 @@ if(DOOM_BUILD_SDL)
         platform/scene3d/weapon.cpp
         platform/scene3d/wear.cpp
         platform/scene3d/weather.cpp
+        platform/scene3d/storm_resources.cpp
         platform/scene3d/windows.cpp
     )
     # The SDL_gpu backend that draws it; gpu3d/internal.h holds what its files share.
@@ -441,6 +442,17 @@ if(DOOM_BUILD_SDL)
     if(MSVC)
         enable_language(RC)
         target_sources(doom PRIVATE platform/engine_version.rc)
+        # Standalone Windows launcher: embed the three original thunder WAVs
+        # directly in doom.exe; no run-time asset path or extra decoder required.
+        set(HELLFORGE_STORM_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/platform/storm_audio")
+        set(HELLFORGE_STORM_RC "${CMAKE_CURRENT_BINARY_DIR}/hellforge_storm.rc")
+        file(WRITE "${HELLFORGE_STORM_RC}"
+            "22001 RCDATA \"${HELLFORGE_STORM_ASSET_DIR}/stronger-thunder.wav\"\n"
+            "22002 RCDATA \"${HELLFORGE_STORM_ASSET_DIR}/medium-thunder.wav\"\n"
+            "22003 RCDATA \"${HELLFORGE_STORM_ASSET_DIR}/distant-thunder.wav\"\n")
+        set_source_files_properties("${HELLFORGE_STORM_RC}" PROPERTIES OBJECT_DEPENDS
+            "${HELLFORGE_STORM_ASSET_DIR}/stronger-thunder.wav;${HELLFORGE_STORM_ASSET_DIR}/medium-thunder.wav;${HELLFORGE_STORM_ASSET_DIR}/distant-thunder.wav")
+        target_sources(doom PRIVATE "${HELLFORGE_STORM_RC}")
         target_compile_options(doom PRIVATE /Zi)
         target_link_options(doom PRIVATE /DEBUG:FULL /OPT:REF /OPT:ICF /INCREMENTAL:NO)
     endif()
@@ -620,6 +632,22 @@ endif()
 
 if(BUILD_TESTING)
     enable_language(CXX)
+    add_executable(doom-storm-rules-tests tests/storm_rules_test.cpp)
+    target_include_directories(doom-storm-rules-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(doom-storm-rules-tests PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(doom-storm-rules-tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(doom-storm-rules-tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME storm-rules COMMAND doom-storm-rules-tests)
+    if(TARGET SDL3::SDL3)
+        add_executable(doom-storm-shutdown-tests tests/storm_shutdown.cpp)
+        target_include_directories(doom-storm-shutdown-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_compile_features(doom-storm-shutdown-tests PRIVATE cxx_std_17)
+        target_link_libraries(doom-storm-shutdown-tests PRIVATE SDL3::SDL3)
+        add_test(NAME storm-shutdown COMMAND doom-storm-shutdown-tests)
+    endif()
     add_executable(doom-weapon-transform-tests tests/weapon_transform.cpp)
     target_compile_features(doom-weapon-transform-tests PRIVATE cxx_std_17)
     add_test(NAME weapon-transform-interpolation COMMAND doom-weapon-transform-tests)

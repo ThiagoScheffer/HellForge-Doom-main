@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="5f972a51b3f4aa7023a8174dd64b4d50111f5cb3ee9a1a8bfdc2b7e7f549fc40">
+<settings source="platform/settings_panel.cpp" source_sha256="d19d7609212a705541f2c6454b74c0fde09a1ba73876657c945d89092d2ad9ab">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -165,6 +165,10 @@
   <option key="corpse_decay_delay" title="Decomposition begins after" category="Atmosphere" kind="choice" choices="2=2 minutes|5=5 minutes|8=8 minutes|10=10 minutes" />
   <option key="authored_episodes" title="Authored episodes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
+  <option key="storm_mode" title="Thunderstorms" category="Atmosphere" kind="choice" choices="0=Off|1=Subtle|2=Normal|3=Dramatic" />
+  <option key="storm_strong_flashes" title="Allow strong lightning flashes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="storm_bolts" title="Visible distant lightning bolts" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="storm_volume" title="Thunder volume" category="Atmosphere" kind="slider" min="0" max="100" step="5" />
   <option key="worn_plates" title="Worn plates" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="window_streaks" title="Window streaks" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="reflections" title="Reflections" category="Atmosphere" kind="check" choices="0=Off|1=On" />

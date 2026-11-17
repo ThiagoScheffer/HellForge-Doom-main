@@ -418,9 +418,11 @@ void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
 void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card=nullptr);
 
 // decoration_ambience.cpp
+// Independent, map-wide corpse-decomposition timeline. Do not remove when
+// updating weather or decoration ambience; geometry.cpp depends on these.
 void corpseDecayReset();
 void corpseDecayTick();
-int corpseDecayStage(const mobj_t *thing); // 0 fresh; 1-3 dry; age independent of visibility.
+int corpseDecayStage(const mobj_t *thing); // 0 fresh; 1-3 dry, independent of camera proximity.
 void decorationAmbienceReset();
 void decorationAmbienceBegin(const Uniforms &camera);
 void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera);
@@ -489,6 +491,7 @@ Image &bloodSpriteImage(int lump,int tint,int &key);
 byte monsterSkinBloodIndex(int type,float shade); // Uses monster-specific blood tint and the WAD's blood palette.
 Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHealth,int &key);
 void monsterSkinReset(); // Before image atlas/map resources are destroyed.
+// Procedurally cached death-sprite variants; original art remains authoritative.
 Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key);
 void corpseDecayImageReset();
 extern int bloodSourceTint;
@@ -697,6 +700,8 @@ bool windowPane(int index,PaneView &out);
 // the windows (following the rain, drying slower than they soak), the wind carrying it
 // (units a second). Per pane, how much rain a broken window has let in.
 extern float rainNow,wetNow,glassWetNow;
+extern float stormFlashNow; // Outdoor lightning pulse, reset per level.
+extern float stormBoltNow,stormBoltAzimuthNow,stormBoltSeedNow;
 extern float rainWind[2];
 float paneSoak(int pane);
 // Where the rain blows (unit vector); the ground's wetness under the sky

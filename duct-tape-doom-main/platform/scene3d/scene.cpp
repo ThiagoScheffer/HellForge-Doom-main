@@ -137,7 +137,7 @@ static void beforeTic() {
     watchWeather();
     watchWear();
     watchShotLights();
-    corpseDecayTick(); // Map-wide, once-per-second corpse ageing; no camera dependency.
+    corpseDecayTick(); // Map-wide corpse aging; never dependent on camera visibility.
 }
 static void acceleratedView(player_t *player) {
     (void)player; worldPending=true; v_overlayactive=true;
@@ -310,10 +310,10 @@ static void startLevel() {
     // Active textures are uploaded lazily by the new map's preparation.
     glassLightShutdown(); // Drops Image pointers before their owners are reclaimed.
     bodyMotionShutdown(); // Includes wound/classification caches keyed by Image*.
-    decorationAmbienceReset(); // Drop all local cosmetic fly/worm emitters.
-    corpseDecayReset(); // Discard corpse ages on level changes and save reloads.
+    decorationAmbienceReset(); // Drop local flies/worms and their emitter state.
+    corpseDecayReset(); // Reset ages on level transition or save reload.
     monsterSkinReset(); // Variant counts and rejected-art identities are map-local.
-    corpseDecayImageReset(); // Reset the 8 MiB dry texture budget.
+    corpseDecayImageReset(); // Release/reset the bounded dry-sprite variant cache.
     bakeMap={};
     images.clear();
     oldThings.clear();oldHeights.clear();tickTime=0;
@@ -461,6 +461,9 @@ FrameView prepareFrame(int w,int h) {
     if(profile.enabled) {profile.frame=I_Render3DFrameProfile{};profile.frame.serial=++profileSerial;pitch=0;}
     camera.projection[2]=1;camera.projection[3]=32768;
     camera.style[0]=settings.ps2Style&&worldPending;
+    // Unused style components carry world-anchored bolt parameters without
+    // changing the 400-byte Camera layout or shader resource bindings.
+    camera.style[1]=0;camera.style[2]=0;camera.style[3]=0;
     camera.effects[0]=settings.filter;camera.effects[1]=settings.retro;
     camera.texFilter[0]=settings.sharpSoftness;camera.texFilter[1]=settings.paletteMips&&settings.filter;
     // A carried torch's colormap (Game_Torch) becomes real light (lights.cpp).
@@ -578,6 +581,13 @@ FrameView prepareFrame(int w,int h) {
         // The far rain sky.frag draws over the sky (weather.cpp's rain stops at the map's sky).
         camera.weather[0]=settings.weather&&camera.effects[2]==0?rainNow:0;
         camera.weather[1]=rainWind[0];camera.weather[2]=rainWind[1];
+        // Sky-only lightning intensity; baked lighting and indoor rooms unchanged.
+        camera.weather[3]=settings.weather&&camera.effects[2]==0?stormFlashNow:0;
+        if(camera.weather[3]>0) {
+            camera.style[1]=stormBoltAzimuthNow;
+            camera.style[2]=stormBoltNow;
+            camera.style[3]=stormBoltSeedNow;
+        }
         renderFraction=fraction;
         // Caustics follow the liquid's frame and crossfade like its floor (surfaceBinding).
         if(!causticFrames.empty()&&causticSpeed>0&&leveltime>0) {

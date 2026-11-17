@@ -153,10 +153,12 @@ byte *I_AllocLow(int length)
 void I_Quit(void)
 {
     D_QuitNetGame();
-    I_ShutdownSound();
-    I_ShutdownMusic();
     M_SaveDefaults();
+    /* Renderer owns the storm audio stream. Release it while SDL audio is
+       still alive, then unregister music before closing the mixer stream. */
     I_ShutdownGraphics();
+    I_ShutdownMusic();
+    I_ShutdownSound();
     exit(EXIT_SUCCESS);
 }
 
@@ -175,11 +177,11 @@ void I_Error(char *error, ...)
     vfprintf(stderr, error, args);
     fputc('\n', stderr);
     va_end(args);
-    I_ShutdownSound();
-    I_ShutdownMusic();
 #ifdef DOOM_NATIVE
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Game_Title(), message, NULL);
 #endif
     I_ShutdownGraphics();
+    I_ShutdownMusic();
+    I_ShutdownSound();
     exit(EXIT_FAILURE);
 }

@@ -367,6 +367,15 @@ void main() {
     if(sprite&&(bakeFlags&(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES))==(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES)&&(vMode&(MODE_SCREEN|MODE_SOFT))==0u&&c.effects.z==0.0)
         color.rgb+=albedo*(1.0-emission)*caustics(vWorld,normal,0u,true)*2.5;
     if((vMode&MODE_MIRROR_FLOOR)!=0u&&c.water.z>0.0&&c.effects.z==0.0) liquidMirror(color,albedo);
+    // Momentary lightning spill onto exposed world surfaces only. This uses
+    // the same sky-openness signal as outdoor haze and does not rebake light,
+    // brighten indoor rooms, sprites, blood, muzzle flashes or reflections.
+    if(mapped&&!sprite&&!blood&&!glassy&&!dead&&c.weather.w>0.0&&
+       sectorInfo[sector].w>0.0&&c.effects.z==0.0&&c.water.z==0.0) {
+        float open=clamp(1.0-outdoorShape(sector).x,0.0,1.0);
+        color.rgb+=albedo*vec3(0.16,0.21,0.28)*
+                   (min(c.weather.w,0.70)*open);
+    }
     // Outdoor haze (c.haze, Game_Sun): surfaces under open sky fade toward
     // the sky's horizon color with distance, so far walls meet the sky.
     if(mapped&&c.haze.w>0.0&&(vMode&MODE_SCREEN)==0u&&sectorInfo[sector].w>0.0) {

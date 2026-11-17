@@ -39,7 +39,7 @@ const char *effectCost(const char *key) {
         {"shore_ripples","HIGH COST: many shoreline particles. Off by default."},
         {"immersive_sky","GPU COST: adds cloud texture fetches and procedural horizon shading for sky pixels."},
         {"decoration_ambience","BOUNDED COST: only maps with fewer than 200 spawned monsters; 12 bodies, 48 flies and 24 worms maximum."},
-        {"corpse_decomposition","BOUNDED COST: under 200 map monsters, at most 199 corpse timestamps and 8 MiB cached visual variants."},
+        {"corpse_decomposition","BOUNDED COST: under 200 map monsters, up to 199 corpse ages and 8 MiB estimated cached sprite variants."},
         {"reflections","HIGH GPU COST: renders the reflected scene again."},
         {"glass_reflections","HIGH GPU COST: another reflected scene when visible."},
         {"msaa","GPU COST rises with sample count and resolution."},
@@ -440,14 +440,16 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Normal is 15-30 seconds for flies and 30-60 for worms.",
                     [](const Settings &d){return d.decorationAmbience!=0&&d.decorationInsects!=0;}),
                 check("corpse_decomposition","Corpse decomposition",&s.corpseDecomposition,
-                    "A portion of ordinary Zombieman, Shotgun Guy, Chaingunner, Imp, Pinky and Spectre corpses gradually dry. "
-                    "Independent of insects. No bosses, gibs or hanging decorations. Disabled at 200+ monsters. Cosmetic only.",
+                    "Dried and discolored death artwork for selected Zombieman, Shotgun Guy, Imp, Pinky, Mancubus, "
+                    "Cacodemon, Hell Knight and Baron corpses. Spectre and Chaingunner are excluded. "
+                    "At Stage 2, selected corpses lose scavengers and associated blood pools. "
+                    "Independent of insects, disabled at 200 or more monsters, cosmetic only.",
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("corpse_decay_delay","Decomposition begins after",&s.corpseDecayDelay,
                     {"2 minutes","5 minutes","8 minutes","10 minutes"},{2,5,8,10},
-                    "Gameplay minutes after the corpse is first detected (scanned across the map). "
-                    "Further drying stages appear after 45 and 120 seconds. Reset on save reload or level change.",
-                    [](const Settings &d){return d.accelerated&&d.corpseDecomposition!=0;})}},
+                    "Gameplay minutes after a corpse is detected in the map-wide scan. "
+                    "Stages 2/3 follow after another 45/120 seconds. Age resets after loading a save or changing maps.",
+                    [](const Settings &d){return d.accelerated!=0&&d.corpseDecomposition!=0;})}},
             {"Authored episodes",{
                 check("authored_episodes","Authored episodes",&s.authored,
                     "Looks picked by hand for the game's own episodes, beyond what DERP derives from the WAD: Knee-Deep in the Dead "
@@ -459,6 +461,20 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "the outside of window glass, the ground darkens as it soaks, and you hear it. Authored episodes: it rains where "
                     "an authored episode's look has rain (DOOM's first episode). Always: on every map. Through a broken window the wind "
                     "blows the rain in, and the floor and wall beneath it get wet."),
+                choice("storm_mode","Thunderstorms",&s.stormMode,{"Off","Subtle","Normal","Dramatic"},{0,1,2,3},
+                    "Optional lightning and delayed close, medium or distant thunder while rain is active. "
+                    "Uses a separate SDL audio stream and respects SFX volume. Off by default.",
+                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0;}),
+                check("storm_strong_flashes","Allow strong lightning flashes",&s.stormStrongFlashes,
+                    "Off limits bright pulses. Sky-only flashes never rebuild lighting or brighten indoor geometry.",
+                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                check("storm_bolts","Visible distant lightning bolts",&s.stormBolts,
+                    "Procedural branching lightning behind the outdoor sky and immersive clouds. "
+                    "Disable to retain diffuse flashes and thunder without visible forks.",
+                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                slider("storm_volume","Thunder volume",&s.stormVolume,0,100,5,
+                    "Thunder level, in percent. The standard sound-effects volume remains authoritative.",
+                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
                 check("worn_plates","Worn plates",&s.wornPlates,
                     "Plain metal plates show years of use: grime packed into their seams, dull blotches, boot scuffs low down, "
                     "and a duller sheen. Only on plates that are otherwise blank, such as the fronts of DOOM's computer desks."),

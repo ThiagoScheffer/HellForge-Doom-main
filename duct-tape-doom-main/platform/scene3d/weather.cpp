@@ -12,16 +12,19 @@
    wetness (wear.glsl), the ambience its sound. Render-only, with its own
    random numbers. */
 #include "internal.h"
+#include "storm_audio.h"
 extern "C" {
 #include "../audio/sound_options.h"
 }
 
 namespace doom3d {
 float rainNow=0,wetNow=0,glassWetNow=0;
+float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
 float rainWind[2]={0,0};
 namespace {
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
 uint32_t weatherSeed=0;
+doom_storm::State stormState;
 float windSpeed=0;
 int weatherTic=-1;
 std::vector<float> soak;
@@ -35,6 +38,9 @@ float downpour(float t) {return (0.8f+0.2f*valueNoise(t,0,6,weatherSeed^0x5bd1e9
 void newLevel() {
     weatherLevelSerial=r_levelserial;weatherTic=-1;
     weatherSeed=levelWeatherSeed();
+    doom_storm::reset(stormState);
+    stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
+    storm_audio::muteQueued();
     windSpeed=90+50*hashUnit(3,4,weatherSeed);
     rainNow=rainy()?downpour(0):0;wetNow=rainNow>0?1:0;glassWetNow=rainNow;
     soak.clear();soakPaneSerial=~0u;
@@ -150,6 +156,19 @@ void watchWeather() {
         else soak[i]=std::max(0.0f,soak[i]-tic/240);
     }
     I_AmbienceRain(settings.accelerated?rainNow:0);
+    // Thunder lives on the game-tic clock, not camera distance or wall time.
+    // This does not consume Doom gameplay RNG or alter rain simulation.
+    const bool active=settings.accelerated&&rainNow>.01f&&settings.weather!=0;
+    doom_storm::Frame storm=doom_storm::advance(stormState,leveltime,TICRATE,
+        settings.stormMode,active,settings.stormStrongFlashes!=0,
+        weatherSeed^0x6a2b9b51u,settings.stormBolts!=0);
+    stormFlashNow=storm.flash;
+    stormBoltNow=storm.bolt;
+    stormBoltAzimuthNow=storm.azimuth;
+    stormBoltSeedNow=storm.boltSeed;
+    if(!active||settings.stormMode<=0)storm_audio::muteQueued();
+    else if(storm.thunder!=doom_storm::Kind::None)
+        storm_audio::play(storm.thunder,settings.stormVolume/100.f,snd_SfxVolume);
 }
 
 namespace {
@@ -398,5 +417,9 @@ void buildRain(const Uniforms &camera) {
     }
 }
 
-void weatherShutdown() {rainNow=wetNow=glassWetNow=0;soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;I_AmbienceRain(0);}
+void weatherShutdown() {
+    rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
+    soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
+    doom_storm::reset(stormState);storm_audio::stop();I_AmbienceRain(0);
+}
 } // namespace doom3d
