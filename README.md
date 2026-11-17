@@ -6,7 +6,7 @@ DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
 extends that foundation with sprite-aware combat, monster survival behavior,
 larger-map support, atmospheric sky rendering, cosmetic monster damage,
-corpse ambience, persistent settings, and faster recovery after death.
+corpse ambience and decomposition, persistent settings, and faster recovery after death.
 The renderer, destruction systems, and bundled-mod integrations are described
 below with their upstream credits.
 
@@ -20,7 +20,7 @@ Why? cos we love Doom. I wanted something personal as my taste.
 
 ## What's new in HELLFORGE
 
-From pixel-level hit detection to atmospheric rendering and corpse ambience,
+From pixel-level hit detection to atmospheric rendering and corpse decomposition,
 these are the gameplay and engine improvements highlighted in this fork. Existing
 feature reports are linked below; newer source-patch additions are described in
 the sections that follow.
@@ -32,6 +32,7 @@ the sections that follow.
 | **HUD bloom ghosting fix** | HUD text and graphics no longer cast misplaced dark copies across bright emissive surfaces in the tested configuration. | Corrected bloom-mask sampling for the three-layer HUD texture atlas while retaining emissive textures. |
 | **Progressive Monster Skin Damage** | Injuries, scratches, and blood increase as supported living monsters lose health. | Three health-driven artwork tiers; stock-sprite identity checks; reusable cached variants; independent of Wound Holes and gameplay bleeding. |
 | **Corpse & Decoration Immersion** | Delayed flies, ground worms, and corpse-specific scavengers bring small encounters and biological decorations to life. | Reusable ambience profiles, deterministic selection, existing particle renderer, resurrection cleanup, and a hard cutoff at 200 spawned kill-count monsters. |
+| **Corpse Decomposition & Organic Decay** | Selected corpses progressively dry and discolor; at Stage 2 their scavengers and associated blood pool disappear. | Map-wide gameplay-time aging, 2/5/8/10-minute F4 delays, eight stock monster types, cached palette-aware sprite variants, owned-pool cleanup, and the same 200-monster performance gate. |
 | 🎯 **[Sprite-based headshots](docs/changes/CRITICAL-PARTS.md)** | 2× human headshots, per-pellet hits, and shots through transparent sprite gaps. | Uses the displayed frame, rotation, mirroring, and silhouette; shares impact coordinates with attached wounds. |
 | 👁️ **[Monster weak points](docs/changes/ENHANCED-MONSTER-COMBAT.md)** | Heads, eyes, faces, brains, and mechanical legs have distinct combat rules. Weapon choice matters. | Monster profiles, conservative region classification, projectile provenance, and damage multipliers that do not stack. |
 | **[Elemental Damage 2.0, combat notifications & Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md)** | Optional Imp/Mancubus fire damage, blue plasma burns, charred Cacodemons, colored combat events and seven independent session metrics. | One authoritative DoT stream per actor, v6 status saves, bounded event queue and event-based session history that survives checkpoint reloads. |
@@ -58,7 +59,7 @@ the sections that follow.
 
 **Start with F4.** Human critical parts, enhanced weak points, weapon
 vulnerabilities, injuries, eye injuries, bleeding, feeding, frenzy, and death-save recovery
-are optional and default off. Damaging elemental burns, colored notifications and the Speedrun HUD also default off. Immersive Sky, Monster Skin Damage and Decoration Immersion also default Off. New ambush sight reuse, sprite filtering and idle-search
+are optional and default off. Damaging elemental burns, colored notifications and the Speedrun HUD also default off. Immersive Sky, Monster Skin Damage, Decoration Immersion and Corpse Decomposition also default Off. New ambush sight reuse, sprite filtering and idle-search
 reuse also default off in the normal build. Sprite combat additions are restricted to
 single-player sprite rendering; multiplayer, demos, and voxel targets retain
 their documented exclusions.
@@ -97,6 +98,8 @@ their documented exclusions.
 
 The following incremental changes target the **2026.11.15.6 source baseline**.
 They do not introduce new gameplay damage or modify classic WAD content.
+Corpse Decomposition Milestones 1–2 have since received user-reported Windows
+build and gameplay acceptance after their visual-activation and linker repairs.
 The relevant user-run verification is distinguished below from source-only tests.
 
 #### Immersive Sky Environment (Milestones A–C)
@@ -214,9 +217,68 @@ The relevant user-run verification is distinguished below from source-only tests
   effects near the underlying actor position.
 - **User runtime tests:** corpse flies passed, the initial invisible-worm
   issue was corrected, and the black-headed worm visual update passed.
-  Species-specific creatures have source-level mock integration coverage;
-  the **latest smaller/rounder worm and darker palette refinement still needs
-  an explicit final Windows/Vulkan visual acceptance report**.
+  Source-level mock tests cover the species-specific creatures. The later M2
+  runtime pass also covers Stage 2 scavenger suppression; a separate exhaustive
+  visual acceptance report for every individual creature variant is not recorded.
+
+#### Corpse Decomposition & Organic Decay (Milestones 1–2)
+
+- **F4 → Atmosphere → Decoration Immersion → Corpse decomposition:** an independent
+  **Off/On** switch (**Off by default**), with **Decomposition begins after**
+  **2, 5 (default), 8 or 10 gameplay minutes**. It works even when flies and
+  worms are disabled. Selection is deterministic: normally about **40% of
+  eligible corpses**, not necessarily every body on a small test map.
+- **Eight supported stock monster types:** Zombieman, Shotgun Guy, Imp, Pinky,
+  Mancubus, Cacodemon, Hell Knight and Baron of Hell. **Spectre and Heavy Weapon
+  Dude/Chaingunner are intentionally excluded**. Only ordinary, settled terminal
+  corpse states qualify; gibbed remains, decorations, other monsters, ragdoll
+  cards and unsupported death artwork retain their original presentation.
+- **Map-wide aging:** the age tracker scans about once per second regardless of
+  camera distance. With the **2-minute** delay, **Stage 1** starts at **2:00**
+  (initial drying), **Stage 2** at **2:45** (partial decomposition), and
+  **Stage 3** at **4:00** (final dry appearance). The other delay presets use
+  the same **+45-second / +120-second** stage offsets. Pausing does not advance
+  the gameplay-time clock. Corpse age is reconstructed after loading a save;
+  exact pre-save decomposition progress is not persisted.
+- **Palette-aware visual decay:** the renderer derives desaturated, mottled,
+  dry-looking variants from the **loaded WAD sprite artwork and PLAYPAL**, with
+  stronger visual contrast after the M1 visual-activation repair. Cacodemons
+  use a blue-grey drying treatment; Mancubus, Baron and Hell Knight use muted
+  warm dried-flesh colors. The original sprite dimensions and transparency are
+  preserved; unsupported/replacement artwork and voxel presentations can fall
+  back to unchanged visuals.
+- **Shared texture cache:** decomposition variants are generated lazily and
+  shared by sprite frame and stage rather than allocated per corpse, with a
+  separate **estimated 8 MiB CPU/GPU payload budget**. Exhaustion falls back to
+  unmodified artwork; this is a cap policy, **not a measured VRAM or FPS saving**.
+- **M2 — Stage 2 cleanup:** after a **selected decomposing corpse** enters
+  Stage 2, **flies, normal and large red worms, and all special scavengers**
+  cease rendering around it. Its **owned blood-pool record is removed** from
+  the active list and no longer emits pool geometry; a per-corpse marker blocks
+  recreation. Other bodies' pools, impact splats, wall blood and hanging
+  decorations are unaffected. Shared blood textures remain cached, so this
+  reduces active decals/particles rather than guaranteeing large GPU-memory
+  savings. Corpses not selected for decomposition retain normal ambience.
+- **Performance and lifecycle:** decomposition and its cleanup are disabled on
+  maps with **200 or more spawned kill-count monsters**. Cosmetic state is
+  cleaned up on resurrection, corpse removal and level transitions. No new
+  gameplay actors, damage logic, save-format changes or shaders are introduced.
+  Existing Monster Skin Damage and Wound Holes retain their own rendering paths.
+- **M1 visual-activation fix:** relaxed an overly strict death-presenter gate
+  for settled terminal corpses, increased visible drying contrast, and added
+  optional **`-decaytest`** (select every eligible corpse) and **`-decaydebug`**
+  diagnostic flags. Test flags are **not** normal gameplay settings and must
+  reach the engine process to take effect.
+- **M2 linker fix:** restored the missing `doom3d::monsterSkinBloodIndex`
+  definition in `platform/scene3d/blood.cpp`, resolving reported
+  `LNK2019` errors in the engine and smoke-test executables while retaining
+  ordinary, Cacodemon-blue and Baron/Hell-Knight-green blood tinting.
+- **Verification:** the first three-minute gameplay test exposed an absence
+  of visible decomposition; the M1 activation repair was then **reported
+  passed in-game**. The M2 expansion initially hit a linker error; after the
+  targeted repair, the user reported **all Windows build and game tests passed**.
+  Isolated GCC/Clang rule and rendering-path tests also passed. These results
+  are not a benchmark or exhaustive certification of all replacement WADs.
 
 ### Engineering and verification
 
@@ -295,6 +357,8 @@ the extensions highlighted above.
 - Optional **Corpse & Decoration Immersion**: delayed flies, pale worms,
   large dark-red worms, Revenant bone spiders, Arch-vile fire slugs and
   Cacodemon blue jelly creatures, bounded by a small-map performance gate.
+- Optional **Corpse Decomposition**: age-driven dried sprite variants for eight
+  monster types, with Stage 2 scavenger and owned blood-pool cleanup.
 - Optional sprite-pixel critical parts with transparent-pixel misses and
   human headshots.
 - Extended monster weak points and weapon vulnerabilities for humanoids,
@@ -329,10 +393,12 @@ renderer-only features intentionally bypass single-player sprite combat rules.
 Performance depends on map complexity, hardware, resolution, lighting settings,
 and accumulated destruction. The lighting cache reduces repeated bake work but
 does not avoid map reconstruction, geometry preparation, or GPU uploads.
-Decoration ambience is automatically disabled at 200 or more spawned
-kill-count monsters, but this is not a measured FPS guarantee. Sprite skin
-injuries are deliberately limited to recognized stock artwork; unusual PWAD
-replacements may remain visually unmodified.
+Decoration ambience and corpse decomposition are automatically disabled at
+200 or more spawned kill-count monsters, but this is not a measured FPS
+or memory-saving guarantee. Sprite skin injuries are deliberately limited to
+recognized stock artwork; unusual PWAD replacements and non-sprite presentations
+may remain visually unmodified. Decomposition's cosmetic corpse age is not
+preserved across saved-game reloads.
 
 See the [large-WAD compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md)
 and [reload/cache report](docs/changes/RELOAD-LIGHTING-CACHE.md) for measured
@@ -341,8 +407,10 @@ limits and verification evidence.
 ## Building
 
 Install Visual Studio 2022 C++ Build Tools, CMake, and the Windows SDK, then
-double-click **Build-Hellforge.bat** in the repository root. For shader changes
-(including Immersive Sky, sun shafts and HUD bloom masking), run
+double-click **Build-Hellforge.bat** in the repository root. Corpse Decomposition
+M1/M2 and its blood-linker repair require a native rebuild **but no shader
+recompilation**. For shader changes (including Immersive Sky, sun shafts and
+HUD bloom masking), run
 **Recompile-Shaders.bat** first; required tools are listed in
 [BUILDING.md](BUILDING.md). Command-line builds also work:
 
@@ -399,11 +467,13 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
 ## Project status
 
 **README baseline: build 2026.11.15.6.** The sky, soft sun-shaft, HUD bloom,
-monster skin-damage and decoration-ambience updates above were developed as
-incremental source patches for this build family. The user's reported runtime
-passes cover the specific changes identified above; the latest ambience visual
-refinement still requires an explicit final runtime acceptance report. No new
-release/build identifier is asserted solely because a patch package exists.
+monster skin-damage, decoration-ambience and Corpse Decomposition M1/M2 updates
+above were developed as incremental source patches for this build family.
+The user reported successful Windows build and gameplay tests for decomposition
+M1 after the visual-activation repair, and for M2 after its missing-symbol linker
+repair. These reports establish the acceptance of the tested changes, **not**
+comprehensive PWAD compatibility, per-effect GPU-memory savings or FPS results.
+No new release/build identifier is asserted solely because a patch package exists.
 
 The latest survival/retaliation changes have a rebuilt native engine and focused
 rule/real-core verification; their launcher package was **not** rebuilt in that
