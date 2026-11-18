@@ -32,8 +32,18 @@ unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
 uint32_t weatherSeed=0;
 doom_storm::State stormState;
 // Only coordinates survive an event: never retain a mobj_t* across tics.
-struct TreeStrike {float x=0,y=0,ground=0,top=0;int born=-1;std::uint32_t seed=0;};
+struct TreeStrike {
+    float x=0,y=0,ground=0,top=0;
+    int born=-1,sector=-1;
+    std::uint32_t seed=0;
+};
+struct BurningTree {
+    float x=0,y=0,ground=0,height=0;
+    int born=-1,sector=-1;
+    std::uint32_t seed=0;
+};
 TreeStrike treeStrike;
+std::array<BurningTree,doom_strike::maxBurningTrees> treeFires{};
 float windSpeed=0;
 int weatherTic=-1;
 std::vector<float> soak;
@@ -56,6 +66,7 @@ void newLevel() {
     weatherSeed=levelWeatherSeed();
     doom_storm::reset(stormState);
     treeStrike=TreeStrike{};
+    treeFires={};
     stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;
@@ -112,8 +123,42 @@ void chooseTreeStrike(std::uint32_t eventSeed) {
             treeStrike.x=x;treeStrike.y=y;treeStrike.ground=base;
             treeStrike.top=std::min(ceil-5.f,base+std::max(55.f,.75f*(ceil-base)));
             treeStrike.seed=h;treeStrike.born=leveltime;
+            treeStrike.sector=s;
         }
     }
+}
+
+// Store coordinates only, not actor pointers. A cosmetic fire lasts at most
+// 24 seconds and never edits actor health, collision, sprites, or the WAD.
+void tryIgniteTree() {
+    if(treeStrike.born<0||!doom_strike::ignite(treeStrike.seed))return;
+    for(const BurningTree &fire:treeFires) {
+        if(doom_strike::fireActive(fire.born,leveltime)&&
+           fire.sector==treeStrike.sector&&
+           std::hypot(fire.x-treeStrike.x,fire.y-treeStrike.y)<1.f)return;
+    }
+    for(BurningTree &fire:treeFires) {
+        if(doom_strike::fireActive(fire.born,leveltime))continue;
+        fire.x=treeStrike.x;fire.y=treeStrike.y;fire.ground=treeStrike.ground;
+        fire.height=std::clamp((treeStrike.top-treeStrike.ground)*.45f,36.f,76.f);
+        fire.sector=treeStrike.sector;fire.born=leveltime;
+        fire.seed=doom_strike::hash(treeStrike.seed^0x7589de31u);
+        break;
+    }
+}
+
+// A destroyed/replaced decoration stops burning. At most four sector-list
+// checks per second, with no retained mobj_t pointer or actor mutation.
+bool fireHasTree(const BurningTree &fire) {
+    if(fire.sector<0||fire.sector>=numsectors)return false;
+    const sector_t *sector=&sectors[fire.sector];
+    if(sector->ceilingpic!=skyflatnum)return false;
+    for(const mobj_t *thing=sector->thinglist;thing;thing=thing->snext)
+        if(thing->type==MT_MISC76&&thing->sprite==SPR_TRE2&&
+           thing->subsector&&thing->subsector->sector==sector&&
+           std::abs(units(thing->x)-fire.x)<1.f&&
+           std::abs(units(thing->y)-fire.y)<1.f)return true;
+    return false;
 }
 }
 
@@ -256,10 +301,21 @@ void watchWeather() {
     const bool treeMode=episodeAtmosphereNow==int(doom_episode::Profile::Inferno)&&
         settings.infernoTreeStrikes&&settings.episodeLightning&&settings.stormBolts&&
         settings.stormMode>0&&settings.accelerated;
-    if(!treeMode||!active)treeStrike=TreeStrike{};
-    else if(storm.bolt>0.f&&stormState.flashTic==leveltime) {
-        chooseTreeStrike(doom_strike::hash(weatherSeed^
-            std::uint32_t(stormState.event)*0x4b7d1365u));
+    if(!treeMode||!active) {
+        treeStrike=TreeStrike{};
+        treeFires={};
+    } else {
+        // The local strike can appear on any lightning flash, including
+        // distant events without a separate sky bolt; audio stays unchanged.
+        if(storm.flash>0.f&&stormState.flashTic==leveltime) {
+            chooseTreeStrike(doom_strike::hash(weatherSeed^
+                std::uint32_t(stormState.event)*0x4b7d1365u));
+            tryIgniteTree();
+        }
+        for(BurningTree &fire:treeFires) {
+            if(!doom_strike::fireActive(fire.born,leveltime)||
+                (leveltime%TICRATE==0&&!fireHasTree(fire)))fire=BurningTree{};
+        }
     }
     if(!active||settings.stormMode<=0)storm_audio::muteQueued();
     else if(storm.thunder!=doom_storm::Kind::None)
@@ -779,86 +835,127 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
     }
 }
 
-// D3: a single decorative tree strike, drawn only for a few simulation tics.
-// Bounded camera-facing pixel billboards, never a real light, damaging actor,
-// tree-state mutation or dynamic lightmap rebake. Renderer skips mirror passes.
+// D3.1: more readable crimson strikes plus bounded cosmetic tree fires.
+// The tree-fire decision is made once per impact, with a 20% deterministic
+// chance, and burning is tied to the original, still-present TRE2 decoration.
 void buildInfernoTreeStrikes(const Uniforms &camera) {
-    if(treeStrike.born<0||episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
+    if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
        !settings.infernoTreeStrikes||!settings.episodeLightning||!settings.stormBolts||
        !settings.stormMode||camera.effects[2]!=0||levelSerial!=r_levelserial)return;
-    const int age=leveltime-treeStrike.born;
-    const float fade=doom_strike::impactFade(age);
-    if(fade<=0.f||std::hypot(camera.eye[0]-treeStrike.x,camera.eye[1]-treeStrike.y)>
-       doom_strike::maxTargetDistance+100.f)return;
-    const float ground=treeStrike.ground;
-    const std::uint32_t seed=treeStrike.seed;
-    const std::array<float,3> outer={.92f,.18f,.075f};
-    const std::array<float,3> core={1.f,.63f,.33f};
-    if(doom_strike::drawBolt(age)) {
-        // Same flash limiter as sky lightning; extra local geometry is a
-        // colored visual accent and does not illuminate indoor world meshes.
-        const float light=std::clamp(stormBoltNow*1.8f,0.f,.88f);
-        if(light>.02f) {
-            const float height=treeStrike.top-ground;
-            const float step=height/float(doom_strike::boltSegments);
-            for(int i=0;i<doom_strike::boltSegments;++i) {
-                const float u=(i+.5f)/float(doom_strike::boltSegments);
-                const float dx=doom_strike::lateral(i,doom_strike::boltSegments,seed);
-                const float dy=doom_strike::lateral(i,doom_strike::boltSegments,seed^0xb941d15fu);
-                const float x=treeStrike.x+dx,y=treeStrike.y+dy;
-                const float z=treeStrike.top-height*u;
-                pixelBlock(particleVertices,camera,x,y,z,2.5f,step/2.5f,
-                           outer,false,nullptr,false,nullptr,.42f*light);
-                pixelBlock(particleVertices,camera,x,y,z,.95f,step/.95f,
-                           core,false,nullptr,false,nullptr,.82f*light);
+    const bool strikeVisible=treeStrike.born>=0&&
+        std::hypot(camera.eye[0]-treeStrike.x,camera.eye[1]-treeStrike.y)<=
+        doom_strike::maxTargetDistance+100.f;
+    if(strikeVisible) {
+        const int age=leveltime-treeStrike.born;
+        const float fade=doom_strike::impactFade(age);
+        if(fade>0.f) {
+            const float ground=treeStrike.ground;
+            const std::uint32_t seed=treeStrike.seed;
+            const std::array<float,3> outer={.96f,.15f,.05f};
+            const std::array<float,3> core={1.f,.72f,.44f};
+            if(doom_strike::drawBolt(age)) {
+                // The user's reduced-flash preference also limits the local
+                // glow. Geometry is thicker, but sky brightness is unchanged.
+                float light=std::clamp(stormFlashNow*2.8f+.20f,0.f,.94f);
+                if(!settings.stormStrongFlashes)light=std::min(light,.22f);
+                const float height=treeStrike.top-ground;
+                const float step=height/float(doom_strike::boltSegments);
+                for(int i=0;i<doom_strike::boltSegments;++i) {
+                    const float u=(i+.5f)/float(doom_strike::boltSegments);
+                    const float dx=doom_strike::lateral(i,doom_strike::boltSegments,seed);
+                    const float dy=doom_strike::lateral(i,doom_strike::boltSegments,seed^0xb941d15fu);
+                    const float x=treeStrike.x+dx,y=treeStrike.y+dy;
+                    const float z=treeStrike.top-height*u;
+                    pixelBlock(particleVertices,camera,x,y,z,3.8f,step/2.f,
+                               outer,false,nullptr,false,nullptr,.62f*light);
+                    pixelBlock(particleVertices,camera,x,y,z,1.55f,step/1.20f,
+                               core,false,nullptr,false,nullptr,.94f*light);
+                }
+                for(int b=0;b<2;++b)for(int i=0;i<doom_strike::branchSegments;++i) {
+                    const float u=(i+.5f)/float(doom_strike::branchSegments);
+                    const float mainT=(b==0?.22f:.52f)+u*.26f;
+                    const int mainIndex=int(mainT*doom_strike::boltSegments);
+                    const float mainDx=doom_strike::lateral(mainIndex,doom_strike::boltSegments,seed);
+                    const float mainDy=doom_strike::lateral(mainIndex,doom_strike::boltSegments,seed^0xb941d15fu);
+                    const float spread=(b==0?1.f:-1.f)*u*(16.f+7.f*doom_strike::unit(seed^0x47u));
+                    const float x=treeStrike.x+mainDx+spread;
+                    const float y=treeStrike.y+mainDy+u*9.f;
+                    const float z=treeStrike.top-height*mainT;
+                    pixelBlock(particleVertices,camera,x,y,z,1.45f,2.5f,
+                               core,false,nullptr,false,nullptr,.78f*light*(1.f-u*.65f));
+                }
+                const std::array<float,3> halo={.92f,.16f,.045f};
+                pixelBlock(particleVertices,camera,treeStrike.x,treeStrike.y,ground+4.f,
+                           13.f,.55f,halo,false,nullptr,false,nullptr,.34f*light);
             }
-            // Two short branches separate from the main bolt in opposite
-            // directions, with no retained geometry or per-frame RNG calls.
-            for(int b=0;b<2;++b)for(int i=0;i<doom_strike::branchSegments;++i) {
-                const float u=(i+.5f)/float(doom_strike::branchSegments);
-                const float mainT=(b==0?.27f:.54f)+u*.20f;
-                const int mainIndex=int(mainT*doom_strike::boltSegments);
-                const float mainDx=doom_strike::lateral(mainIndex,doom_strike::boltSegments,seed);
-                const float mainDy=doom_strike::lateral(mainIndex,doom_strike::boltSegments,seed^0xb941d15fu);
-                const float spread=(b==0?1.f:-1.f)*u*(12.f+4.f*doom_strike::unit(seed^0x47u));
-                const float x=treeStrike.x+mainDx+spread;
-                const float y=treeStrike.y+mainDy+u*7.f;
-                const float z=treeStrike.top-height*mainT;
-                pixelBlock(particleVertices,camera,x,y,z,1.f,2.1f,
-                           core,false,nullptr,false,nullptr,.55f*light*(1.f-u*.7f));
+            const float seconds=float(std::max(age,0))/float(TICRATE);
+            for(int n=0;n<doom_strike::emberCount;++n) {
+                const float phase=6.28318530718f*doom_strike::unit(seed+
+                    std::uint32_t(n)*0x9e3779b9u);
+                const float speed=12.f+24.f*doom_strike::unit(seed^
+                    (std::uint32_t(n)*0x5a821b9du));
+                const float x=treeStrike.x+std::cos(phase)*speed*seconds;
+                const float y=treeStrike.y+std::sin(phase)*speed*seconds;
+                const float z=ground+2.f+seconds*(9.f+18.f*doom_strike::unit(seed+
+                    std::uint32_t(n)*0x3c6ef372u));
+                const std::array<float,3> tint=n%3==0?
+                    std::array<float,3>{1.f,.56f,.13f}:
+                    std::array<float,3>{.84f,.20f,.035f};
+                pixelBlock(particleVertices,camera,x,y,z,.62f,1.0f,tint,
+                           false,nullptr,false,nullptr,.72f*fade);
             }
-            // Brief localized impact halo at the burnt tree's base.
-            const std::array<float,3> halo={.85f,.13f,.045f};
-            pixelBlock(particleVertices,camera,treeStrike.x,treeStrike.y,ground+3.f,
-                       10.f,.38f,halo,false,nullptr,false,nullptr,.28f*light);
         }
     }
-    // Small, stable arc of embers lasting ~0.5 s after impact. No sound
-    // duplication: thunder remains exclusively scheduled by Storm A/B.
-    const float seconds=float(std::max(age,0))/float(TICRATE);
-    for(int n=0;n<doom_strike::emberCount;++n) {
-        const float phase=6.28318530718f*doom_strike::unit(seed+
-            std::uint32_t(n)*0x9e3779b9u);
-        const float speed=12.f+24.f*doom_strike::unit(seed^
-            (std::uint32_t(n)*0x5a821b9du));
-        const float x=treeStrike.x+std::cos(phase)*speed*seconds;
-        const float y=treeStrike.y+std::sin(phase)*speed*seconds;
-        const float z=ground+2.f+seconds*(9.f+18.f*doom_strike::unit(seed+
-            std::uint32_t(n)*0x3c6ef372u));
-        const std::array<float,3> tint=n%3==0?
-            std::array<float,3>{1.f,.55f,.12f}:
-            std::array<float,3>{.80f,.18f,.035f};
-        pixelBlock(particleVertices,camera,x,y,z,.52f,.85f,tint,
-                   false,nullptr,false,nullptr,.65f*fade);
+    // Up to four independent fires. Billboards never affect actor health,
+    // map geometry or sound; each fire expires after 24 simulation seconds.
+    for(const BurningTree &fire:treeFires) {
+        if(!doom_strike::fireActive(fire.born,leveltime))continue;
+        if(std::hypot(camera.eye[0]-fire.x,camera.eye[1]-fire.y)>
+           doom_strike::maxTargetDistance+100.f)continue;
+        const float seconds=float(leveltime-fire.born)/float(TICRATE);
+        const float fade=doom_strike::fireFade(fire.born,leveltime);
+        const float flicker=.75f+.25f*std::sin(seconds*9.0f+
+            6.2831853f*doom_strike::unit(fire.seed));
+        for(int n=0;n<doom_strike::flameStrands;++n) {
+            const float seedPhase=6.2831853f*doom_strike::unit(fire.seed+
+                std::uint32_t(n)*0x32c91u);
+            const float phase=seedPhase+seconds*(2.2f+.15f*n);
+            const float radius=3.5f+2.f*doom_strike::unit(fire.seed^
+                std::uint32_t(n)*0x3a1c15u);
+            const float x=fire.x+radius*std::cos(phase);
+            const float y=fire.y+radius*std::sin(phase);
+            const float height=fire.height*(.30f+.55f*doom_strike::unit(
+                fire.seed+std::uint32_t(n)*0x76d45u));
+            const float z=fire.ground+12.f+height*.52f+
+                3.4f*std::sin(seconds*6.8f+seedPhase);
+            const std::array<float,3> red={.96f,.19f,.035f};
+            const std::array<float,3> orange={1.f,.49f,.095f};
+            pixelBlock(particleVertices,camera,x,y,z,3.f,height*.80f,
+                       red,false,nullptr,false,nullptr,.46f*fade*flicker);
+            pixelBlock(particleVertices,camera,x,y,z,1.45f,height*.57f,
+                       orange,false,nullptr,false,nullptr,.72f*fade*flicker);
+        }
+        for(int n=0;n<doom_strike::flameSparks;++n) {
+            const float phase=6.2831853f*doom_strike::unit(fire.seed+
+                std::uint32_t(n)*0x6ac17u);
+            const float t=std::fmod(seconds*(.7f+.1f*n)+
+                doom_strike::unit(fire.seed^std::uint32_t(n)*0x1649b5u),1.f);
+            const float x=fire.x+(3.f+9.f*t)*std::cos(phase);
+            const float y=fire.y+(3.f+9.f*t)*std::sin(phase);
+            const float z=fire.ground+12.f+fire.height*(.3f+.9f*t);
+            const std::array<float,3> gold={1.f,.66f,.19f};
+            pixelBlock(particleVertices,camera,x,y,z,.57f,.90f,gold,
+                       false,nullptr,false,nullptr,.65f*fade*(1.f-t));
+        }
     }
 }
-
 void weatherShutdown() {
     rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;
     episodeAtmosphereNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
-    doom_storm::reset(stormState);treeStrike=TreeStrike{};storm_audio::stop();I_AmbienceRain(0);
+    doom_storm::reset(stormState);treeStrike=TreeStrike{};treeFires={};
+    storm_audio::stop();I_AmbienceRain(0);
 }
 } // namespace doom3d

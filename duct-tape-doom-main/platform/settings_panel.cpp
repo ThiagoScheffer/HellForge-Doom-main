@@ -479,7 +479,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 check("inferno_tree_strikes","Inferno tree lightning strikes",&s.infernoTreeStrikes,
                     "Cosmetic crimson branches may hit nearby sky-exposed original burnt-tree decorations (TRE2). "
-                    "Small ember bursts linger after impact; no damage, ignition, AI, geometry or gameplay RNG changes. "
+                    "A stronger crimson strike and ember burst follow; each tree impact has a 20% chance "
+                    "to ignite a cosmetic 24-second fire (up to four fires). No actor damage or gameplay changes. "
                     "Requires Inferno, themed lightning, thunderstorms and visible bolts. Other maps are unaffected.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&
                         d.episodeLightning!=0&&d.stormMode!=0&&d.stormBolts!=0;}),
