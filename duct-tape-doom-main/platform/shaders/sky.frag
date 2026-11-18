@@ -169,9 +169,16 @@ void main() {
         float band=(1.0-smoothstep(-0.08,0.55,ray.z))*0.22;
         color.rgb=mix(color.rgb,vec3(0.31,0.10,0.065),band);
     } else if(deimos) {
-        // Subdued dusty violet at the horizon, not a blanket blue snow sky.
-        float band=(1.0-smoothstep(-0.10,0.52,ray.z))*0.17;
-        color.rgb=mix(color.rgb,vec3(0.29,0.245,0.37),band);
+        // D2.1: a cold, opaque-looking whiteout over the far horizon.
+        // c.haze.w is already gated by the user's Fog setting; this affects
+        // sky pixels only, not sealed indoor geometry or baked lighting.
+        float snow=clamp(c.haze.w,0.0,1.0);
+        float band=(1.0-smoothstep(-0.18,0.83,ray.z))*(0.25+0.43*snow);
+        vec3 frost=vec3(0.43,0.47,0.58);
+        color.rgb=mix(color.rgb,frost,band);
+        float bleach=(1.0-smoothstep(0.18,0.98,ray.z))*(0.12+0.19*snow);
+        float gray=dot(color.rgb,vec3(0.299,0.587,0.114));
+        color.rgb=mix(color.rgb,vec3(gray)*vec3(0.94,0.99,1.08),bleach);
     }
     // Brief diffuse electrical illumination of the visible sky only.
     // No full-screen flash: underground rooms and closed ceilings stay dark.

@@ -637,14 +637,16 @@ FrameView prepareFrame(int w,int h) {
                 camera.haze[c]*.30f+infernoHaze[c]*.70f;
         }
         if(episodeAtmosphereNow==2) {
-            // Cold reddish-violet high-altitude haze: retain some original
-            // WAD sky influence, and apply only through outdoor fog exposure.
-            const std::array<float,3> deimosHaze={.31f,.29f,.42f};
+            // D2.1: opaque-looking, cold airborne powder at distance.
+            // Existing world.frag shades exposed outdoor surfaces only;
+            // keep indoor rooms and baked lighting untouched.
+            const std::array<float,3> deimosHaze={.43f,.46f,.56f};
             for(int c=0;c<3;++c)camera.haze[c]=
-                camera.haze[c]*.40f+deimosHaze[c]*.60f;
+                camera.haze[c]*.12f+deimosHaze[c]*.88f;
         }
         const float extraHaze=episodeAtmosphereNow==1?.18f:
-            episodeAtmosphereNow==2?.14f:0.f;
+            episodeAtmosphereNow==2?
+                (.48f+.31f*std::clamp(deimosBlizzardNow,0.f,1.f)):0.f;
         camera.haze[3]=settings.fog?
             std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f):0.f;
         buildMist(camera);

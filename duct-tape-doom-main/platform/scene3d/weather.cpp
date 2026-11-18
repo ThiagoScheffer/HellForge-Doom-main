@@ -24,6 +24,7 @@ float rainNow=0,wetNow=0,glassWetNow=0;
 float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
 float stormCurtainNow=0,stormHazeNow=0;
 int episodeAtmosphereNow=0; // doom_episode::Profile; shared by geometry and sky.
+float deimosBlizzardNow=0,deimosGustNow=0; // D2.1: cosmetic-only whiteout progression.
 float rainWind[2]={0,0};
 namespace {
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
@@ -52,6 +53,7 @@ void newLevel() {
     doom_storm::reset(stormState);
     stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
+    deimosBlizzardNow=deimosGustNow=0;
     episodeAtmosphereNow=static_cast<int>(episodeProfile());
     storm_audio::muteQueued();
     windSpeed=90+50*hashUnit(3,4,weatherSeed);
@@ -159,9 +161,17 @@ void watchWeather() {
         std::clamp(baseRain*atmosphere.rainScale,0.f,1.f):baseRain;
     stormCurtainNow=atmosphere.curtain;
     stormHazeNow=atmosphere.haze;
-    // Only speed changes under gusts: never flip a map's authored wind.
+    // Deimos is a dry, abrasive blizzard even with Rain=Never or Storm=Off.
+    // Its extra gusts only change wind speed; heading stays map-authored.
+    const bool deimos=episodeAtmosphereNow==int(doom_episode::Profile::Deimos);
+    const doom_episode::Blizzard blizzard=doom_episode::deimosBlizzard(
+        deimos?leveltime:-1,TICRATE,weatherSeed^0x2dcf1357u);
+    deimosBlizzardNow=blizzard.intensity;
+    deimosGustNow=blizzard.gust;
+    // All other episodes retain the original rain/wind calculation.
     float wx,wy;rainHeading(wx,wy);
-    const float speed=windSpeed*(0.6f+0.8f*gust)*atmosphere.windScale;
+    const float speed=windSpeed*(0.6f+0.8f*gust)*atmosphere.windScale*
+                      (deimos?blizzard.windScale:1.f);
     rainWind[0]=wx*speed;rainWind[1]=wy*speed;
     // The heading turned (the authored layer switched on or off): the ground's wetness anew.
     if(flatLightTexture&&wetLevelSerial==r_levelserial&&(wx!=wetHeading[0]||wy!=wetHeading[1])) {
@@ -510,13 +520,14 @@ void buildRain(const Uniforms &camera) {
     }
 }
 
-// D2 — Deimos cold anomaly: wind-driven alien crystal motes and fine dust.
-// The sparse drifting particles depict a stylized hostile moon environment,
-// not physical snow or wet weather. Geometry and RNG are strictly cosmetic.
-// Outdoor/path checks match D1, and no dynamic heap allocations are needed.
+// D2.1 — Whiteout: Deimos has a near-field windblown layer and a thinner
+// drifting powder layer. Uses deterministic world cells; no gameplay actors,
+// persistent allocation or new shader. Every candidate and the swept motion
+// path must remain under open sky. Ring order prioritizes near-camera flecks
+// when the hard particle budget is reached, avoiding a far-side bias.
 static void buildDeimosAtmosphere(const Uniforms &camera) {
     if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
-    constexpr float cell=40.f,reach=385.f;
+    constexpr float cell=28.f,reach=455.f;
     const int density=std::clamp(settings.episodeParticles,0,2);
     const int crystalLimit=doom_episode::crystalBudget(density);
     const int dustLimit=doom_episode::frostDustBudget(density);
@@ -524,19 +535,27 @@ static void buildDeimosAtmosphere(const Uniforms &camera) {
     const float windLength=std::hypot(rainWind[0],rainWind[1]);
     const float wx=windLength>1.f?rainWind[0]/windLength:1.f;
     const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
+    const float gust=std::clamp(deimosGustNow,0.f,1.f);
+    const float storm=std::clamp(deimosBlizzardNow,0.f,1.f);
+    const float wind=std::clamp(windLength,90.f,270.f);
     const uint32_t salt=weatherSeed^0x65ba19d3u;
     const int cx=(int)std::floor(camera.eye[0]/cell);
     const int cy=(int)std::floor(camera.eye[1]/cell);
     int crystals=0,dust=0;
-    for(int gy=cy-10;gy<=cy+10&&(crystals<crystalLimit||dust<dustLimit);++gy)
-    for(int gx=cx-10;gx<=cx+10&&(crystals<crystalLimit||dust<dustLimit);++gx) {
+    // Bounded 33x33 neighboring cells. The inner rings are processed first,
+    // so foreground density does not disappear when the cap is reached.
+    for(int ring=0;ring<=16&&(crystals<crystalLimit||dust<dustLimit);++ring)
+    for(int gy=cy-ring;gy<=cy+ring&&(crystals<crystalLimit||dust<dustLimit);++gy)
+    for(int gx=cx-ring;gx<=cx+ring&&(crystals<crystalLimit||dust<dustLimit);++gx) {
+        if(std::max(std::abs(gx-cx),std::abs(gy-cy))!=ring)continue;
         const uint32_t seed=hash32(uint32_t(gx)*0x9f28a713u^
                                    uint32_t(gy)*0x6c8e9cf5u^salt);
         for(int kind=0;kind<2;++kind) {
             const bool fine=kind!=0;
             if(fine?dust>=dustLimit:crystals>=crystalLimit)continue;
-            if(hashUnit(gx,gy,seed^(fine?0x293a16u:0xb1ce49u))>(fine?.34f:.78f))continue;
-            const float life=fine?6.8f:5.1f;
+            const float selection=hashUnit(gx,gy,seed^(fine?0x293a16u:0xb1ce49u));
+            if(selection>(fine?.75f+.10f*storm:.91f+.07f*storm))continue;
+            const float life=fine?3.5f:2.8f;
             const float phase=hashUnit(gx,gy,seed^0x4c741fu);
             const float clock=now+phase*life;
             const int cycle=(int)std::floor(clock/life);
@@ -548,23 +567,25 @@ static void buildDeimosAtmosphere(const Uniforms &camera) {
             if(!origin||origin->ceilingpic!=skyflatnum)continue;
             const float floor=floorZ(origin),ceiling=ceilZ(origin),height=ceiling-floor;
             if(height<18.f)continue;
-            const float start=floor+std::min(height-5.f,10.f+height*
-                (.22f+.63f*hashUnit(gx,gy,own^0x41u)));
-            const float vz=fine?-(2.f+4.f*hashUnit(gx,gy,own^0x63u)):
-                -(7.f+9.f*hashUnit(gx,gy,own^0x54u));
-            // Crystalline shards race sideways in gusts; powder drifts slowly.
-            const float drift=fine?6.f:14.f;
-            const float swirl=(fine?5.f:3.f)*std::sin(age*(fine?.9f:1.7f)+phase*6.2831853f);
+            const float start=floor+std::min(height-5.f,8.f+height*
+                (.18f+.68f*hashUnit(gx,gy,own^0x41u)));
+            const float vz=fine?-(3.f+7.f*hashUnit(gx,gy,own^0x63u)):
+                -(11.f+15.f*hashUnit(gx,gy,own^0x54u));
+            // Ice cuts across the air with sustained sideways motion. Powder
+            // blows slower and broadens the nearby field between gusts.
+            const float drift=wind*(fine?.35f:.61f)*(0.80f+.36f*gust);
+            const float swirl=(fine?8.f:4.f)*std::sin(age*(fine?1.5f:2.2f)+phase*6.2831853f);
             const float dx=wx*drift*age-wy*swirl;
             const float dy=wy*drift*age+wx*swirl;
             const float x=x0+dx,y=y0+dy,z=start+vz*age;
             const sector_t *at=sectorAt(x,y);
             if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+2.f||
                z>=ceilZ(at)-2.f)continue;
-            // Reject paths crossing indoor rooms, even if both ends are outside.
             bool blocked=false;
-            for(int step=1;step<4;++step) {
-                const float u=float(step)/4.f;
+            // Up to five conservative samples prevent wind transport through
+            // indoor rooms (including a narrow roof along the swept path).
+            for(int step=1;step<=5;++step) {
+                const float u=float(step)/6.f;
                 const sector_t *through=sectorAt(x0+dx*u,y0+dy*u);
                 const float hz=start+vz*age*u;
                 if(!through||through->ceilingpic!=skyflatnum||
@@ -574,21 +595,37 @@ static void buildDeimosAtmosphere(const Uniforms &camera) {
             }
             if(blocked)continue;
             const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
-            if(dist<14.f||dist>reach)continue;
-            const float fade=std::clamp(std::min({age*1.65f,(life-age)*1.65f,
-                        (reach-dist)/65.f,(dist-14.f)/25.f}),0.f,1.f);
+            if(dist<12.f||dist>reach)continue;
+            const float fade=std::clamp(std::min({age*2.7f,(life-age)*2.7f,
+                       (reach-dist)/80.f,(dist-12.f)/18.f}),0.f,1.f);
             if(fade<.025f)continue;
-            const float light=std::clamp(lighting(at),.20f,1.1f);
+            const float light=std::clamp(lighting(at),.22f,1.1f);
             const float hue=hashUnit(gx,gy,own^0x78u);
-            std::array<float,3> color=fine?
-                std::array<float,3>{.46f+.10f*hue,.45f+.13f*hue,.57f+.12f*hue}:
-                std::array<float,3>{.60f+.10f*hue,.73f+.09f*hue,.86f+.10f*hue};
-            for(float &c:color)c*=.55f+.45f*light;
-            // Narrow vertical glints feel crystalline, not like ordinary rain.
+            const std::array<float,3> color=fine?
+                std::array<float,3>{(.65f+.10f*hue)*(.75f+.25f*light),
+                                    (.68f+.10f*hue)*(.75f+.25f*light),
+                                    (.78f+.10f*hue)*(.75f+.25f*light)}:
+                std::array<float,3>{(.72f+.13f*hue)*(.75f+.25f*light),
+                                    (.83f+.10f*hue)*(.75f+.25f*light),
+                                    (.98f+.02f*hue)*(.75f+.25f*light)};
+            const float alpha=fade*(fine?.43f:.72f)*(0.82f+.18f*storm);
+            // Separate bright head and dimmer trailing shard make a short,
+            // oblique gust streak without adding any new renderer primitives.
             pixelBlock(particleVertices,camera,x,y,z,
-                       fine?.56f:.48f,fine?.50f:1.30f,color,
-                       false,nullptr,false,nullptr,fade*(fine?.40f:.72f));
-            if(fine)++dust;else ++crystals;
+                       fine?.75f:.77f,fine?.85f:1.80f,color,
+                       false,nullptr,false,nullptr,alpha);
+            if(!fine) {
+                // Tail stays close to the validated head; the full path to
+                // the current head was already conservatively checked.
+                const float trail=2.3f+2.4f*gust;
+                const float tx=x-wx*trail,ty=y-wy*trail,tz=z+.55f;
+                const sector_t *tail=sectorAt(tx,ty);
+                if(tail&&tail->ceilingpic==skyflatnum&&
+                   tz>floorZ(tail)+2.f&&tz<ceilZ(tail)-2.f)
+                    pixelBlock(particleVertices,camera,tx,ty,tz,
+                               .48f,.90f,color,false,nullptr,false,nullptr,alpha*.35f);
+                ++crystals;
+            } else ++dust;
         }
     }
 }
@@ -683,6 +720,7 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
 void weatherShutdown() {
     rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
+    deimosBlizzardNow=deimosGustNow=0;
     episodeAtmosphereNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
     doom_storm::reset(stormState);storm_audio::stop();I_AmbienceRain(0);
