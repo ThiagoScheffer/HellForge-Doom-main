@@ -10,7 +10,7 @@
    under the sky lies wet in steps baked once (bakeWetness), the same all
    map long. The glass draws its drops itself (glass.frag), the ground its
    wetness (wear.glsl), the ambience its sound. Render-only, with its own
-   random numbers. */
+   random numbers. update*/
 #include "internal.h"
 #include "storm_audio.h"
 #include "../storm_atmosphere.h"
@@ -1013,8 +1013,10 @@ static void buildStarportAtmosphere(const Uniforms &camera) {
 
 // E2 — Burning City: drifting dark smoke, soot and scarce glowing embers.
 // No persistent particle actors, no rain/wetness and no scene-wide fog pass.
-// Smoke renders as a pair of soft translucent billboards per puff; total
-// geometry <= 2*citySmokeBudget + cityAshBudget (248 at High).
+// Each smoke puff is three overlapping, multi-tier lobes. Short tapered bands
+// form a rounded, irregular silhouette instead of two tall opaque rectangles.
+// 12 small billboards per smoke puff; hard bound at high density:
+// 12*citySmokeBudget + cityAshBudget = 1208 billboards (including ash).
 static void buildBurningCityAtmosphere(const Uniforms &camera) {
     if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
     constexpr float cell=38.f,reach=490.f;
@@ -1084,12 +1086,41 @@ static void buildBurningCityAtmosphere(const Uniforms &camera) {
             const float hue=hashUnit(gx,gy,own^0x86u);
             const float light=std::clamp(lighting(at),.20f,1.0f);
             if(!soot) {
+                // Three irregular lobes, each built from four short horizontal
+                // tiers. This makes the visible silhouette rounded: the outer
+                // tiers narrow and fade, while overlapping middle tiers have
+                // slightly different soot shades. The layout is seeded per puff
+                // and anchored to world coordinates; it never uses gameplay RNG.
                 const std::array<float,3> gray={.16f+.10f*hue,.145f+.08f*hue,.13f+.07f*hue};
-                const float alpha=fade*(.19f+.12f*intensity)*(.75f+.25f*light);
-                pixelBlock(particleVertices,camera,x,y,z,5.8f,5.1f,gray,
-                    false,nullptr,false,nullptr,alpha);
-                pixelBlock(particleVertices,camera,x+wx*2.3f,y+wy*2.3f,z+2.7f,
-                    4.6f,4.2f,gray,false,nullptr,false,nullptr,alpha*.63f);
+                const float opacity=fade*(.19f+.12f*intensity)*(.75f+.25f*light);
+                constexpr float bandWidth[4]={.58f,.96f,1.f,.63f};
+                constexpr float bandOpacity[4]={.52f,.86f,.88f,.46f};
+                constexpr float bandHeight[4]={-.94f,-.32f,.32f,.94f};
+                const float crossX=-wy,crossY=wx;
+                for(int lobe=0;lobe<3;++lobe) {
+                    const float offset=lobe==0?0.f:lobe==1?-2.0f:2.1f;
+                    const float riseOffset=lobe==0?0.f:lobe==1?1.55f:1.15f;
+                    const float radius=(lobe==0?2.85f:lobe==1?2.20f:2.40f)*
+                        (.86f+.28f*hashUnit(lobe,1,own^0x29f17u));
+                    const float pX=x+crossX*offset+wx*.7f*lobe;
+                    const float pY=y+crossY*offset+wy*.7f*lobe;
+                    const float top=ceilZ(at)-2.f,bottom=floorZ(at)+2.f;
+                    const float shade=.90f+.12f*hashUnit(lobe,2,own^0x7d912u);
+                    const std::array<float,3> lobeTint={gray[0]*shade,gray[1]*shade,gray[2]*shade};
+                    for(int band=0;band<4;++band) {
+                        const float tierZ=z+riseOffset+bandHeight[band]*radius;
+                        // Do not draw the top half of a puff through a roof
+                        // or the bottom half through the ground.
+                        if(tierZ-.425f*radius<bottom||
+                           tierZ+.425f*radius>top)continue;
+                        const float breadth=2.0f*radius*bandWidth[band];
+                        const float tierAlpha=opacity*bandOpacity[band]*
+                            (lobe==0?.60f:lobe==1?.49f:.53f);
+                        pixelBlock(particleVertices,camera,pX,pY,tierZ,
+                            breadth,.85f*radius,lobeTint,
+                            false,nullptr,false,nullptr,tierAlpha);
+                    }
+                }
                 ++smoke;
             } else {
                 const std::array<float,3> color=ember?
