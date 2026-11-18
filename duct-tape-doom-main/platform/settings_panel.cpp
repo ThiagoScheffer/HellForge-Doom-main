@@ -464,9 +464,15 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("episode_particles","Episode atmosphere particles",&s.episodeParticles,
                     {"Low","Normal","High"},{0,1,2},
-                    "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 64/16, 112/32, 144/48. "
+                    "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 180/80, 320/144, 480/220. "
                     "Only open-sky sectors and swept sky-exposed paths are eligible.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
+                choice("deimos_fog","Deimos blizzard visibility",&s.deimosFog,
+                    {"Off","Light","Heavy","Whiteout"},{0,1,2,3},
+                    "Deimos-only outdoor distance fog. Light preserves distant detail; Heavy brings fog into the ice field; "
+                    "Whiteout sharply reduces outdoor sight lines. Does not change gameplay detection or enclosed-room fog. "
+                    "Requires Fog enabled. Independent of ice-particle density.",
+                    [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&d.fog!=0;}),
                 check("episode_lightning","Themed episode lightning",&s.episodeLightning,
                     "Crimson lightning in Inferno, pale electric blue-white in Deimos. "
                     "Allows thunder on dry episode maps when Thunderstorms is enabled; Rain=Never stays dry.",

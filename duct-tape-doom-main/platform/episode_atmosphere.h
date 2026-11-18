@@ -30,6 +30,26 @@ inline int emberBudget(int density) {return density<=0?12:density==1?24:32;}
 inline int crystalBudget(int density) {return density<=0?180:density==1?320:480;}
 inline int frostDustBudget(int density) {return density<=0?80:density==1?144:220;}
 
+// D2.2: fog strength is independent of particle density and water rain.
+// Levels are authored for a depth-based outdoor whiteout, not generic full-screen fog.
+// 0 means no new blizzard fog; existing engine height fog is unaffected.
+inline float deimosFogStrength(int visibility,float blizzard) {
+    if(visibility<=0)return 0.f;
+    const float storm=std::clamp(blizzard,0.f,1.f);
+    const float base=visibility==1?.29f:visibility==2?.64f:.88f;
+    const float modulation=visibility==1?.09f:visibility==2?.17f:.12f;
+    return std::clamp(base+modulation*storm,0.f,1.f);
+}
+// Same extinction curve used in world.frag. Beyond the onset, haze builds
+// exponentially and reaches near-opacity in Whiteout; the foreground stays readable.
+inline float deimosFogOpacity(float distance,float strength) {
+    if(strength<=0.f)return 0.f;
+    strength=std::clamp(strength,0.f,1.f);
+    const float onset=200.f-186.f*strength;
+    const float reach=600.f-548.f*strength;
+    return strength*(1.f-std::exp(-std::max(distance-onset,0.f)/reach));
+}
+
 // Smooth, deterministic Deimos-only whiteout weather. Independent of the
 // rain/storm mode and of Doom's gameplay random stream. Calculated per tic,
 // never stores particle state or changes existing rain/wet-surface simulation.

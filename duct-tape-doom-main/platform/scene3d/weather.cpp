@@ -537,6 +537,10 @@ static void buildDeimosAtmosphere(const Uniforms &camera) {
     const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
     const float gust=std::clamp(deimosGustNow,0.f,1.f);
     const float storm=std::clamp(deimosBlizzardNow,0.f,1.f);
+    // The same depth extinction as outdoor surfaces: far crystals blend
+    // into the cold veil instead of floating sharply over obscured scenery.
+    const float frostStrength=settings.fog?
+        doom_episode::deimosFogStrength(settings.deimosFog,storm):0.f;
     const float wind=std::clamp(windLength,90.f,270.f);
     const uint32_t salt=weatherSeed^0x65ba19d3u;
     const int cx=(int)std::floor(camera.eye[0]/cell);
@@ -601,14 +605,19 @@ static void buildDeimosAtmosphere(const Uniforms &camera) {
             if(fade<.025f)continue;
             const float light=std::clamp(lighting(at),.22f,1.1f);
             const float hue=hashUnit(gx,gy,own^0x78u);
-            const std::array<float,3> color=fine?
+            std::array<float,3> color=fine?
                 std::array<float,3>{(.65f+.10f*hue)*(.75f+.25f*light),
                                     (.68f+.10f*hue)*(.75f+.25f*light),
                                     (.78f+.10f*hue)*(.75f+.25f*light)}:
                 std::array<float,3>{(.72f+.13f*hue)*(.75f+.25f*light),
                                     (.83f+.10f*hue)*(.75f+.25f*light),
                                     (.98f+.02f*hue)*(.75f+.25f*light)};
-            const float alpha=fade*(fine?.43f:.72f)*(0.82f+.18f*storm);
+            const float spatialDistance=std::hypot(dist,z-camera.eye[2]);
+            const float fogAmount=doom_episode::deimosFogOpacity(spatialDistance,frostStrength);
+            const std::array<float,3> frost={.43f,.46f,.56f};
+            for(int c=0;c<3;++c)color[c]=color[c]*(1.f-fogAmount*.58f)+frost[c]*(fogAmount*.58f);
+            const float alpha=fade*(fine?.43f:.72f)*(0.82f+.18f*storm)*
+                (1.f-.48f*fogAmount);
             // Separate bright head and dimmer trailing shard make a short,
             // oblique gust streak without adding any new renderer primitives.
             pixelBlock(particleVertices,camera,x,y,z,

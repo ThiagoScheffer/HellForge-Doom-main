@@ -144,6 +144,7 @@ struct Settings {
     int stormAtmosphere=1; // Milestone C: gradual fronts, gusts, distant rain curtains and outdoor haze.
     int episodeAtmosphere=1; // 0 Off, 1 authored E2 Deimos/E3 Inferno, 2 manual Inferno, 3 manual Deimos.
     int episodeParticles=1; // 0 Low, 1 Normal, 2 High; capped episode particle budgets.
+    int deimosFog=2; // D2.2: 0 Off, 1 Light, 2 Heavy (default), 3 Whiteout; Deimos only.
     int episodeLightning=1; // Themed lightning in Inferno/Deimos, including dry maps when storms are on.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.

@@ -173,10 +173,12 @@ void main() {
         // c.haze.w is already gated by the user's Fog setting; this affects
         // sky pixels only, not sealed indoor geometry or baked lighting.
         float snow=clamp(c.haze.w,0.0,1.0);
-        float band=(1.0-smoothstep(-0.18,0.83,ray.z))*(0.25+0.43*snow);
+        // Match near-field frost visibility to the corresponding world-space
+        // extinction: Heavy/Whiteout bleach the horizon, Light stays readable.
+        float band=(1.0-smoothstep(-0.18,0.83,ray.z))*(0.11+0.80*snow);
         vec3 frost=vec3(0.43,0.47,0.58);
         color.rgb=mix(color.rgb,frost,band);
-        float bleach=(1.0-smoothstep(0.18,0.98,ray.z))*(0.12+0.19*snow);
+        float bleach=(1.0-smoothstep(0.18,0.98,ray.z))*(0.06+0.27*snow);
         float gray=dot(color.rgb,vec3(0.299,0.587,0.114));
         color.rgb=mix(color.rgb,vec3(gray)*vec3(0.94,0.99,1.08),bleach);
     }

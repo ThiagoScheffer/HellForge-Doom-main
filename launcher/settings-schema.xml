@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="f6822806443626f862a8f477cee58bb7af502f32121d3f2d9cf8b35a0b1717e0">
+<settings source="platform/settings_panel.cpp" source_sha256="7dd220cb68f8f091d3eab28b58b59258408ecf3e9ce7d406e21daf781e3c038d">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -166,6 +166,7 @@
   <option key="authored_episodes" title="Authored episodes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="episode_atmosphere" title="Episode atmosphere" category="Atmosphere" kind="choice" choices="0=Off|1=Authored episodes|2=Inferno (manual)|3=Deimos (manual)" />
   <option key="episode_particles" title="Episode atmosphere particles" category="Atmosphere" kind="choice" choices="0=Low|1=Normal|2=High" />
+  <option key="deimos_fog" title="Deimos blizzard visibility" category="Atmosphere" kind="choice" choices="0=Off|1=Light|2=Heavy|3=Whiteout" />
   <option key="episode_lightning" title="Themed episode lightning" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
   <option key="storm_mode" title="Thunderstorms" category="Atmosphere" kind="choice" choices="0=Off|1=Subtle|2=Normal|3=Dramatic" />

@@ -9,6 +9,7 @@ extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
    (prepareFrame), plus the backend-independent I_Render3D calls. */
 #include "internal.h"
+#include "../episode_atmosphere.h"
 #include "../shaders/feature_flags.h"
 #include "modern_hud.h"
 #include "weapon_wheel.h"
@@ -644,11 +645,15 @@ FrameView prepareFrame(int w,int h) {
             for(int c=0;c<3;++c)camera.haze[c]=
                 camera.haze[c]*.12f+deimosHaze[c]*.88f;
         }
-        const float extraHaze=episodeAtmosphereNow==1?.18f:
-            episodeAtmosphereNow==2?
-                (.48f+.31f*std::clamp(deimosBlizzardNow,0.f,1.f)):0.f;
+        // D2.2: outdoor Deimos fog begins within the same depth range as
+        // windblown ice. Its strength is a separate F4 choice, not particle count.
+        // Keep normal height fog untouched; the world shader applies this
+        // additional frost veil only to sky-exposed mapped surfaces.
+        const float extraHaze=episodeAtmosphereNow==1?.18f:0.f;
         camera.haze[3]=settings.fog?
-            std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f):0.f;
+            (episodeAtmosphereNow==2?
+                doom_episode::deimosFogStrength(settings.deimosFog,deimosBlizzardNow):
+                std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
         buildMist(camera);
         buildShafts(camera);
         buildRings(camera);

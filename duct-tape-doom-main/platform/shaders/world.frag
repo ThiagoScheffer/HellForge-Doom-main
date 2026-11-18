@@ -367,20 +367,24 @@ void main() {
     if(sprite&&(bakeFlags&(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES))==(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES)&&(vMode&(MODE_SCREEN|MODE_SOFT))==0u&&c.effects.z==0.0)
         color.rgb+=albedo*(1.0-emission)*caustics(vWorld,normal,0u,true)*2.5;
     if((vMode&MODE_MIRROR_FLOOR)!=0u&&c.water.z>0.0&&c.effects.z==0.0) liquidMirror(color,albedo);
-    // Momentary lightning spill onto exposed world surfaces only. This uses
-    // the same sky-openness signal as outdoor haze and does not rebake light,
-    // brighten indoor rooms, sprites, blood, muzzle flashes or reflections.
-    if(mapped&&!sprite&&!blood&&!glassy&&!dead&&c.weather.w>0.0&&
-       sectorInfo[sector].w>0.0&&c.effects.z==0.0&&c.water.z==0.0) {
-        float open=clamp(1.0-outdoorShape(sector).x,0.0,1.0);
-        color.rgb+=albedo*vec3(0.16,0.21,0.28)*
-                   (min(c.weather.w,0.70)*open);
-    }
-    // Outdoor haze (c.haze, Game_Sun): surfaces under open sky fade toward
-    // the sky's horizon color with distance, so far walls meet the sky.
+    // Outdoor haze: preserve existing authored/Inferno colors. Deimos D2.2
+    // uses an independent frost extinction curve, fading *geometry by depth*
+    // starting within the windblown crystal field instead of beyond 256 units.
+    // Existing sky-exposure masks exclude roofs/interiors; no fullscreen tint,
+    // baked-light rebuild, additional uniforms, or fog on screen/UI passes.
     if(mapped&&c.haze.w>0.0&&(vMode&MODE_SCREEN)==0u&&sectorInfo[sector].w>0.0) {
-        float open=1.0-outdoorShape(sector).x;
-        color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,open*c.haze.w*0.6*(1.0-exp(-max(vDistance-256.0,0.0)/1400.0)));
+        float open=clamp(1.0-outdoorShape(sector).x,0.0,1.0);
+        if(c.style.w<=-3.0) {
+            // The Deimos episode is already encoded in style.w by Storm D2.
+            float strength=clamp(c.haze.w,0.0,1.0);
+            float onset=200.0-186.0*strength;
+            float extinctionRange=600.0-548.0*strength;
+            float veil=strength*(1.0-exp(-max(vDistance-onset,0.0)/extinctionRange));
+            color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,clamp(open*veil,0.0,1.0));
+        } else {
+            color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,
+                open*c.haze.w*0.6*(1.0-exp(-max(vDistance-256.0,0.0)/1400.0)));
+        }
     }
     if((vMode&MODE_SCREEN)==0u) {
         vec4 fog=fogAlong(vWorld);
