@@ -141,6 +141,7 @@ struct Settings {
     int stormStrongFlashes=1; // Reduce lightning intensity for photosensitivity.
     int stormBolts=1; // World-anchored procedural sky bolts, Off for simple flashes.
     float stormVolume=75; // Thunder sample gain percentage, also respects SFX volume.
+    int stormAtmosphere=1; // Milestone C: gradual fronts, gusts, distant rain curtains and outdoor haze.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.

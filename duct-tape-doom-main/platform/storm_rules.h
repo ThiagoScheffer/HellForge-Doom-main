@@ -76,7 +76,9 @@ inline Frame advance(State &s,int tic,int rate,int mode,bool rainActive,bool str
         s.boltAzimuth=-3.14159265358979323846f+
             6.2831853071795864769f*unit(h^0x84a2c771u);
         s.boltSeed=unit(h^0x3d71f9b2u);
-        float chance=s.kind==Kind::Close?.67f:s.kind==Kind::Medium?.44f:.25f;
+        // Milestone C: more readable bolts without changing thunder kind,
+        // event cadence, delays or the photosensitivity flash limiter.
+        float chance=s.kind==Kind::Close?.87f:s.kind==Kind::Medium?.69f:.49f;
         s.hasBolt=unit(h^0x7789eab1u)<chance;
         s.flashTic=tic;
         s.thunderTic=tic+thunderDelay(s.kind,rate,h^0x13727bu);

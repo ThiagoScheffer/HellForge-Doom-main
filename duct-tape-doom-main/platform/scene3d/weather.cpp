@@ -13,6 +13,7 @@
    random numbers. */
 #include "internal.h"
 #include "storm_audio.h"
+#include "../storm_atmosphere.h"
 extern "C" {
 #include "../audio/sound_options.h"
 }
@@ -20,6 +21,7 @@ extern "C" {
 namespace doom3d {
 float rainNow=0,wetNow=0,glassWetNow=0;
 float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
+float stormCurtainNow=0,stormHazeNow=0;
 float rainWind[2]={0,0};
 namespace {
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
@@ -40,6 +42,7 @@ void newLevel() {
     weatherSeed=levelWeatherSeed();
     doom_storm::reset(stormState);
     stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
+    stormCurtainNow=stormHazeNow=0;
     storm_audio::muteQueued();
     windSpeed=90+50*hashUnit(3,4,weatherSeed);
     rainNow=rainy()?downpour(0):0;wetNow=rainNow>0?1:0;glassWetNow=rainNow;
@@ -133,10 +136,22 @@ void watchWeather() {
     if(leveltime==weatherTic) return;
     weatherTic=leveltime;
     float t=leveltime/(float)TICRATE,gust=valueNoise(t,0,4,weatherSeed^0x68e31da4u);
-    rainNow=rainy()?downpour(t):0;
-    // The rain blows along its heading; gusts vary how hard.
+    const bool rainEnabled=rainy();
+    // Independent slow storm front; regular rain is unchanged when the
+    // advanced atmosphere setting is disabled (or storms are Off).
+    const doom_storm::Atmosphere atmosphere=doom_storm::atmosphere(
+        leveltime,TICRATE,settings.stormMode,rainEnabled&&settings.accelerated,
+        settings.stormAtmosphere!=0,weatherSeed^0x43b817a9u);
+    const float baseRain=rainEnabled?downpour(t):0.f;
+    // A/B behavior is unchanged when atmospheric progression is disabled.
+    rainNow=atmosphere.curtain>0.f?
+        std::clamp(baseRain*atmosphere.rainScale,0.f,1.f):baseRain;
+    stormCurtainNow=atmosphere.curtain;
+    stormHazeNow=atmosphere.haze;
+    // Only speed changes under gusts: never flip a map's authored wind.
     float wx,wy;rainHeading(wx,wy);
-    rainWind[0]=wx*windSpeed*(0.6f+0.8f*gust);rainWind[1]=wy*windSpeed*(0.6f+0.8f*gust);
+    const float speed=windSpeed*(0.6f+0.8f*gust)*atmosphere.windScale;
+    rainWind[0]=wx*speed;rainWind[1]=wy*speed;
     // The heading turned (the authored layer switched on or off): the ground's wetness anew.
     if(flatLightTexture&&wetLevelSerial==r_levelserial&&(wx!=wetHeading[0]||wy!=wetHeading[1])) {
         bakeWetness();
@@ -318,6 +333,64 @@ extern "C" void I_TestOutdoorWind() {
     puts("PASS outdoor wind renders under sky, respects particle cap, rain reduction and toggle");
 }
 
+// Milestone C: world-anchored distant rain curtains under actual sky sectors.
+// Fixed 12-curtain / 96-streak ceiling, with no dynamic actors or persistent
+// geometry. This adds to (not replaces) the existing per-cell rain and splash.
+// Each streak is validated against sky exposure so it cannot enter a room.
+static void buildStormCurtains(const Uniforms &camera,float now) {
+    if(stormCurtainNow<0.10f||!settings.stormAtmosphere)return;
+    constexpr float cell=160.f,reach=640.f;
+    constexpr int maxCurtains=12,streaksPerCurtain=8;
+    const int cx=int(std::floor(camera.eye[0]/cell));
+    const int cy=int(std::floor(camera.eye[1]/cell));
+    const float windLength=std::hypot(rainWind[0],rainWind[1]);
+    if(windLength<1.f)return;
+    const float wx=rainWind[0]/windLength,wy=rainWind[1]/windLength;
+    const uint32_t salt=weatherSeed^0x7dbbe321u;
+    int rendered=0;
+    for(int gy=cy-4;gy<=cy+4&&rendered<maxCurtains;++gy)
+    for(int gx=cx-4;gx<=cx+4&&rendered<maxCurtains;++gx) {
+        if(hashUnit(gx,gy,salt)>.12f+.17f*stormCurtainNow)continue;
+        const float centerX=(gx+.25f+.50f*hashUnit(gx,gy,salt^1u))*cell;
+        const float centerY=(gy+.25f+.50f*hashUnit(gx,gy,salt^2u))*cell;
+        const float dist=std::hypot(centerX-camera.eye[0],centerY-camera.eye[1]);
+        if(dist<190.f||dist>reach)continue;
+        const sector_t *sector=sectorAt(centerX,centerY);
+        if(!sector||sector->ceilingpic!=skyflatnum)continue;
+        const float bottom=floorZ(sector)+12.f;
+        const float top=std::max(ceilZ(sector),camera.eye[2]+100.f)-14.f;
+        if(top-bottom<36.f)continue;
+        const float phase=hashUnit(gx,gy,salt^3u);
+        // Horizontal sweep repeats per cell; fade the curtain near its wrap.
+        const float motion=std::fmod(now*(28.f+20.f*stormCurtainNow)+phase*cell,cell)/cell;
+        const float sweep=(motion-.5f)*cell*.42f;
+        const float wrapFade=std::clamp(std::min(motion,1.f-motion)*8.f,0.f,1.f);
+        const float distanceFade=std::clamp((reach-dist)/120.f,0.f,1.f);
+        const float alpha=stormCurtainNow*wrapFade*distanceFade*.21f;
+        if(alpha<.015f)continue;
+        auto tint=rainAlbedo();
+        for(float &component:tint)component=std::min(1.f,component*1.18f);
+        for(int n=0;n<streaksPerCurtain;++n) {
+            // A sparse narrow vertical sheet, perpendicular to wind.
+            const float across=(float(n)-3.5f)*10.f;
+            const float x=centerX-wy*across+wx*sweep;
+            const float y=centerY+wx*across+wy*sweep;
+            const sector_t *at=sectorAt(x,y);
+            if(!at||at->ceilingpic!=skyflatnum)continue;
+            const float localFloor=floorZ(at)+10.f;
+            const float localTop=std::max(ceilZ(at),camera.eye[2]+100.f)-14.f;
+            if(localTop-localFloor<32.f)continue;
+            const float speed=440.f+70.f*hashUnit(n,gx,salt^4u);
+            const float fall=localTop-localFloor;
+            const float z=localFloor+std::fmod(now*speed+fall*hashUnit(n,gy,salt^5u),fall);
+            const float opacity=alpha*(.65f+.35f*hashUnit(n,gy,salt^6u));
+            streak(camera,x,y,z,rainWind[0],rainWind[1],-speed,
+                   12.f,1,tint,opacity);
+        }
+        ++rendered;
+    }
+}
+
 void buildRain(const Uniforms &camera) {
     if(rainNow<=0.01f||camera.effects[2]!=0||seamCells.empty()||levelSerial!=r_levelserial||!settings.weather) return;
     constexpr float cell=16,reach=640;
@@ -362,6 +435,9 @@ void buildRain(const Uniforms &camera) {
         }
         else if(distance<384) splash(camera,lx,ly,floor,(age-fall)*TICRATE,*sector,own);
     }
+    // A capped, distant rain layer adds depth only while advanced storms
+    // are enabled; existing window/rain effects retain their normal behavior.
+    buildStormCurtains(camera,now);
     // Through broken windows: drops blown in across the opening, slow at
     // first and falling ever faster, to splash on the sill or the floor
     // inside. As many as the window is wide, the rain heavy and the wind
@@ -419,6 +495,7 @@ void buildRain(const Uniforms &camera) {
 
 void weatherShutdown() {
     rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
+    stormCurtainNow=stormHazeNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
     doom_storm::reset(stormState);storm_audio::stop();I_AmbienceRain(0);
 }

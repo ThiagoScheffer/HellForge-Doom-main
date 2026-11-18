@@ -702,6 +702,7 @@ bool windowPane(int index,PaneView &out);
 extern float rainNow,wetNow,glassWetNow;
 extern float stormFlashNow; // Outdoor lightning pulse, reset per level.
 extern float stormBoltNow,stormBoltAzimuthNow,stormBoltSeedNow;
+extern float stormCurtainNow,stormHazeNow; // Optional Milestone C atmosphere; zero when disabled.
 extern float rainWind[2];
 float paneSoak(int pane);
 // Where the rain blows (unit vector); the ground's wetness under the sky

@@ -472,6 +472,11 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Procedural branching lightning behind the outdoor sky and immersive clouds. "
                     "Disable to retain diffuse flashes and thunder without visible forks.",
                     [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                check("storm_atmosphere","Advanced storm atmosphere",&s.stormAtmosphere,
+                    "When a thunderstorm is active, gradually builds and fades rain, adds wind gusts, "
+                    "bounded distant rain curtains and light outdoor haze. Off preserves Milestone A/B rain behavior. "
+                    "No lighting rebake, new actors or gameplay changes.",
+                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
                 slider("storm_volume","Thunder volume",&s.stormVolume,0,100,5,
                     "Thunder level, in percent. The standard sound-effects volume remains authoritative.",
                     [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),

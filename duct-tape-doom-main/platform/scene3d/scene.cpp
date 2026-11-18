@@ -619,7 +619,9 @@ FrameView prepareFrame(int w,int h) {
         for(int c=0;c<3;++c)camera.fx[1+c]=skyTint[c];
         // Outdoor haze in the sky's horizon color (Game_Sun), with the fog.
         for(int c=0;c<3;++c)camera.haze[c]=horizon[c]*camera.mood[0]*camera.mood[1+c];
-        camera.haze[3]=settings.fog?game.haze:0;
+        // Storm haze reuses the existing outdoor-only sector exposure path;
+        // never adds haze to enclosed rooms or disables the Fog F4 preference.
+        camera.haze[3]=settings.fog?(stormHazeNow>0.f?std::clamp(game.haze+stormHazeNow,0.f,1.f):game.haze):0;
         buildMist(camera);
         buildShafts(camera);
         buildRings(camera);

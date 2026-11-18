@@ -11,19 +11,19 @@ float hellforgeBoltMask(float az,float rise,float strikeAz,float seed) {
     // Wrap into [-PI, PI] so a strike crosses the 360-degree sky seam.
     float dx=atan(sin(az-strikeAz),cos(az-strikeAz));
     vec2 p=vec2(dx,rise);
-    // Short forked path, terminating above the majority of horizon ridges.
+    // Milestone C: wider, longer zigzags, still ending behind the skyline.
     float sway=seed*2.0-1.0;
-    vec2 a=vec2(0.0,0.70),b=vec2(-0.014+0.010*sway,0.55);
-    vec2 c=vec2(0.009+0.018*sway,0.41),d=vec2(-0.016+0.026*sway,0.31);
+    vec2 a=vec2(0.0,0.83),b=vec2(-0.019+0.012*sway,0.63);
+    vec2 c=vec2(0.016+0.022*sway,0.44),d=vec2(-0.026+0.035*sway,0.21);
     float mainStroke=0.0;
-    mainStroke=max(mainStroke,hellforgeBoltLine(p,a,b,0.0020));
-    mainStroke=max(mainStroke,hellforgeBoltLine(p,b,c,0.0025));
-    mainStroke=max(mainStroke,hellforgeBoltLine(p,c,d,0.0030));
-    vec2 left=c+vec2(-0.060-0.010*seed,-0.125);
-    vec2 right=b+vec2(0.047+0.012*seed,-0.110);
-    float branches=max(hellforgeBoltLine(p,c,left,0.0017),
-                       hellforgeBoltLine(p,b,right,0.0015));
-    return max(mainStroke,branches*0.78);
+    mainStroke=max(mainStroke,hellforgeBoltLine(p,a,b,0.0040));
+    mainStroke=max(mainStroke,hellforgeBoltLine(p,b,c,0.0045));
+    mainStroke=max(mainStroke,hellforgeBoltLine(p,c,d,0.0050));
+    vec2 left=c+vec2(-0.084-0.013*seed,-0.142);
+    vec2 right=b+vec2(0.070+0.016*seed,-0.144);
+    float branches=max(hellforgeBoltLine(p,c,left,0.0028),
+                       hellforgeBoltLine(p,b,right,0.0026));
+    return max(mainStroke,branches*0.88);
 }
 float hellforgeBoltHalo(float az,float rise,float strikeAz) {
     float dx=atan(sin(az-strikeAz),cos(az-strikeAz));

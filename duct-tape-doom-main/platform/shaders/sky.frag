@@ -84,8 +84,10 @@ void main() {
     if(c.style.z>0.0) {
         float stroke=hellforgeBoltMask(angle,rise,c.style.y,c.style.w);
         float halo=hellforgeBoltHalo(angle,rise,c.style.y);
-        color.rgb=mix(color.rgb,max(color.rgb,vec3(0.72,0.81,1.0)),
-                      clamp(stroke*c.style.z*1.7+halo*c.style.z*0.10,0.0,0.85));
+        // Clearer bolt cores without increasing the full-sky flash amplitude.
+        // Both core and halo remain behind the distant horizon/cloud layers.
+        color.rgb=mix(color.rgb,max(color.rgb,vec3(1.12,1.32,1.57)),
+                      clamp(stroke*c.style.z*2.55+halo*c.style.z*0.15,0.0,0.95));
     }
     // Milestone C: three virtual horizon layers compose behind the
     // sky cloud decks. No map geometry or additional GPU drawing is created.
@@ -142,6 +144,9 @@ void main() {
             if(mod(along,period)<streak) drops=max(drops,layer==0?0.42:0.22);
         }
         drops*=1.0-smoothstep(0.9,1.8,rise);
+        // Existing lightning briefly catches droplets at the horizon.
+        // Does not brighten indoor/world surfaces or change thunder timing.
+        drops*=1.0+0.30*clamp(c.weather.w,0.0,0.7);
         color.rgb=mix(color.rgb,max(color.rgb*1.5,low*1.3+0.05),drops);
     }
     // An episode whose outdoors lie dark (Game_Mood) dims its sky with them,
