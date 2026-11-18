@@ -88,17 +88,22 @@ void main() {
     bool starport=c.style.w<=-5.0&&!city&&!bloodHell;
     bool deimos=c.style.w<=-3.0&&!starport&&!city&&!bloodHell;
     bool inferno=c.style.w<=-1.0&&!deimos&&!starport&&!city&&!bloodHell;
-    bool crimson=inferno&&c.style.w>-2.0;
+    bool crimson=(inferno&&c.style.w>-2.0)||(bloodHell&&c.style.w>-10.0);
     bool coldElectrical=deimos&&c.style.w>-4.0;
     float boltSeed=inferno?((crimson?-1.0:-2.0)-c.style.w):
         deimos?((coldElectrical?-3.0:-4.0)-c.style.w):
         starport?-5.0-c.style.w:city?-7.0-c.style.w:
-        bloodHell?-9.0-c.style.w:c.style.w;
+        bloodHell?((crimson?-9.0:-10.0)-c.style.w):c.style.w;
     // E1 only: dusk sand scattering close to the low horizon, leaving
     // the recognisable painted Starport cloud shapes visible.
     if(starport) {
         float dust=1.0-smoothstep(-0.15,0.75,rise);
         color.rgb=mix(color.rgb,vec3(.42,.265,.155),.21*dust);
+    }
+    if(city) {
+        // Distant smoke below the burning skyline, not a full-screen tint.
+        float smog=(1.0-smoothstep(-0.22,0.75,rise));
+        color.rgb=mix(color.rgb,vec3(.26,.23,.21),.27*smog);
     }
     // Lightning is behind the three virtual horizon layers and clouds.
     // The skyline therefore masks the bolt rather than being lit on top.
@@ -107,7 +112,8 @@ void main() {
         float halo=hellforgeBoltHalo(angle,rise,c.style.y);
         // Clearer bolt cores without increasing the full-sky flash amplitude.
         // Both core and halo remain behind the distant horizon/cloud layers.
-        vec3 core=crimson?vec3(1.55,0.32,0.18):
+        vec3 core=bloodHell&&crimson?vec3(1.65,.18,.30):
+                  crimson?vec3(1.55,0.32,0.18):
                   coldElectrical?vec3(1.14,1.55,1.74):vec3(1.12,1.32,1.57);
         color.rgb=mix(color.rgb,max(color.rgb,core),
                       clamp(stroke*c.style.z*2.55+halo*c.style.z*0.15,0.0,0.95));
@@ -124,11 +130,16 @@ void main() {
         // No new layers or extra texture lookups are required.
         if(starport)color.rgb=mix(color.rgb,vec3(.23,.185,.14),
                                   .24*clamp(cloudCover,0.0,1.0));
+        if(city)color.rgb=mix(color.rgb,vec3(.19,.17,.16),
+                              .35*clamp(cloudCover,0.0,1.0));
+        if(bloodHell)color.rgb=mix(color.rgb,vec3(.25,.10,.14),
+                                   .22*clamp(cloudCover,0.0,1.0));
         // Electrical glow scatters through the soft cloud layers; the
         // bolt itself stays beneath the silhouettes and cloud shading.
         if(c.weather.w>0.0) {
             float halo=hellforgeBoltHalo(angle,rise,c.style.y);
-            vec3 scatter=crimson?vec3(0.37,0.065,0.04):
+            vec3 scatter=bloodHell&&crimson?vec3(.39,.045,.11):
+                         crimson?vec3(0.37,0.065,0.04):
                          coldElectrical?vec3(0.20,0.33,0.41):vec3(0.18,0.23,0.34);
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
@@ -177,6 +188,21 @@ void main() {
         drops*=1.0+0.30*clamp(c.weather.w,0.0,0.7);
         color.rgb=mix(color.rgb,max(color.rgb*1.5,low*1.3+0.05),drops);
     }
+    // E3: distant crimson droplets beyond the map's sky boundary. This is
+    // purely the sky color; it never invokes water rain or wet-surface code.
+    if(bloodHell&&c.effects.z==0.0) {
+        float tic=floor(c.fog.w*35.0)/35.0;
+        vec2 cellAt=floor(vec2(angle,rise)*(160.0*c.projection.x));
+        float column=cellAt.x+floor(cellAt.y*.055);
+        float seed=fract(sin(column*12.9898+37.719)*43758.5453);
+        if(seed<.32) {
+            float along=cellAt.y+tic*(36.0+seed*18.0)+seed*197.0;
+            float period=44.0+21.0*seed;
+            float drop=1.0-step(3.8+seed*3.0,mod(along,period));
+            drop*=(1.0-smoothstep(.85,1.65,rise));
+            color.rgb=mix(color.rgb,vec3(.57,.075,.105),.36*drop);
+        }
+    }
     // An episode whose outdoors lie dark (Game_Mood) dims its sky with them,
     // and its hour can tint it.
     color.rgb*=c.mood.x*c.mood.yzw;
@@ -185,6 +211,14 @@ void main() {
     if(inferno) {
         float band=(1.0-smoothstep(-0.08,0.55,ray.z))*0.22;
         color.rgb=mix(color.rgb,vec3(0.31,0.10,0.065),band);
+    } else if(bloodHell) {
+        // E3: a cold blood-grey horizon veil over the existing skull sky art.
+        float band=(1.0-smoothstep(-.16,.80,ray.z))*.58;
+        color.rgb=mix(color.rgb,vec3(.31,.17,.23),band);
+    } else if(city) {
+        // E2: thick pollution retains the recognizable burning-city artwork.
+        float band=(1.0-smoothstep(-.18,.67,ray.z))*.30;
+        color.rgb=mix(color.rgb,vec3(.23,.20,.19),band);
     } else if(deimos) {
         // D2.1: a cold, opaque-looking whiteout over the far horizon.
         // c.haze.w is already gated by the user's Fog setting; this affects

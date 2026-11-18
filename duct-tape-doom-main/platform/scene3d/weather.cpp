@@ -27,6 +27,7 @@ float stormCurtainNow=0,stormHazeNow=0;
 int episodeAtmosphereNow=0; // doom_episode::Profile; shared by geometry and sky.
 float deimosBlizzardNow=0,deimosGustNow=0; // D2.1: cosmetic-only whiteout progression.
 float starportDustNow=0,starportGustNow=0; // E1: dry sandstorm intensity and gusts.
+float citySmokeNow=0,bloodHellMistNow=0; // E2/E3: themed haze, without water rain.
 float rainWind[2]={0,0};
 namespace {
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
@@ -99,6 +100,7 @@ void newLevel() {
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;
     starportDustNow=starportGustNow=0;
+    citySmokeNow=bloodHellMistNow=0;
     episodeAtmosphereNow=static_cast<int>(episodeProfile());
     storm_audio::muteQueued();
     windSpeed=90+50*hashUnit(3,4,weatherSeed);
@@ -282,7 +284,8 @@ void finishTreeFire(const BurningTree &fire) {
 // against its sector and sprite, so merely sharing an old coordinate is not enough.
 bool infernoTreeCharred(const mobj_t *thing) {
     if(!thing||charredCount<=0||!settings.infernoTreeStrikes||
-       episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
+       (episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)&&
+        episodeAtmosphereNow!=int(doom_episode::Profile::BloodHell))||
        !doom_strike::stockTree(thing->type,thing->sprite,
            MT_MISC40,SPR_TRE1,MT_MISC76,SPR_TRE2)||
        !thing->subsector||!thing->subsector->sector)return false;
@@ -397,10 +400,20 @@ void watchWeather() {
         starport?leveltime:-1,TICRATE,weatherSeed^0x53b7a41du);
     starportDustNow=sand.intensity;
     starportGustNow=sand.gust;
+    const doom_episode::CityAir cityAir=doom_episode::burningCity(
+        episodeAtmosphereNow==int(doom_episode::Profile::BurningCity)?leveltime:-1,
+        TICRATE,weatherSeed^0x83e70d91u);
+    const doom_episode::BloodWeather bloodAir=doom_episode::bloodHellWeather(
+        episodeAtmosphereNow==int(doom_episode::Profile::BloodHell)?leveltime:-1,
+        TICRATE,weatherSeed^0x426eb7d3u);
+    citySmokeNow=cityAir.intensity;
+    bloodHellMistNow=bloodAir.intensity;
     // All other episodes retain the original rain/wind calculation.
     float wx,wy;rainHeading(wx,wy);
     const float speed=windSpeed*(0.6f+0.8f*gust)*atmosphere.windScale*
-                      (deimos?blizzard.windScale:starport?sand.windScale:1.f);
+                      (deimos?blizzard.windScale:starport?sand.windScale:
+                       episodeAtmosphereNow==int(doom_episode::Profile::BurningCity)?cityAir.windScale:
+                       episodeAtmosphereNow==int(doom_episode::Profile::BloodHell)?bloodAir.windScale:1.f);
     rainWind[0]=wx*speed;rainWind[1]=wy*speed;
     // The heading turned (the authored layer switched on or off): the ground's wetness anew.
     if(flatLightTexture&&wetLevelSerial==r_levelserial&&(wx!=wetHeading[0]||wy!=wetHeading[1])) {
@@ -427,7 +440,8 @@ void watchWeather() {
     // enabling water rain, wet floors, splashes or window droplets. Their
     // sound schedule is the original Storm A/B scheduler and sound samples.
     const bool themedDryStorm=(episodeAtmosphereNow==int(doom_episode::Profile::Inferno)||
-        episodeAtmosphereNow==int(doom_episode::Profile::Deimos))&&settings.episodeLightning!=0;
+        episodeAtmosphereNow==int(doom_episode::Profile::Deimos)||
+        episodeAtmosphereNow==int(doom_episode::Profile::BloodHell))&&settings.episodeLightning!=0;
     const bool active=settings.accelerated&&(
         (rainNow>.01f&&settings.weather!=0)||themedDryStorm);
     doom_storm::Frame storm=doom_storm::advance(stormState,leveltime,TICRATE,
@@ -437,7 +451,8 @@ void watchWeather() {
     stormBoltNow=storm.bolt;
     stormBoltAzimuthNow=storm.azimuth;
     stormBoltSeedNow=storm.boltSeed;
-    const bool treeMode=episodeAtmosphereNow==int(doom_episode::Profile::Inferno)&&
+    const bool treeMode=(episodeAtmosphereNow==int(doom_episode::Profile::Inferno)||
+        episodeAtmosphereNow==int(doom_episode::Profile::BloodHell))&&
         settings.infernoTreeStrikes&&settings.episodeLightning&&settings.stormBolts&&
         settings.stormMode>0&&settings.accelerated;
     if(!treeMode||!active) {
@@ -996,6 +1011,195 @@ static void buildStarportAtmosphere(const Uniforms &camera) {
     }
 }
 
+// E2 — Burning City: drifting dark smoke, soot and scarce glowing embers.
+// No persistent particle actors, no rain/wetness and no scene-wide fog pass.
+// Smoke renders as a pair of soft translucent billboards per puff; total
+// geometry <= 2*citySmokeBudget + cityAshBudget (248 at High).
+static void buildBurningCityAtmosphere(const Uniforms &camera) {
+    if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
+    constexpr float cell=38.f,reach=490.f;
+    const int density=std::clamp(settings.episodeParticles,0,2);
+    const int smokeCap=doom_episode::citySmokeBudget(density);
+    const int ashCap=doom_episode::cityAshBudget(density);
+    const float now=gameSeconds();
+    const float windLength=std::hypot(rainWind[0],rainWind[1]);
+    const float wx=windLength>1.f?rainWind[0]/windLength:1.f;
+    const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
+    const float intensity=std::clamp(citySmokeNow,0.f,1.f);
+    const uint32_t salt=weatherSeed^0x4bb29f7du;
+    const int cx=int(std::floor(camera.eye[0]/cell));
+    const int cy=int(std::floor(camera.eye[1]/cell));
+    int smoke=0,ash=0;
+    for(int ring=0;ring<=15&&(smoke<smokeCap||ash<ashCap);++ring)
+    for(int gy=cy-ring;gy<=cy+ring&&(smoke<smokeCap||ash<ashCap);++gy)
+    for(int gx=cx-ring;gx<=cx+ring&&(smoke<smokeCap||ash<ashCap);++gx) {
+        if(std::max(std::abs(gx-cx),std::abs(gy-cy))!=ring)continue;
+        const uint32_t seed=hash32(uint32_t(gx)*0x6e8feb86u^
+                                    uint32_t(gy)*0x49b1ca15u^salt);
+        for(int kind=0;kind<2;++kind) {
+            const bool soot=kind!=0;
+            if(soot?ash>=ashCap:smoke>=smokeCap)continue;
+            if(hashUnit(gx,gy,seed^(soot?0x71d13au:0xe54c3bu))>
+               (soot?.48f:.76f+.12f*intensity))continue;
+            const float life=soot?4.8f:6.3f;
+            const float phase=hashUnit(gx,gy,seed^0x83a31du);
+            const float clock=now+phase*life;
+            const int cycle=int(std::floor(clock/life));
+            const float age=clock-float(cycle)*life;
+            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u);
+            const float x0=(gx+.12f+.76f*hashUnit(gx,gy,own^0x31u))*cell;
+            const float y0=(gy+.12f+.76f*hashUnit(gx,gy,own^0x42u))*cell;
+            const sector_t *origin=sectorAt(x0,y0);
+            if(!origin||origin->ceilingpic!=skyflatnum)continue;
+            const float floor=floorZ(origin),ceiling=ceilZ(origin);
+            const float height=ceiling-floor;
+            if(height<24.f)continue;
+            const float start=floor+std::min(height-6.f,8.f+height*
+                (.07f+.48f*hashUnit(gx,gy,own^0x53u)));
+            const bool ember=soot&&hashUnit(gx,gy,own^0x64u)<.28f;
+            const float rise=soot?(ember?7.f:-4.f):8.f+6.f*hashUnit(gx,gy,own^0x75u);
+            const float drift=(soot?13.f:19.f)*age;
+            const float swirl=(soot?5.f:11.f)*
+                (std::sin(age*(soot?1.7f:.84f)+phase*6.2831853f)-
+                 std::sin(phase*6.2831853f));
+            const float dx=wx*drift-wy*swirl,dy=wy*drift+wx*swirl;
+            const float x=x0+dx,y=y0+dy,z=start+rise*age;
+            const sector_t *at=sectorAt(x,y);
+            if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+2.f||
+               z>=ceilZ(at)-2.f)continue;
+            bool blocked=false;
+            for(int k=1;k<=5;++k) {
+                const float u=float(k)/6.f;
+                const sector_t *through=sectorAt(x0+dx*u,y0+dy*u);
+                const float zz=start+rise*age*u;
+                if(!through||through->ceilingpic!=skyflatnum||
+                   zz<=floorZ(through)+2.f||zz>=ceilZ(through)-2.f) {blocked=true;break;}
+            }
+            if(blocked)continue;
+            const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
+            if(dist<15.f||dist>reach)continue;
+            const float fade=std::clamp(std::min({age*1.4f,(life-age)*1.4f,
+                (reach-dist)/90.f,(dist-15.f)/25.f}),0.f,1.f);
+            if(fade<.03f)continue;
+            const float hue=hashUnit(gx,gy,own^0x86u);
+            const float light=std::clamp(lighting(at),.20f,1.0f);
+            if(!soot) {
+                const std::array<float,3> gray={.16f+.10f*hue,.145f+.08f*hue,.13f+.07f*hue};
+                const float alpha=fade*(.19f+.12f*intensity)*(.75f+.25f*light);
+                pixelBlock(particleVertices,camera,x,y,z,5.8f,5.1f,gray,
+                    false,nullptr,false,nullptr,alpha);
+                pixelBlock(particleVertices,camera,x+wx*2.3f,y+wy*2.3f,z+2.7f,
+                    4.6f,4.2f,gray,false,nullptr,false,nullptr,alpha*.63f);
+                ++smoke;
+            } else {
+                const std::array<float,3> color=ember?
+                    std::array<float,3>{.87f+.10f*hue,.28f+.17f*hue,.05f+.07f*hue}:
+                    std::array<float,3>{.23f+.08f*hue,.20f+.07f*hue,.18f+.05f*hue};
+                pixelBlock(particleVertices,camera,x,y,z,ember?.55f:.75f,
+                    ember?.80f:1.1f,color,false,nullptr,false,nullptr,
+                    fade*(ember?.72f:.54f));
+                ++ash;
+            }
+        }
+    }
+}
+
+// E3 — Blood Hell: atmospheric *blood-colored* droplets plus cold embers.
+// Droplets vanish at the floor; they never use buildRain(), splash(), blood
+// decals, wetNow, glassWetNow or any gameplay blood pool / damage code.
+// Geometry <= 3*bloodRainBudget + bloodEmberBudget (392 at High).
+static void buildBloodHellAtmosphere(const Uniforms &camera) {
+    if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
+    constexpr float cell=30.f,reach=455.f;
+    const int density=std::clamp(settings.episodeParticles,0,2);
+    const int dropCap=doom_episode::bloodRainBudget(density);
+    const int emberCap=doom_episode::bloodEmberBudget(density);
+    const float now=gameSeconds();
+    const float speed=std::hypot(rainWind[0],rainWind[1]);
+    const float wx=speed>1.f?rainWind[0]/speed:1.f;
+    const float wy=speed>1.f?rainWind[1]/speed:0.f;
+    const float intensity=std::clamp(bloodHellMistNow,0.f,1.f);
+    const uint32_t salt=weatherSeed^0xbd19f8a3u;
+    const int cx=int(std::floor(camera.eye[0]/cell));
+    const int cy=int(std::floor(camera.eye[1]/cell));
+    int drops=0,embers=0;
+    for(int ring=0;ring<=16&&(drops<dropCap||embers<emberCap);++ring)
+    for(int gy=cy-ring;gy<=cy+ring&&(drops<dropCap||embers<emberCap);++gy)
+    for(int gx=cx-ring;gx<=cx+ring&&(drops<dropCap||embers<emberCap);++gx) {
+        if(std::max(std::abs(gx-cx),std::abs(gy-cy))!=ring)continue;
+        const uint32_t seed=hash32(uint32_t(gx)*0x17e9c1fbu^
+                                    uint32_t(gy)*0x4cb29a37u^salt);
+        for(int kind=0;kind<2;++kind) {
+            const bool ember=kind!=0;
+            if(ember?embers>=emberCap:drops>=dropCap)continue;
+            if(hashUnit(gx,gy,seed^(ember?0x154u:0x276u))>
+               (ember?.18f:.66f+.18f*intensity))continue;
+            const float life=ember?4.2f:2.1f;
+            const float phase=hashUnit(gx,gy,seed^0x4d1u);
+            const float clock=now+phase*life;
+            const int cycle=int(std::floor(clock/life));
+            const float age=clock-float(cycle)*life;
+            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u);
+            const float x0=(gx+.13f+.74f*hashUnit(gx,gy,own^0x386u))*cell;
+            const float y0=(gy+.13f+.74f*hashUnit(gx,gy,own^0x497u))*cell;
+            const sector_t *origin=sectorAt(x0,y0);
+            if(!origin||origin->ceilingpic!=skyflatnum)continue;
+            const float floor=floorZ(origin),ceiling=ceilZ(origin);
+            const float height=ceiling-floor;
+            if(height<25.f)continue;
+            const float start=floor+std::min(height-5.f,10.f+height*
+                (.30f+.56f*hashUnit(gx,gy,own^0x508u)));
+            const float vz=ember?5.f+7.f*hashUnit(gx,gy,own^0x619u):
+                -(100.f+70.f*hashUnit(gx,gy,own^0x72au));
+            const float drift=(ember?15.f:17.f)*age;
+            const float swirl=3.4f*(std::sin(age*1.7f+phase*6.2831853f)-
+                                     std::sin(phase*6.2831853f));
+            const float dx=wx*drift-wy*swirl,dy=wy*drift+wx*swirl;
+            const float x=x0+dx,y=y0+dy,z=start+vz*age;
+            const sector_t *at=sectorAt(x,y);
+            if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+1.f||
+               z>=ceilZ(at)-2.f)continue;
+            bool sheltered=false;
+            for(int k=1;k<=5;++k) {
+                const float u=float(k)/6.f;
+                const sector_t *through=sectorAt(x0+dx*u,y0+dy*u);
+                const float zz=start+vz*age*u;
+                if(!through||through->ceilingpic!=skyflatnum||
+                   zz<=floorZ(through)+1.f||zz>=ceilZ(through)-2.f) {sheltered=true;break;}
+            }
+            if(sheltered)continue;
+            const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
+            if(dist<11.f||dist>reach)continue;
+            const float fade=std::clamp(std::min({age*2.2f,(life-age)*2.2f,
+                (reach-dist)/80.f,(dist-11.f)/19.f}),0.f,1.f);
+            if(fade<.03f)continue;
+            const float light=std::clamp(lighting(at),.23f,1.f);
+            const float variation=hashUnit(gx,gy,own^0x83bu);
+            if(ember) {
+                const std::array<float,3> color={.83f+.15f*variation,
+                    .18f+.13f*variation,.07f+.045f*variation};
+                pixelBlock(particleVertices,camera,x,y,z,.44f,.72f,color,
+                    false,nullptr,false,nullptr,fade*.70f);
+                ++embers;
+            } else {
+                // Dark crimson drips, two short separated segments.
+                const std::array<float,3> red={(.43f+.22f*variation)*light,
+                    (.055f+.07f*variation)*light,
+                    (.060f+.065f*variation)*light};
+                pixelBlock(particleVertices,camera,x,y,z,.73f,2.9f,red,
+                    false,nullptr,false,nullptr,fade*.86f);
+                pixelBlock(particleVertices,camera,x-wx*.75f,y-wy*.75f,z+2.f,
+                    .48f,1.8f,red,false,nullptr,false,nullptr,fade*.43f);
+                // Tiny transient droplet break-up at ground level, not a decal.
+                if(z-floorZ(at)<10.f)
+                    pixelBlock(particleVertices,camera,x,y,floorZ(at)+1.1f,
+                        1.25f,.55f,red,false,nullptr,false,nullptr,fade*.42f);
+                ++drops;
+            }
+        }
+    }
+}
+
 // D1: Inferno particles are ephemeral analytic billboards, not persistent actors.
 // The original rain, dripping-window effects and wetness remain unchanged.
 // One candidate per 48-unit world cell; hard caps bound all generated geometry.
@@ -1003,6 +1207,12 @@ static void buildStarportAtmosphere(const Uniforms &camera) {
 void buildEpisodeAtmosphere(const Uniforms &camera) {
     if(episodeAtmosphereNow==int(doom_episode::Profile::Starport)) {
         buildStarportAtmosphere(camera);return;
+    }
+    if(episodeAtmosphereNow==int(doom_episode::Profile::BurningCity)) {
+        buildBurningCityAtmosphere(camera);return;
+    }
+    if(episodeAtmosphereNow==int(doom_episode::Profile::BloodHell)) {
+        buildBloodHellAtmosphere(camera);return;
     }
     if(episodeAtmosphereNow==int(doom_episode::Profile::Deimos)) {
         buildDeimosAtmosphere(camera);return;
@@ -1090,7 +1300,8 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
 // bounded embers. The 20% ignition decision remains deterministic, and
 // a finished fire leaves a cached charcoal-colored tree sprite.
 void buildInfernoTreeStrikes(const Uniforms &camera) {
-    if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
+    if((episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)&&
+        episodeAtmosphereNow!=int(doom_episode::Profile::BloodHell))||
        !settings.infernoTreeStrikes||!settings.episodeLightning||!settings.stormBolts||
        !settings.stormMode||camera.effects[2]!=0||levelSerial!=r_levelserial)return;
     const bool strikeVisible=treeStrike.born>=0&&
@@ -1223,6 +1434,7 @@ void weatherShutdown() {
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;
     starportDustNow=starportGustNow=0;
+    citySmokeNow=bloodHellMistNow=0;
     episodeAtmosphereNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
     doom_storm::reset(stormState);treeStrike=TreeStrike{};treeFires={};

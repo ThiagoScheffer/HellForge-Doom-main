@@ -588,7 +588,7 @@ FrameView prepareFrame(int w,int h) {
         const bool starport=episodeAtmosphereNow==3;
         const bool city=episodeAtmosphereNow==4;
         const bool bloodHell=episodeAtmosphereNow==5;
-        camera.weather[3]=(settings.weather||inferno||deimos)&&camera.effects[2]==0?
+        camera.weather[3]=(settings.weather||inferno||deimos||bloodHell)&&camera.effects[2]==0?
             stormFlashNow:0;
         if(camera.weather[3]>0) {
             camera.style[1]=stormBoltAzimuthNow;
@@ -604,8 +604,9 @@ FrameView prepareFrame(int w,int h) {
         else if(deimos)camera.style[3]=
             (settings.episodeLightning?-3.f:-4.f)-camera.style[3];
         else if(starport)camera.style[3]=-5.f-camera.style[3];
-        else if(city)camera.style[3]=-7.f-camera.style[3]; // E2 reserved
-        else if(bloodHell)camera.style[3]=-9.f-camera.style[3]; // E3 reserved
+        else if(city)camera.style[3]=-7.f-camera.style[3];
+        else if(bloodHell)camera.style[3]=
+            (settings.episodeLightning?-9.f:-10.f)-camera.style[3];
         renderFraction=fraction;
         // Caustics follow the liquid's frame and crossfade like its floor (surfaceBinding).
         if(!causticFrames.empty()&&causticSpeed>0&&leveltime>0) {
@@ -659,6 +660,18 @@ FrameView prepareFrame(int w,int h) {
             for(int c=0;c<3;++c)camera.haze[c]=
                 camera.haze[c]*.18f+sandHaze[c]*.82f;
         }
+        if(episodeAtmosphereNow==4) {
+            // E2: charcoal pollution haze, only where the outdoor mask permits.
+            const std::array<float,3> smokeHaze={.255f,.245f,.235f};
+            for(int c=0;c<3;++c)camera.haze[c]=
+                camera.haze[c]*.10f+smokeHaze[c]*.90f;
+        }
+        if(episodeAtmosphereNow==5) {
+            // E3: chilling crimson-grey fog, independent of water rain.
+            const std::array<float,3> bloodHaze={.33f,.205f,.245f};
+            for(int c=0;c<3;++c)camera.haze[c]=
+                camera.haze[c]*.12f+bloodHaze[c]*.88f;
+        }
         // D2.2: outdoor Deimos fog begins within the same depth range as
         // windblown ice. Its strength is a separate F4 choice, not particle count.
         // Keep normal height fog untouched; the world shader applies this
@@ -669,6 +682,10 @@ FrameView prepareFrame(int w,int h) {
                 doom_episode::deimosFogStrength(settings.deimosFog,deimosBlizzardNow):
              episodeAtmosphereNow==3?
                 doom_episode::starportHaze(starportDustNow):
+             episodeAtmosphereNow==4?
+                doom_episode::cityHaze(citySmokeNow):
+             episodeAtmosphereNow==5?
+                doom_episode::bloodHellHaze(bloodHellMistNow):
                 std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
         buildMist(camera);
         buildShafts(camera);

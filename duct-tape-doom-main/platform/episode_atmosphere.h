@@ -7,7 +7,7 @@
 #include <cstdint>
 namespace doom_episode {
 // Keep the existing numeric values of Inferno and Deimos in graphics.cfg.
-// E2 and E3 may define particles later; the profile IDs are reserved now.
+// E2/E3 use the profile IDs reserved by E1; retain legacy F4 values.
 enum class Profile : int { None=0, Inferno=1, Deimos=2,
                            Starport=3, BurningCity=4, BloodHell=5 };
 // skyKind describes the *current logical sky texture*, not a hardcoded MAP range.
@@ -38,8 +38,8 @@ inline Profile selectSky(int setting,bool authoredEnabled,bool authoredSupported
     if(setting==3)return Profile::Deimos;
     if(setting==4) return commercialSky(skyKind); // Explicit custom-WAD opt-in.
     if(setting==5) return Profile::Starport;
-    if(setting==6) return Profile::BurningCity; // reserved for E2
-    if(setting==7) return Profile::BloodHell;   // reserved for E3
+    if(setting==6) return Profile::BurningCity;
+    if(setting==7) return Profile::BloodHell;
     if(commercial) {
         return setting==1&&authoredEnabled&&authoredSupported?
                commercialSky(skyKind):Profile::None;
@@ -69,6 +69,46 @@ inline Sandstorm starportStorm(int tic,int rate,std::uint32_t seed) {
 }
 inline float starportHaze(float intensity) {
     return std::clamp(.36f+.30f*intensity,.36f,.66f);
+}
+// E2 — Burning City: dark rising smoke, falling soot and rare orange embers.
+// A smoke puff uses two billboards; ash/embers use one. Fixed scene budgets.
+inline int citySmokeBudget(int density) {return density<=0?56:density==1?80:96;}
+inline int cityAshBudget(int density) {return density<=0?24:density==1?40:56;}
+struct CityAir {float intensity=0.f,gust=0.f,windScale=1.f;};
+inline CityAir burningCity(int tic,int rate,std::uint32_t seed) {
+    CityAir a{};
+    if(tic<0||rate<=0)return a;
+    const float t=float(tic)/float(rate);
+    const float phase=float(((seed^(seed>>15))*0x846ca68bu)&65535u)/65536.f;
+    const float slow=.5f-.5f*std::cos(6.283185307f*(t/94.f+phase));
+    a.gust=std::clamp(.48f+.34f*std::sin(t*.37f+phase*6.283185307f)
+                      +.18f*std::sin(t*.91f+phase*9.1f),0.f,1.f);
+    a.intensity=std::clamp(.70f+.17f*slow+.13f*a.gust,.70f,1.f);
+    a.windScale=.78f+.44f*a.gust;
+    return a;
+}
+inline float cityHaze(float intensity) {
+    return std::clamp(.52f+.24f*intensity,.52f,.76f);
+}
+// E3 — Blood Hell: cold opaque crimson smog, heavy *cosmetic* blood drips
+// and floating cinders. Never affects water rain, splashes or wet textures.
+inline int bloodRainBudget(int density) {return density<=0?64:density==1?96:120;}
+inline int bloodEmberBudget(int density) {return density<=0?12:density==1?24:32;}
+struct BloodWeather {float intensity=0.f,gust=0.f,windScale=1.f;};
+inline BloodWeather bloodHellWeather(int tic,int rate,std::uint32_t seed) {
+    BloodWeather b{};
+    if(tic<0||rate<=0)return b;
+    const float t=float(tic)/float(rate);
+    const float phase=float(((seed^(seed>>16))*0x7feb352du)&65535u)/65536.f;
+    const float slow=.5f-.5f*std::cos(6.283185307f*(t/75.f+phase));
+    b.gust=std::clamp(.50f+.35f*std::sin(t*.51f+phase*6.283185307f)
+                     +.15f*std::sin(t*1.11f+phase*12.3f),0.f,1.f);
+    b.intensity=std::clamp(.76f+.15f*slow+.09f*b.gust,.76f,1.f);
+    b.windScale=.86f+.36f*b.gust;
+    return b;
+}
+inline float bloodHellHaze(float intensity) {
+    return std::clamp(.64f+.23f*intensity,.64f,.87f);
 }
 inline int ashBudget(int density) {return density<=0?48:density==1?96:128;}
 inline int emberBudget(int density) {return density<=0?12:density==1?24:32;}

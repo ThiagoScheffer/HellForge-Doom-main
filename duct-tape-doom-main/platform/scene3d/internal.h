@@ -706,6 +706,7 @@ extern float stormCurtainNow,stormHazeNow; // Optional Milestone C atmosphere; z
 extern int episodeAtmosphereNow; // 0 none, 1 Inferno, 2 Deimos, 3 Starport, 4 City, 5 Blood Hell.
 extern float deimosBlizzardNow,deimosGustNow;
 extern float starportDustNow,starportGustNow; // E1 dry dusk duststorm intensity and gusts.
+extern float citySmokeNow,bloodHellMistNow; // E2/E3 independent dry particle profiles.
 extern float rainWind[2];
 float paneSoak(int pane);
 // Where the rain blows (unit vector); the ground's wetness under the sky

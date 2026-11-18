@@ -458,16 +458,18 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Weather and wear",{
                 choice("episode_atmosphere","Episode atmosphere",&s.episodeAtmosphere,
                     {"Off","Authored episodes","Inferno (manual)","Deimos (manual)",
-                     "Follow active SKY1/2/3","Starport duststorm (manual)"},{0,1,2,3,4,5},
-                    "Classic E2 Deimos and E3 Inferno retain their effects. DOOM II SKY1: strong sandy wind, "
-                    "airborne grit and warm dusk haze. SKY2 (Burning City) and SKY3 (Blood Hell) have reserved "
-                    "profiles for the next milestones. Follow active sky explicitly opts custom WADs in; "
-                    "Off disables the extra particles and haze. Dry dust does not create water rain or wetness.",
+                     "Follow active SKY1/2/3","Starport duststorm (manual)",
+                     "Burning City (manual)","Blood Hell (manual)"},{0,1,2,3,4,5,6,7},
+                    "Classic Deimos/Inferno and DOOM II SKY1 Starport duststorms, SKY2 Burning City smoke, "
+                    "and SKY3 Blood Hell rain and fog. Follow active sky explicitly opts custom WADs in; "
+                    "Off disables themed particles/haze. Themed dust and blood drips do not create water wetness.",
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("episode_particles","Episode atmosphere particles",&s.episodeParticles,
                     {"Low","Normal","High"},{0,1,2},
                     "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 180/80, 320/144, 480/220; "
-                    "Starport fine sand/heavy grit: 80/16, 128/24, 160/32. "
+                    "Starport fine sand/heavy grit: 80/16, 128/24, 160/32; "
+                    "Burning City smoke/ash: 56/24, 80/40, 96/56; "
+                    "Blood Hell droplets/embers: 64/12, 96/24, 120/32. "
                     "Only open-sky sectors and swept sky-exposed paths are eligible.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 choice("deimos_fog","Deimos blizzard visibility",&s.deimosFog,
@@ -477,15 +479,15 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Requires Fog enabled. Independent of ice-particle density.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&d.fog!=0;}),
                 check("episode_lightning","Themed episode lightning",&s.episodeLightning,
-                    "Crimson lightning in Inferno, pale electric blue-white in Deimos. "
+                    "Crimson lightning in Inferno and Blood Hell, pale electric blue-white in Deimos. "
                     "Allows thunder on dry episode maps when Thunderstorms is enabled; Rain=Never stays dry.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
-                check("inferno_tree_strikes","Inferno tree lightning strikes",&s.infernoTreeStrikes,
+                check("inferno_tree_strikes","Hell tree lightning strikes",&s.infernoTreeStrikes,
                     "Cosmetic crimson branches may hit outdoor original small (TRE1) or large (TRE2) dead trees. "
                     "Each strike replaces ordinary thunder with the close recording, and has a 20% chance "
                     "to ignite a 24-second cosmetic fire with drifting embers. Burned-out trees remain charcoal-dark "
                     "until the level resets (up to 64 tracked). No actor damage or gameplay changes. "
-                    "Requires Inferno, themed lightning, thunderstorms and visible bolts. Other maps are unaffected.",
+                    "Available in Inferno or Blood Hell with themed lightning, thunderstorms and visible bolts. Other maps are unaffected.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&
                         d.episodeLightning!=0&&d.stormMode!=0&&d.stormBolts!=0;}),
                 choice("weather","Rain",&s.weather,{"Never","Authored episodes","Always"},{0,1,2},
@@ -495,7 +497,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "blows the rain in, and the floor and wall beneath it get wet."),
                 choice("storm_mode","Thunderstorms",&s.stormMode,{"Off","Subtle","Normal","Dramatic"},{0,1,2,3},
                     "Optional lightning and delayed close, medium or distant thunder with active rain, "
-                    "or in an enabled dry Inferno/Deimos profile with themed lightning. Off disables thunder.",
+                    "or in an enabled dry Inferno, Deimos or Blood Hell profile with themed lightning. Off disables thunder.",
                     [](const Settings &d){return d.accelerated!=0&&(d.weather!=0||
                         (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_strong_flashes","Allow strong lightning flashes",&s.stormStrongFlashes,

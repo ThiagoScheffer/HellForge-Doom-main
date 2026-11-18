@@ -374,7 +374,17 @@ void main() {
     // baked-light rebuild, additional uniforms, or fog on screen/UI passes.
     if(mapped&&c.haze.w>0.0&&(vMode&MODE_SCREEN)==0u&&sectorInfo[sector].w>0.0) {
         float open=clamp(1.0-outdoorShape(sector).x,0.0,1.0);
-        if(c.style.w<=-5.0&&c.style.w>-7.0) {
+        if(c.style.w<=-9.0) {
+            // E3: cold crimson fog starts in the same space as blood drips.
+            float strength=clamp(c.haze.w,0.0,1.0);
+            float veil=strength*(1.0-exp(-max(vDistance-38.0,0.0)/255.0));
+            color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,clamp(open*veil,0.0,1.0));
+        } else if(c.style.w<=-7.0&&c.style.w>-9.0) {
+            // E2: layered pollution; middle distance fades to smoky charcoal.
+            float strength=clamp(c.haze.w,0.0,1.0);
+            float veil=strength*(1.0-exp(-max(vDistance-70.0,0.0)/360.0));
+            color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,clamp(open*veil,0.0,1.0));
+        } else if(c.style.w<=-5.0&&c.style.w>-7.0) {
             // E1: Starport dusk dust begins closer than the general horizon
             // haze, but remains masked to actually exposed outdoor surfaces.
             float strength=clamp(c.haze.w,0.0,1.0);
