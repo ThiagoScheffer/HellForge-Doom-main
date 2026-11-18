@@ -723,6 +723,8 @@ void buildRain(const Uniforms &camera);
 void buildOutdoorWind(const Uniforms &camera);
 void buildEpisodeAtmosphere(const Uniforms &camera);
 void buildInfernoTreeStrikes(const Uniforms &camera);
+// D3.2: true after the original outdoor tree finished burning; coordinates only.
+bool infernoTreeCharred(const mobj_t *thing);
 void weatherShutdown();
 
 // wear.cpp

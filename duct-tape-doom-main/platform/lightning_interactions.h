@@ -1,4 +1,4 @@
-/* HELLFORGE D3 — optional cosmetic lightning on original burnt-tree sprites.
+/* HELLFORGE D3.3 — fair cosmetic lightning on original dead-tree sprites.
    Selection, pulse, and ember timing are independent of Doom gameplay RNG.
    This header intentionally has no Doom engine or rendering dependencies. */
 #ifndef HELLFORGE_LIGHTNING_INTERACTIONS_H
@@ -15,19 +15,39 @@ constexpr int emberLifetimeTics=26;
 constexpr int flameLifetimeTics=24*35;
 constexpr int maxBurningTrees=4;
 constexpr int flameStrands=7;
-constexpr int flameSparks=5;
+constexpr int flameSparks=9;
+constexpr int fireEmberMotes=12; // small drifting coals surrounding each fire
+constexpr int maxCharredTrees=64; // fixed-size per-level cosmetic history
+constexpr int maxStrikeHistory=128; // bounded rotation history, no actor pointers
 constexpr int peakStrikeBlocks=boltSegments*2+branchSegments*2+1+emberCount;
-constexpr int maxFlameBlocks=maxBurningTrees*(flameStrands*2+flameSparks);
+constexpr int maxFlameBlocks=maxBurningTrees*(flameStrands*2+flameSparks+fireEmberMotes);
 inline std::uint32_t hash(std::uint32_t x) {
     x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;return x;
 }
 inline float unit(std::uint32_t x) {return float(hash(x)&0xffffffu)/16777216.f;}
-// Vanilla Doom's big dead/burnt tree: MT_MISC76 / SPR_TRE2 (thing 54).
-// Caller provides the actor's type and *actual displayed* sprite identity.
+// Vanilla Doom dead trees: MT_MISC40 / SPR_TRE1 (thing 43, small),
+// and MT_MISC76 / SPR_TRE2 (thing 54, large). Never identify replacements
+// by color alone: caller verifies both the actor type and displayed sprite.
+inline bool stockTree(int type,int sprite,int smallType,int smallSprite,int bigType,int bigSprite) {
+    return (type==smallType&&sprite==smallSprite)||(type==bigType&&sprite==bigSprite);
+}
+// Caller provides actor type and *actual displayed* sprite identity.
 inline bool eligibleTree(int type,int sprite,int treeType,int treeSprite,
-                         bool sky,float distance,float headroom) {
+                         bool sky,float distance,float headroom,bool smallTree=false) {
+    // TRE1 is a short decoration (vanilla actor height 16), so the old
+    // common 56-unit gate incorrectly rejected it in low open-sky sectors.
+    // Both variants still require a genuine sky ceiling and clear headroom.
+    const float minimum=smallTree?24.f:56.f;
     return type==treeType&&sprite==treeSprite&&sky&&
-           distance>=24.f&&distance<=maxTargetDistance&&headroom>=56.f;
+           distance>=24.f&&distance<=maxTargetDistance&&headroom>=minimum;
+}
+// Map-local location identity for fire, charcoal and strike rotation.
+// No mobj_t pointers survive an event. One-unit tolerance handles fixed-point
+// conversion while checking sector, stock type and displayed sprite as well.
+inline bool sameTree(int sector,int type,int sprite,float x,float y,
+                     int otherSector,int otherType,int otherSprite,float otherX,float otherY) {
+    return sector==otherSector&&type==otherType&&sprite==otherSprite&&
+           std::abs(x-otherX)<1.f&&std::abs(y-otherY)<1.f;
 }
 // A target is selected on ~90% of the existing storm events if a qualifying
 // tree is present; events themselves retain their approved cadence.
@@ -47,6 +67,26 @@ inline float impactFade(int age) {
         std::clamp(1.f-float(age)/float(emberLifetimeTics),0.f,1.f);
 }
 inline bool drawBolt(int age) {return age>=0&&age<=8;}
+// A tree impact gets the close recording after a short, credible delay.
+// Replace (do not stack) the normal distant/medium thunder for that event.
+struct CloseThunder {
+    int due=-1;
+    bool replaceOriginal=false;
+};
+inline void scheduleClose(CloseThunder &s,int tic,int rate) {
+    s.due=tic+std::max(1,int(std::lround(0.28f*float(std::max(1,rate)))));
+    s.replaceOriginal=true;
+}
+inline bool useOrdinaryThunder(CloseThunder &s) {
+    if(!s.replaceOriginal)return true;
+    s.replaceOriginal=false;
+    return false;
+}
+inline bool closeReady(CloseThunder &s,int tic) {
+    if(s.due<0||tic<s.due)return false;
+    s.due=-1;
+    return true;
+}
 // Anchored at both ends, so the bolt meets the target and sky consistently.
 inline float lateral(int segment,int count,std::uint32_t seed) {
     const float u=float(segment)/float(std::max(1,count));

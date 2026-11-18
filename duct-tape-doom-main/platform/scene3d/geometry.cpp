@@ -866,10 +866,15 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
             // Keep the unmodified art authoritative for silhouette, pose, wound attachment
             // and hole-mask matching; only the sampled GPU texture changes with health.
+            // A lightning-ignited original dead tree is only recolored after
+            // its cosmetic fire ends. Use the existing palette-based, cached
+            // charred sprite variant: no per-frame uploads, actor edits or WAD mutations.
+            Image &treeImage = !self && infernoTreeCharred(thing)
+                ? charredImage(baseImage,spriteKey,spriteKey) : baseImage;
             Image &skinImage = (!self && !death.ragdoll && settings.monsterSkinDamage && thing->health>0 && thing->info &&
                                 !P_CombatCharred(thing) && !thing->player)
                 ? monsterSkinImage(thing->type,lump,baseImage,thing->health,thing->info->spawnhealth,spriteKey)
-                : baseImage;
+                : treeImage;
             // The age tracker alone decides whether the actor is a terminal
             // ordinary corpse. A death presenter may retain a fall pose or a
             // different frame well after the actor reaches its last death state;

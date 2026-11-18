@@ -34,16 +34,34 @@ doom_storm::State stormState;
 // Only coordinates survive an event: never retain a mobj_t* across tics.
 struct TreeStrike {
     float x=0,y=0,ground=0,top=0;
-    int born=-1,sector=-1;
+    int born=-1,sector=-1,type=-1,sprite=-1;
     std::uint32_t seed=0;
 };
 struct BurningTree {
     float x=0,y=0,ground=0,height=0;
-    int born=-1,sector=-1;
+    int born=-1,sector=-1,type=-1,sprite=-1;
     std::uint32_t seed=0;
+};
+struct CharredTree {
+    float x=0,y=0;
+    int sector=-1,type=-1,sprite=-1;
+};
+// Bounded per-map history: prefer never-hit trees, then those struck least
+// recently. This distributes strikes across TRE1 and TRE2 instead of repeatedly
+// favoring whichever tree is nearest the player. No retained actor pointers.
+struct TreeStrikeHistory {
+    float x=0,y=0;
+    int sector=-1,type=-1,sprite=-1;
+    unsigned hits=0,order=0;
 };
 TreeStrike treeStrike;
 std::array<BurningTree,doom_strike::maxBurningTrees> treeFires{};
+std::array<CharredTree,doom_strike::maxCharredTrees> charredTrees{};
+int charredCount=0;
+std::array<TreeStrikeHistory,doom_strike::maxStrikeHistory> treeHistory{};
+int historyCount=0;
+unsigned strikeOrder=0;
+doom_strike::CloseThunder treeCloseThunder{};
 float windSpeed=0;
 int weatherTic=-1;
 std::vector<float> soak;
@@ -66,7 +84,9 @@ void newLevel() {
     weatherSeed=levelWeatherSeed();
     doom_storm::reset(stormState);
     treeStrike=TreeStrike{};
-    treeFires={};
+    treeFires={};charredTrees={};charredCount=0;
+    treeHistory={};historyCount=0;strikeOrder=0;
+    treeCloseThunder={};
     stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;
@@ -86,9 +106,56 @@ float inward(const PaneView &p) {
     return std::max(0.0f,(rainWind[0]*p.inX+rainWind[1]*p.inY)/speed);
 }
 bool letsRainIn(const PaneView &p) {return p.broken&&p.sky&&rainNow>0.02f&&inward(p)>0.05f;}
-// A rare fork can connect to a nearby, sky-exposed original dead tree.
-// Scan living sector lists only at the instant of a bolt (never each frame).
-// No object pointers are held: removed or replaced decorations cannot dangle.
+// Map-local eligibility. Trees already alight or burned to charcoal must
+// never receive another local strike. Normal sky lightning continues if no
+// untouched tree is available. These tests are deliberately type-aware.
+bool treeAlreadyBurned(int sector,int type,int sprite,float x,float y) {
+    for(const BurningTree &fire:treeFires)
+        if(fire.born>=0&&
+           doom_strike::sameTree(sector,type,sprite,x,y,
+               fire.sector,fire.type,fire.sprite,fire.x,fire.y))return true;
+    for(int n=0;n<charredCount;++n) {
+        const CharredTree &charred=charredTrees[n];
+        if(doom_strike::sameTree(sector,type,sprite,x,y,
+                charred.sector,charred.type,charred.sprite,charred.x,charred.y))return true;
+    }
+    return false;
+}
+const TreeStrikeHistory *treeHistoryFor(int sector,int type,int sprite,float x,float y) {
+    for(int n=0;n<historyCount;++n) {
+        const TreeStrikeHistory &entry=treeHistory[n];
+        if(doom_strike::sameTree(sector,type,sprite,x,y,
+                entry.sector,entry.type,entry.sprite,entry.x,entry.y))return &entry;
+    }
+    return nullptr;
+}
+void rememberTreeStrike(const TreeStrike &target) {
+    int index=-1;
+    for(int n=0;n<historyCount;++n) {
+        const TreeStrikeHistory &entry=treeHistory[n];
+        if(doom_strike::sameTree(target.sector,target.type,target.sprite,target.x,target.y,
+                entry.sector,entry.type,entry.sprite,entry.x,entry.y)) {index=n;break;}
+    }
+    if(index<0) {
+        if(historyCount<doom_strike::maxStrikeHistory)index=historyCount++;
+        else {
+            // Bounded memory even on maps with hundreds of tree decorations.
+            // Evict the least recently hit entry, not any game actor.
+            index=0;
+            for(int n=1;n<historyCount;++n)
+                if(treeHistory[n].order<treeHistory[index].order)index=n;
+        }
+        treeHistory[index]=TreeStrikeHistory{};
+        treeHistory[index].x=target.x;treeHistory[index].y=target.y;
+        treeHistory[index].sector=target.sector;
+        treeHistory[index].type=target.type;treeHistory[index].sprite=target.sprite;
+    }
+    TreeStrikeHistory &entry=treeHistory[index];
+    entry.hits=std::min(entry.hits+1u,0xfffffffeu);
+    entry.order=++strikeOrder;
+}
+// A rare fork can connect to a nearby, sky-exposed stock dead tree.
+// Candidate selection runs only when the approved storm scheduler flashes.
 void chooseTreeStrike(std::uint32_t eventSeed) {
     treeStrike=TreeStrike{};
     if(!doom_strike::selectEvent(eventSeed)||gamestate!=GS_LEVEL||
@@ -97,51 +164,75 @@ void chooseTreeStrike(std::uint32_t eventSeed) {
     const float vx=units(viewer->x),vy=units(viewer->y);
     const float angle=float(double(viewer->angle)*(2.0*doomPi/4294967296.0));
     const float fx=std::cos(angle),fy=std::sin(angle);
-    float best=2.f;
+    unsigned bestHits=~0u,bestOrder=~0u;
+    float bestTie=2.f;
     for(int s=0;s<numsectors;++s) {
         const sector_t *sector=&sectors[s];
         if(sector->ceilingpic!=skyflatnum)continue;
         for(const mobj_t *thing=sector->thinglist;thing;thing=thing->snext) {
-            if(thing->type!=MT_MISC76||thing->sprite!=SPR_TRE2)continue;
+            const bool small=thing->type==MT_MISC40&&thing->sprite==SPR_TRE1;
+            if(!doom_strike::stockTree(thing->type,thing->sprite,
+                    MT_MISC40,SPR_TRE1,MT_MISC76,SPR_TRE2))continue;
             const float x=units(thing->x),y=units(thing->y);
             const float dx=x-vx,dy=y-vy,dist=std::hypot(dx,dy);
             const float base=units(thing->z),ceil=ceilZ(sector);
             if(!doom_strike::eligibleTree(thing->type,thing->sprite,
-                  MT_MISC76,SPR_TRE2,true,dist,ceil-base))continue;
-            // Favor the player's forward field while allowing peripheral strikes.
+                  small?MT_MISC40:MT_MISC76,small?SPR_TRE1:SPR_TRE2,
+                  true,dist,ceil-base,small))continue;
+            // Keep the established camera-facing and sector ownership rules.
             if(dx*fx+dy*fy<-.18f*dist)continue;
-            // Current actor must really occupy this sky sector (not just a
-            // stale sector-list position while moving or being destroyed).
             if(!thing->subsector||thing->subsector->sector!=sector)continue;
+            if(treeAlreadyBurned(s,thing->type,thing->sprite,x,y))continue;
+            const TreeStrikeHistory *history=treeHistoryFor(s,thing->type,thing->sprite,x,y);
+            const unsigned hits=history?history->hits:0;
+            const unsigned order=history?history->order:0;
             const std::uint32_t h=doom_strike::hash(eventSeed^
                 std::uint32_t(s)*0x9e3779b9u^
                 std::uint32_t(thing->x)^std::uint32_t(thing->y));
-            const float score=doom_strike::unit(h)*.65f+
-                .35f*dist/doom_strike::maxTargetDistance;
-            if(score>=best)continue;
-            best=score;
+            // Fair rotation: always favor a tree with fewer hits. When counts
+            // match, pick the one least recently struck. Hash breaks ties.
+            // This lets TRE1 be struck even beside a prominent TRE2.
+            const float tie=doom_strike::unit(h)*.85f+
+                .15f*dist/doom_strike::maxTargetDistance;
+            if(hits>bestHits||(hits==bestHits&&(order>bestOrder||
+                (order==bestOrder&&tie>=bestTie))))continue;
+            bestHits=hits;bestOrder=order;bestTie=tie;
             treeStrike.x=x;treeStrike.y=y;treeStrike.ground=base;
-            treeStrike.top=std::min(ceil-5.f,base+std::max(55.f,.75f*(ceil-base)));
+            const float desired=small?std::max(24.f,.48f*(ceil-base)):
+                                      std::max(55.f,.75f*(ceil-base));
+            treeStrike.top=std::max(base+8.f,std::min(ceil-5.f,base+desired));
             treeStrike.seed=h;treeStrike.born=leveltime;
-            treeStrike.sector=s;
+            treeStrike.sector=s;treeStrike.type=thing->type;treeStrike.sprite=thing->sprite;
         }
     }
+    if(treeStrike.born>=0)rememberTreeStrike(treeStrike);
 }
 
 // Store coordinates only, not actor pointers. A cosmetic fire lasts at most
 // 24 seconds and never edits actor health, collision, sprites, or the WAD.
 void tryIgniteTree() {
     if(treeStrike.born<0||!doom_strike::ignite(treeStrike.seed))return;
+    int burning=0;
     for(const BurningTree &fire:treeFires) {
-        if(doom_strike::fireActive(fire.born,leveltime)&&
-           fire.sector==treeStrike.sector&&
-           std::hypot(fire.x-treeStrike.x,fire.y-treeStrike.y)<1.f)return;
+        // Includes a just-expired fire awaiting this tic's cleanup pass.
+        if(fire.born<0)continue;
+        ++burning;
+        if(doom_strike::sameTree(treeStrike.sector,treeStrike.type,treeStrike.sprite,
+               treeStrike.x,treeStrike.y,fire.sector,fire.type,fire.sprite,fire.x,fire.y))return;
     }
+    // Every new ignition reserves room for a permanent cosmetic charred entry.
+    // Never start fires we cannot later mark as burned-out and ineligible.
+    if(charredCount+burning>=doom_strike::maxCharredTrees||
+       treeAlreadyBurned(treeStrike.sector,treeStrike.type,treeStrike.sprite,
+           treeStrike.x,treeStrike.y))return;
     for(BurningTree &fire:treeFires) {
         if(doom_strike::fireActive(fire.born,leveltime))continue;
         fire.x=treeStrike.x;fire.y=treeStrike.y;fire.ground=treeStrike.ground;
-        fire.height=std::clamp((treeStrike.top-treeStrike.ground)*.45f,36.f,76.f);
+        const bool small=treeStrike.type==MT_MISC40;
+        fire.height=small?std::clamp((treeStrike.top-treeStrike.ground)*.48f,22.f,46.f):
+            std::clamp((treeStrike.top-treeStrike.ground)*.45f,36.f,76.f);
         fire.sector=treeStrike.sector;fire.born=leveltime;
+        fire.type=treeStrike.type;fire.sprite=treeStrike.sprite;
         fire.seed=doom_strike::hash(treeStrike.seed^0x7589de31u);
         break;
     }
@@ -154,12 +245,46 @@ bool fireHasTree(const BurningTree &fire) {
     const sector_t *sector=&sectors[fire.sector];
     if(sector->ceilingpic!=skyflatnum)return false;
     for(const mobj_t *thing=sector->thinglist;thing;thing=thing->snext)
-        if(thing->type==MT_MISC76&&thing->sprite==SPR_TRE2&&
+        if(thing->type==fire.type&&thing->sprite==fire.sprite&&
+           doom_strike::stockTree(thing->type,thing->sprite,
+               MT_MISC40,SPR_TRE1,MT_MISC76,SPR_TRE2)&&
            thing->subsector&&thing->subsector->sector==sector&&
            std::abs(units(thing->x)-fire.x)<1.f&&
            std::abs(units(thing->y)-fire.y)<1.f)return true;
     return false;
 }
+// This map-local registry is bounded, and never stores mobj_t pointers.
+// A tree becomes charcoal only once an actual 24-second fire has ended.
+void finishTreeFire(const BurningTree &fire) {
+    if(!fireHasTree(fire))return;
+    for(int n=0;n<charredCount;++n) {
+        const CharredTree &c=charredTrees[n];
+        if(c.sector==fire.sector&&c.type==fire.type&&c.sprite==fire.sprite&&
+           std::abs(c.x-fire.x)<1.f&&std::abs(c.y-fire.y)<1.f)return;
+    }
+    if(charredCount>=doom_strike::maxCharredTrees)return;
+    CharredTree &c=charredTrees[charredCount++];
+    c.x=fire.x;c.y=fire.y;c.sector=fire.sector;
+    c.type=fire.type;c.sprite=fire.sprite;
+}
+}
+
+// Read-only from geometry's sprite-rendering path. The active tree is verified
+// against its sector and sprite, so merely sharing an old coordinate is not enough.
+bool infernoTreeCharred(const mobj_t *thing) {
+    if(!thing||charredCount<=0||!settings.infernoTreeStrikes||
+       episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
+       !doom_strike::stockTree(thing->type,thing->sprite,
+           MT_MISC40,SPR_TRE1,MT_MISC76,SPR_TRE2)||
+       !thing->subsector||!thing->subsector->sector)return false;
+    const int sector=int(thing->subsector->sector-sectors);
+    const float x=units(thing->x),y=units(thing->y);
+    for(int n=0;n<charredCount;++n) {
+        const CharredTree &c=charredTrees[n];
+        if(c.sector==sector&&c.type==thing->type&&c.sprite==thing->sprite&&
+           std::abs(c.x-x)<1.f&&std::abs(c.y-y)<1.f)return true;
+    }
+    return false;
 }
 
 float paneSoak(int pane) {return pane>=0&&(size_t)pane<soak.size()?soak[pane]:0.0f;}
@@ -304,22 +429,42 @@ void watchWeather() {
     if(!treeMode||!active) {
         treeStrike=TreeStrike{};
         treeFires={};
+        treeCloseThunder={};
     } else {
         // The local strike can appear on any lightning flash, including
         // distant events without a separate sky bolt; audio stays unchanged.
         if(storm.flash>0.f&&stormState.flashTic==leveltime) {
             chooseTreeStrike(doom_strike::hash(weatherSeed^
                 std::uint32_t(stormState.event)*0x4b7d1365u));
-            tryIgniteTree();
+            if(treeStrike.born==leveltime) {
+                tryIgniteTree();
+                // A ground impact is local: prioritize the close recording and
+                // suppress the event's normal, potentially distant thunder.
+                doom_strike::scheduleClose(treeCloseThunder,leveltime,TICRATE);
+            }
         }
         for(BurningTree &fire:treeFires) {
-            if(!doom_strike::fireActive(fire.born,leveltime)||
-                (leveltime%TICRATE==0&&!fireHasTree(fire)))fire=BurningTree{};
+            if(fire.born<0)continue;
+            if(!doom_strike::fireActive(fire.born,leveltime)) {
+                finishTreeFire(fire);
+                fire=BurningTree{};
+            } else if(leveltime%TICRATE==0&&!fireHasTree(fire))fire=BurningTree{};
         }
     }
     if(!active||settings.stormMode<=0)storm_audio::muteQueued();
-    else if(storm.thunder!=doom_storm::Kind::None)
-        storm_audio::play(storm.thunder,settings.stormVolume/100.f,snd_SfxVolume);
+    else {
+        // Never double-play close + ordinary thunder for one tree impact.
+        if(storm.thunder!=doom_storm::Kind::None&&
+           doom_strike::useOrdinaryThunder(treeCloseThunder))
+            storm_audio::play(storm.thunder,settings.stormVolume/100.f,snd_SfxVolume);
+        if(doom_strike::closeReady(treeCloseThunder,leveltime)) {
+            // The 14-second distant sample may still be playing from a prior
+            // event. Clear it so the local impact always gets audio priority.
+            storm_audio::muteQueued();
+            storm_audio::play(doom_storm::Kind::Close,
+                settings.stormVolume/100.f,snd_SfxVolume);
+        }
+    }
 }
 
 namespace {
@@ -835,9 +980,9 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
     }
 }
 
-// D3.1: more readable crimson strikes plus bounded cosmetic tree fires.
-// The tree-fire decision is made once per impact, with a 20% deterministic
-// chance, and burning is tied to the original, still-present TRE2 decoration.
+// D3.2: both vanilla dead-tree sprites, prioritized close thunder, and
+// bounded embers. The 20% ignition decision remains deterministic, and
+// a finished fire leaves a cached charcoal-colored tree sprite.
 void buildInfernoTreeStrikes(const Uniforms &camera) {
     if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
        !settings.infernoTreeStrikes||!settings.episodeLightning||!settings.stormBolts||
@@ -947,6 +1092,24 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
             pixelBlock(particleVertices,camera,x,y,z,.57f,.90f,gold,
                        false,nullptr,false,nullptr,.65f*fade*(1.f-t));
         }
+        // D3.2: low, slow orange-red coals orbit and drift away from the
+        // burning branches, at different heights and phases. Pure geometry.
+        for(int n=0;n<doom_strike::fireEmberMotes;++n) {
+            const float offset=doom_strike::unit(fire.seed+
+                std::uint32_t(n)*0x7feb352du);
+            const float t=std::fmod(seconds*(.29f+.045f*(n%4))+offset,1.f);
+            const float a=6.2831853f*doom_strike::unit(fire.seed^
+                (std::uint32_t(n)*0x846ca68bu))+.55f*seconds;
+            const float radius=2.5f+13.f*t;
+            const float x=fire.x+radius*std::cos(a);
+            const float y=fire.y+radius*std::sin(a);
+            const float z=fire.ground+5.f+fire.height*(.15f+.95f*t);
+            const std::array<float,3> ember=n%3==0?
+                std::array<float,3>{1.f,.60f,.20f}:
+                std::array<float,3>{.88f,.28f,.065f};
+            pixelBlock(particleVertices,camera,x,y,z,.38f,.60f,ember,
+                       false,nullptr,false,nullptr,.73f*fade*(1.f-t));
+        }
     }
 }
 void weatherShutdown() {
@@ -956,6 +1119,8 @@ void weatherShutdown() {
     episodeAtmosphereNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
     doom_storm::reset(stormState);treeStrike=TreeStrike{};treeFires={};
+    charredTrees={};charredCount=0;treeHistory={};historyCount=0;strikeOrder=0;
+    treeCloseThunder={};
     storm_audio::stop();I_AmbienceRain(0);
 }
 } // namespace doom3d

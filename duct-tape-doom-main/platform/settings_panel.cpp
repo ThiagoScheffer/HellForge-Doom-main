@@ -478,9 +478,10 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Allows thunder on dry episode maps when Thunderstorms is enabled; Rain=Never stays dry.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 check("inferno_tree_strikes","Inferno tree lightning strikes",&s.infernoTreeStrikes,
-                    "Cosmetic crimson branches may hit nearby sky-exposed original burnt-tree decorations (TRE2). "
-                    "A stronger crimson strike and ember burst follow; each tree impact has a 20% chance "
-                    "to ignite a cosmetic 24-second fire (up to four fires). No actor damage or gameplay changes. "
+                    "Cosmetic crimson branches may hit outdoor original small (TRE1) or large (TRE2) dead trees. "
+                    "Each strike replaces ordinary thunder with the close recording, and has a 20% chance "
+                    "to ignite a 24-second cosmetic fire with drifting embers. Burned-out trees remain charcoal-dark "
+                    "until the level resets (up to 64 tracked). No actor damage or gameplay changes. "
                     "Requires Inferno, themed lightning, thunderstorms and visible bolts. Other maps are unaffected.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&
                         d.episodeLightning!=0&&d.stormMode!=0&&d.stormBolts!=0;}),
