@@ -142,9 +142,9 @@ struct Settings {
     int stormBolts=1; // World-anchored procedural sky bolts, Off for simple flashes.
     float stormVolume=75; // Thunder sample gain percentage, also respects SFX volume.
     int stormAtmosphere=1; // Milestone C: gradual fronts, gusts, distant rain curtains and outdoor haze.
-    int episodeAtmosphere=1; // D1: 0 Off, 1 authored Inferno E3, 2 manual Inferno (PWAD override).
-    int episodeParticles=1; // 0 Low, 1 Normal, 2 High; fixed ash/ember budgets.
-    int episodeLightning=1; // Crimson lightning on Inferno, including dry maps if storms enabled.
+    int episodeAtmosphere=1; // 0 Off, 1 authored E2 Deimos/E3 Inferno, 2 manual Inferno, 3 manual Deimos.
+    int episodeParticles=1; // 0 Low, 1 Normal, 2 High; capped episode particle budgets.
+    int episodeLightning=1; // Themed lightning in Inferno/Deimos, including dry maps when storms are on.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.

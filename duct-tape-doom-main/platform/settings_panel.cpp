@@ -457,19 +457,19 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Off: every map is lit as the WAD gives it, sun and all. Maps from custom WADs never get these looks.",hasAuthored)}},
             {"Weather and wear",{
                 choice("episode_atmosphere","Episode atmosphere",&s.episodeAtmosphere,
-                    {"Off","Authored episodes","Inferno (manual)"},{0,1,2},
-                    "Inferno (E3): outdoor drifting ash, rare embers and red-brown atmospheric haze. "
-                    "Authored uses the existing classic-episode compatibility gate; replacement maps are not guessed from sky colors. "
-                    "Manual Inferno also works on supported custom WAD maps. No water rain or wet surfaces are forced.",
+                    {"Off","Authored episodes","Inferno (manual)","Deimos (manual)"},{0,1,2,3},
+                    "Authored E2 Deimos: alien ice crystals, drifting cold dust, violet-grey haze and pale electrical storms. "
+                    "Authored E3 Inferno: ash, embers, red-brown haze and crimson storms. "
+                    "Manual profiles work on custom WADs. Neither creates water rain or wet surfaces.",
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("episode_particles","Episode atmosphere particles",&s.episodeParticles,
                     {"Low","Normal","High"},{0,1,2},
-                    "Caps ash and ember particles at 48/12, 96/24 or 128/32 nearby billboards. "
+                    "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 64/16, 112/32, 144/48. "
                     "Only open-sky sectors and swept sky-exposed paths are eligible.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
-                check("episode_lightning","Inferno crimson lightning",&s.episodeLightning,
-                    "Color thunderstorm lightning red-orange in Inferno. Allows thunder on dry Inferno maps "
-                    "only when Thunderstorms is enabled; Rain=Never remains dry.",
+                check("episode_lightning","Themed episode lightning",&s.episodeLightning,
+                    "Crimson lightning in Inferno, pale electric blue-white in Deimos. "
+                    "Allows thunder on dry episode maps when Thunderstorms is enabled; Rain=Never stays dry.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 choice("weather","Rain",&s.weather,{"Never","Authored episodes","Always"},{0,1,2},
                     "Rain falls under the sky in streaks of whole pixels and splashes where it lands; drops gather and run down "
@@ -478,7 +478,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "blows the rain in, and the floor and wall beneath it get wet."),
                 choice("storm_mode","Thunderstorms",&s.stormMode,{"Off","Subtle","Normal","Dramatic"},{0,1,2,3},
                     "Optional lightning and delayed close, medium or distant thunder with active rain, "
-                    "or in an enabled dry Inferno atmosphere with crimson lightning. Off disables all thunder.",
+                    "or in an enabled dry Inferno/Deimos profile with themed lightning. Off disables thunder.",
                     [](const Settings &d){return d.accelerated!=0&&(d.weather!=0||
                         (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_strong_flashes","Allow strong lightning flashes",&s.stormStrongFlashes,
@@ -492,7 +492,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                         (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_atmosphere","Advanced storm atmosphere",&s.stormAtmosphere,
                     "When a rainy thunderstorm is active, gradually builds and fades rain, adds wind gusts, "
-                    "bounded distant rain curtains and light outdoor haze. Dry Inferno remains dry. "
+                    "bounded distant rain curtains and light outdoor haze. Dry episodes remain dry. "
                     "No lighting rebake, new actors or gameplay changes.",
                     [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
                 slider("storm_volume","Thunder volume",&s.stormVolume,0,100,5,

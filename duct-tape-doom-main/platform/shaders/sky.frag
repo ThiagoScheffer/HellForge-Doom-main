@@ -79,11 +79,14 @@ void main() {
     // silhouettes meet a soft band rather than a hard painted edge.
     if(c.materials.z>0.0&&c.effects.z==0.0)
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
-    // D1: negative style.w encodes Inferno with crimson On (-1-seed)
-    // or Off (-2-seed). Decode [0,1] seed for unchanged branch geometry.
-    bool inferno=c.style.w<=-1.0;
+    // D1/2: negative style.w encodes episode/profile and themed-lightning
+    // switch without adding a Camera field. Inferno [-3,-1], Deimos [-5,-3].
+    bool deimos=c.style.w<=-3.0;
+    bool inferno=c.style.w<=-1.0&&!deimos;
     bool crimson=inferno&&c.style.w>-2.0;
-    float boltSeed=inferno?((crimson?-1.0:-2.0)-c.style.w):c.style.w;
+    bool coldElectrical=deimos&&c.style.w>-4.0;
+    float boltSeed=inferno?((crimson?-1.0:-2.0)-c.style.w):
+        deimos?((coldElectrical?-3.0:-4.0)-c.style.w):c.style.w;
     // Lightning is behind the three virtual horizon layers and clouds.
     // The skyline therefore masks the bolt rather than being lit on top.
     if(c.style.z>0.0) {
@@ -91,7 +94,8 @@ void main() {
         float halo=hellforgeBoltHalo(angle,rise,c.style.y);
         // Clearer bolt cores without increasing the full-sky flash amplitude.
         // Both core and halo remain behind the distant horizon/cloud layers.
-        vec3 core=crimson?vec3(1.55,0.32,0.18):vec3(1.12,1.32,1.57);
+        vec3 core=crimson?vec3(1.55,0.32,0.18):
+                  coldElectrical?vec3(1.14,1.55,1.74):vec3(1.12,1.32,1.57);
         color.rgb=mix(color.rgb,max(color.rgb,core),
                       clamp(stroke*c.style.z*2.55+halo*c.style.z*0.15,0.0,0.95));
     }
@@ -107,7 +111,8 @@ void main() {
         // bolt itself stays beneath the silhouettes and cloud shading.
         if(c.weather.w>0.0) {
             float halo=hellforgeBoltHalo(angle,rise,c.style.y);
-            vec3 scatter=crimson?vec3(0.37,0.065,0.04):vec3(0.18,0.23,0.34);
+            vec3 scatter=crimson?vec3(0.37,0.065,0.04):
+                         coldElectrical?vec3(0.20,0.33,0.41):vec3(0.18,0.23,0.34);
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
     }
@@ -163,12 +168,17 @@ void main() {
     if(inferno) {
         float band=(1.0-smoothstep(-0.08,0.55,ray.z))*0.22;
         color.rgb=mix(color.rgb,vec3(0.31,0.10,0.065),band);
+    } else if(deimos) {
+        // Subdued dusty violet at the horizon, not a blanket blue snow sky.
+        float band=(1.0-smoothstep(-0.10,0.52,ray.z))*0.17;
+        color.rgb=mix(color.rgb,vec3(0.29,0.245,0.37),band);
     }
     // Brief diffuse electrical illumination of the visible sky only.
     // No full-screen flash: underground rooms and closed ceilings stay dark.
     if(c.weather.w>0.0) {
         float pulse=clamp(c.weather.w,0.0,0.75);
-        vec3 diffuse=crimson?vec3(0.85,0.23,0.14):vec3(0.60,0.72,0.96);
+        vec3 diffuse=crimson?vec3(0.85,0.23,0.14):
+                     coldElectrical?vec3(0.73,0.86,1.01):vec3(0.60,0.72,0.96);
         color.rgb=mix(color.rgb,max(color.rgb,diffuse),pulse);
     }
     vec4 fog=fogAlong(c.eye.xyz+ray*2000.0);

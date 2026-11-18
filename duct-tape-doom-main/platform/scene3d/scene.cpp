@@ -581,20 +581,23 @@ FrameView prepareFrame(int w,int h) {
         // The far rain sky.frag draws over the sky (weather.cpp's rain stops at the map's sky).
         camera.weather[0]=settings.weather&&camera.effects[2]==0?rainNow:0;
         camera.weather[1]=rainWind[0];camera.weather[2]=rainWind[1];
-        // D1: dry Inferno electrical storms still illuminate the outdoor sky.
+        // D2: both authored electrical worlds can flash independently of rain.
         const bool inferno=episodeAtmosphereNow==1;
-        camera.weather[3]=(settings.weather||inferno)&&camera.effects[2]==0?
+        const bool deimos=episodeAtmosphereNow==2;
+        camera.weather[3]=(settings.weather||inferno||deimos)&&camera.effects[2]==0?
             stormFlashNow:0;
         if(camera.weather[3]>0) {
             camera.style[1]=stormBoltAzimuthNow;
             camera.style[2]=stormBoltNow;
             camera.style[3]=stormBoltSeedNow;
         }
-        // style.w is otherwise only the [0,1] branch seed. Negative values
-        // encode the Inferno atmosphere and, independently, whether red bolts
-        // are enabled. No Camera layout or descriptor-binding changes.
+        // style.w otherwise holds the [0,1] branch seed. D1 uses [-3,-1]
+        // for Inferno; D2 uses [-5,-3] for Deimos. Preserve the existing
+        // Camera uniform layout, GLSL bindings and branch determinism.
         if(inferno)camera.style[3]=
             (settings.episodeLightning?-1.f:-2.f)-camera.style[3];
+        else if(deimos)camera.style[3]=
+            (settings.episodeLightning?-3.f:-4.f)-camera.style[3];
         renderFraction=fraction;
         // Caustics follow the liquid's frame and crossfade like its floor (surfaceBinding).
         if(!causticFrames.empty()&&causticSpeed>0&&leveltime>0) {
@@ -633,7 +636,15 @@ FrameView prepareFrame(int w,int h) {
             for(int c=0;c<3;++c)camera.haze[c]=
                 camera.haze[c]*.30f+infernoHaze[c]*.70f;
         }
-        const float extraHaze=episodeAtmosphereNow==1?.18f:0.f;
+        if(episodeAtmosphereNow==2) {
+            // Cold reddish-violet high-altitude haze: retain some original
+            // WAD sky influence, and apply only through outdoor fog exposure.
+            const std::array<float,3> deimosHaze={.31f,.29f,.42f};
+            for(int c=0;c<3;++c)camera.haze[c]=
+                camera.haze[c]*.40f+deimosHaze[c]*.60f;
+        }
+        const float extraHaze=episodeAtmosphereNow==1?.18f:
+            episodeAtmosphereNow==2?.14f:0.f;
         camera.haze[3]=settings.fog?
             std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f):0.f;
         buildMist(camera);

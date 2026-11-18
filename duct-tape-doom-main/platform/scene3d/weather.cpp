@@ -184,13 +184,13 @@ void watchWeather() {
     I_AmbienceRain(settings.accelerated?rainNow:0);
     // Thunder lives on the game-tic clock, not camera distance or wall time.
     // This does not consume Doom gameplay RNG or alter rain simulation.
-    // Inferno's electrical sky is not water weather. Rain=Never remains dry,
-    // while a user-enabled Thunderstorms mode can still trigger crimson events.
-    // Storm mode Off always means no lightning or thunder.
-    const bool infernoDryStorm=episodeAtmosphereNow==int(doom_episode::Profile::Inferno)
-        &&settings.episodeLightning!=0;
+    // Themed electrical storms may run in dry Inferno and Deimos without
+    // enabling water rain, wet floors, splashes or window droplets. Their
+    // sound schedule is the original Storm A/B scheduler and sound samples.
+    const bool themedDryStorm=(episodeAtmosphereNow==int(doom_episode::Profile::Inferno)||
+        episodeAtmosphereNow==int(doom_episode::Profile::Deimos))&&settings.episodeLightning!=0;
     const bool active=settings.accelerated&&(
-        (rainNow>.01f&&settings.weather!=0)||infernoDryStorm);
+        (rainNow>.01f&&settings.weather!=0)||themedDryStorm);
     doom_storm::Frame storm=doom_storm::advance(stormState,leveltime,TICRATE,
         settings.stormMode,active,settings.stormStrongFlashes!=0,
         weatherSeed^0x6a2b9b51u,settings.stormBolts!=0);
@@ -510,11 +510,97 @@ void buildRain(const Uniforms &camera) {
     }
 }
 
+// D2 — Deimos cold anomaly: wind-driven alien crystal motes and fine dust.
+// The sparse drifting particles depict a stylized hostile moon environment,
+// not physical snow or wet weather. Geometry and RNG are strictly cosmetic.
+// Outdoor/path checks match D1, and no dynamic heap allocations are needed.
+static void buildDeimosAtmosphere(const Uniforms &camera) {
+    if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
+    constexpr float cell=40.f,reach=385.f;
+    const int density=std::clamp(settings.episodeParticles,0,2);
+    const int crystalLimit=doom_episode::crystalBudget(density);
+    const int dustLimit=doom_episode::frostDustBudget(density);
+    const float now=gameSeconds();
+    const float windLength=std::hypot(rainWind[0],rainWind[1]);
+    const float wx=windLength>1.f?rainWind[0]/windLength:1.f;
+    const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
+    const uint32_t salt=weatherSeed^0x65ba19d3u;
+    const int cx=(int)std::floor(camera.eye[0]/cell);
+    const int cy=(int)std::floor(camera.eye[1]/cell);
+    int crystals=0,dust=0;
+    for(int gy=cy-10;gy<=cy+10&&(crystals<crystalLimit||dust<dustLimit);++gy)
+    for(int gx=cx-10;gx<=cx+10&&(crystals<crystalLimit||dust<dustLimit);++gx) {
+        const uint32_t seed=hash32(uint32_t(gx)*0x9f28a713u^
+                                   uint32_t(gy)*0x6c8e9cf5u^salt);
+        for(int kind=0;kind<2;++kind) {
+            const bool fine=kind!=0;
+            if(fine?dust>=dustLimit:crystals>=crystalLimit)continue;
+            if(hashUnit(gx,gy,seed^(fine?0x293a16u:0xb1ce49u))>(fine?.34f:.78f))continue;
+            const float life=fine?6.8f:5.1f;
+            const float phase=hashUnit(gx,gy,seed^0x4c741fu);
+            const float clock=now+phase*life;
+            const int cycle=(int)std::floor(clock/life);
+            const float age=clock-float(cycle)*life;
+            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u);
+            const float x0=(gx+.12f+.76f*hashUnit(gx,gy,own^0x14u))*cell;
+            const float y0=(gy+.12f+.76f*hashUnit(gx,gy,own^0x25u))*cell;
+            const sector_t *origin=sectorAt(x0,y0);
+            if(!origin||origin->ceilingpic!=skyflatnum)continue;
+            const float floor=floorZ(origin),ceiling=ceilZ(origin),height=ceiling-floor;
+            if(height<18.f)continue;
+            const float start=floor+std::min(height-5.f,10.f+height*
+                (.22f+.63f*hashUnit(gx,gy,own^0x41u)));
+            const float vz=fine?-(2.f+4.f*hashUnit(gx,gy,own^0x63u)):
+                -(7.f+9.f*hashUnit(gx,gy,own^0x54u));
+            // Crystalline shards race sideways in gusts; powder drifts slowly.
+            const float drift=fine?6.f:14.f;
+            const float swirl=(fine?5.f:3.f)*std::sin(age*(fine?.9f:1.7f)+phase*6.2831853f);
+            const float dx=wx*drift*age-wy*swirl;
+            const float dy=wy*drift*age+wx*swirl;
+            const float x=x0+dx,y=y0+dy,z=start+vz*age;
+            const sector_t *at=sectorAt(x,y);
+            if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+2.f||
+               z>=ceilZ(at)-2.f)continue;
+            // Reject paths crossing indoor rooms, even if both ends are outside.
+            bool blocked=false;
+            for(int step=1;step<4;++step) {
+                const float u=float(step)/4.f;
+                const sector_t *through=sectorAt(x0+dx*u,y0+dy*u);
+                const float hz=start+vz*age*u;
+                if(!through||through->ceilingpic!=skyflatnum||
+                   hz<=floorZ(through)+2.f||hz>=ceilZ(through)-2.f) {
+                    blocked=true;break;
+                }
+            }
+            if(blocked)continue;
+            const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
+            if(dist<14.f||dist>reach)continue;
+            const float fade=std::clamp(std::min({age*1.65f,(life-age)*1.65f,
+                        (reach-dist)/65.f,(dist-14.f)/25.f}),0.f,1.f);
+            if(fade<.025f)continue;
+            const float light=std::clamp(lighting(at),.20f,1.1f);
+            const float hue=hashUnit(gx,gy,own^0x78u);
+            std::array<float,3> color=fine?
+                std::array<float,3>{.46f+.10f*hue,.45f+.13f*hue,.57f+.12f*hue}:
+                std::array<float,3>{.60f+.10f*hue,.73f+.09f*hue,.86f+.10f*hue};
+            for(float &c:color)c*=.55f+.45f*light;
+            // Narrow vertical glints feel crystalline, not like ordinary rain.
+            pixelBlock(particleVertices,camera,x,y,z,
+                       fine?.56f:.48f,fine?.50f:1.30f,color,
+                       false,nullptr,false,nullptr,fade*(fine?.40f:.72f));
+            if(fine)++dust;else ++crystals;
+        }
+    }
+}
+
 // D1: Inferno particles are ephemeral analytic billboards, not persistent actors.
 // The original rain, dripping-window effects and wetness remain unchanged.
 // One candidate per 48-unit world cell; hard caps bound all generated geometry.
 // Each current position and its swept path must be under an actual sky ceiling.
 void buildEpisodeAtmosphere(const Uniforms &camera) {
+    if(episodeAtmosphereNow==int(doom_episode::Profile::Deimos)) {
+        buildDeimosAtmosphere(camera);return;
+    }
     if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
        camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
     constexpr float cell=48.f,reach=390.f;

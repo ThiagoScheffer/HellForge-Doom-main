@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="7d34c7eadbdcff9b5259c993ef91e802f974e722fd1ab16bf3450fd24e5b09a0">
+<settings source="platform/settings_panel.cpp" source_sha256="f6822806443626f862a8f477cee58bb7af502f32121d3f2d9cf8b35a0b1717e0">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -164,9 +164,9 @@
   <option key="corpse_decomposition" title="Corpse decomposition" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="corpse_decay_delay" title="Decomposition begins after" category="Atmosphere" kind="choice" choices="2=2 minutes|5=5 minutes|8=8 minutes|10=10 minutes" />
   <option key="authored_episodes" title="Authored episodes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="episode_atmosphere" title="Episode atmosphere" category="Atmosphere" kind="choice" choices="0=Off|1=Authored episodes|2=Inferno (manual)" />
+  <option key="episode_atmosphere" title="Episode atmosphere" category="Atmosphere" kind="choice" choices="0=Off|1=Authored episodes|2=Inferno (manual)|3=Deimos (manual)" />
   <option key="episode_particles" title="Episode atmosphere particles" category="Atmosphere" kind="choice" choices="0=Low|1=Normal|2=High" />
-  <option key="episode_lightning" title="Inferno crimson lightning" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="episode_lightning" title="Themed episode lightning" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
   <option key="storm_mode" title="Thunderstorms" category="Atmosphere" kind="choice" choices="0=Off|1=Subtle|2=Normal|3=Dramatic" />
   <option key="storm_strong_flashes" title="Allow strong lightning flashes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
