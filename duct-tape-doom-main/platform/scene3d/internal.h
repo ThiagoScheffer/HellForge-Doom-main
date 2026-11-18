@@ -722,6 +722,7 @@ void discoverRunoff(float x,float y,float z);
 void buildRain(const Uniforms &camera);
 void buildOutdoorWind(const Uniforms &camera);
 void buildEpisodeAtmosphere(const Uniforms &camera);
+void buildInfernoTreeStrikes(const Uniforms &camera);
 void weatherShutdown();
 
 // wear.cpp

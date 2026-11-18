@@ -477,6 +477,12 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Crimson lightning in Inferno, pale electric blue-white in Deimos. "
                     "Allows thunder on dry episode maps when Thunderstorms is enabled; Rain=Never stays dry.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
+                check("inferno_tree_strikes","Inferno tree lightning strikes",&s.infernoTreeStrikes,
+                    "Cosmetic crimson branches may hit nearby sky-exposed original burnt-tree decorations (TRE2). "
+                    "Small ember bursts linger after impact; no damage, ignition, AI, geometry or gameplay RNG changes. "
+                    "Requires Inferno, themed lightning, thunderstorms and visible bolts. Other maps are unaffected.",
+                    [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0&&
+                        d.episodeLightning!=0&&d.stormMode!=0&&d.stormBolts!=0;}),
                 choice("weather","Rain",&s.weather,{"Never","Authored episodes","Always"},{0,1,2},
                     "Rain falls under the sky in streaks of whole pixels and splashes where it lands; drops gather and run down "
                     "the outside of window glass, the ground darkens as it soaks, and you hear it. Authored episodes: it rains where "

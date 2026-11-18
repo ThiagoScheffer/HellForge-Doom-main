@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="7dd220cb68f8f091d3eab28b58b59258408ecf3e9ce7d406e21daf781e3c038d">
+<settings source="platform/settings_panel.cpp" source_sha256="62aac65af9e2e7d163df69f2f3a17bf51000d2c4c41a8920da9d496d1032817b">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -168,6 +168,7 @@
   <option key="episode_particles" title="Episode atmosphere particles" category="Atmosphere" kind="choice" choices="0=Low|1=Normal|2=High" />
   <option key="deimos_fog" title="Deimos blizzard visibility" category="Atmosphere" kind="choice" choices="0=Off|1=Light|2=Heavy|3=Whiteout" />
   <option key="episode_lightning" title="Themed episode lightning" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="inferno_tree_strikes" title="Inferno tree lightning strikes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="weather" title="Rain" category="Atmosphere" kind="choice" choices="0=Never|1=Authored episodes|2=Always" />
   <option key="storm_mode" title="Thunderstorms" category="Atmosphere" kind="choice" choices="0=Off|1=Subtle|2=Normal|3=Dramatic" />
   <option key="storm_strong_flashes" title="Allow strong lightning flashes" category="Atmosphere" kind="check" choices="0=Off|1=On" />

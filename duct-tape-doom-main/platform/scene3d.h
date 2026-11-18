@@ -146,6 +146,7 @@ struct Settings {
     int episodeParticles=1; // 0 Low, 1 Normal, 2 High; capped episode particle budgets.
     int deimosFog=2; // D2.2: 0 Off, 1 Light, 2 Heavy (default), 3 Whiteout; Deimos only.
     int episodeLightning=1; // Themed lightning in Inferno/Deimos, including dry maps when storms are on.
+    int infernoTreeStrikes=1; // D3: cosmetic, sky-exposed burnt-tree strikes in Inferno; no damage.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.

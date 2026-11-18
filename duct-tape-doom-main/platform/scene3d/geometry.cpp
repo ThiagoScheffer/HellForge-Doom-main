@@ -1217,6 +1217,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         buildOutdoorWind(camera);
         buildRain(camera);
         buildEpisodeAtmosphere(camera);
+        buildInfernoTreeStrikes(camera);
         buildBubbles(camera);
         timing(9);
         if (spike)
