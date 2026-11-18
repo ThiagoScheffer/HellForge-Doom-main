@@ -456,30 +456,49 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "lies at night in a downpour, the sun hidden and the lit rooms shining out through their windows into the dark. "
                     "Off: every map is lit as the WAD gives it, sun and all. Maps from custom WADs never get these looks.",hasAuthored)}},
             {"Weather and wear",{
+                choice("episode_atmosphere","Episode atmosphere",&s.episodeAtmosphere,
+                    {"Off","Authored episodes","Inferno (manual)"},{0,1,2},
+                    "Inferno (E3): outdoor drifting ash, rare embers and red-brown atmospheric haze. "
+                    "Authored uses the existing classic-episode compatibility gate; replacement maps are not guessed from sky colors. "
+                    "Manual Inferno also works on supported custom WAD maps. No water rain or wet surfaces are forced.",
+                    [](const Settings &d){return d.accelerated!=0;}),
+                choice("episode_particles","Episode atmosphere particles",&s.episodeParticles,
+                    {"Low","Normal","High"},{0,1,2},
+                    "Caps ash and ember particles at 48/12, 96/24 or 128/32 nearby billboards. "
+                    "Only open-sky sectors and swept sky-exposed paths are eligible.",
+                    [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
+                check("episode_lightning","Inferno crimson lightning",&s.episodeLightning,
+                    "Color thunderstorm lightning red-orange in Inferno. Allows thunder on dry Inferno maps "
+                    "only when Thunderstorms is enabled; Rain=Never remains dry.",
+                    [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 choice("weather","Rain",&s.weather,{"Never","Authored episodes","Always"},{0,1,2},
                     "Rain falls under the sky in streaks of whole pixels and splashes where it lands; drops gather and run down "
                     "the outside of window glass, the ground darkens as it soaks, and you hear it. Authored episodes: it rains where "
                     "an authored episode's look has rain (DOOM's first episode). Always: on every map. Through a broken window the wind "
                     "blows the rain in, and the floor and wall beneath it get wet."),
                 choice("storm_mode","Thunderstorms",&s.stormMode,{"Off","Subtle","Normal","Dramatic"},{0,1,2,3},
-                    "Optional lightning and delayed close, medium or distant thunder while rain is active. "
-                    "Uses a separate SDL audio stream and respects SFX volume. Off by default.",
-                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0;}),
+                    "Optional lightning and delayed close, medium or distant thunder with active rain, "
+                    "or in an enabled dry Inferno atmosphere with crimson lightning. Off disables all thunder.",
+                    [](const Settings &d){return d.accelerated!=0&&(d.weather!=0||
+                        (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_strong_flashes","Allow strong lightning flashes",&s.stormStrongFlashes,
                     "Off limits bright pulses. Sky-only flashes never rebuild lighting or brighten indoor geometry.",
-                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                    [](const Settings &d){return d.accelerated!=0&&d.stormMode!=0&&(d.weather!=0||
+                        (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_bolts","Visible distant lightning bolts",&s.stormBolts,
                     "Procedural branching lightning behind the outdoor sky and immersive clouds. "
                     "Disable to retain diffuse flashes and thunder without visible forks.",
-                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                    [](const Settings &d){return d.accelerated!=0&&d.stormMode!=0&&(d.weather!=0||
+                        (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("storm_atmosphere","Advanced storm atmosphere",&s.stormAtmosphere,
-                    "When a thunderstorm is active, gradually builds and fades rain, adds wind gusts, "
-                    "bounded distant rain curtains and light outdoor haze. Off preserves Milestone A/B rain behavior. "
+                    "When a rainy thunderstorm is active, gradually builds and fades rain, adds wind gusts, "
+                    "bounded distant rain curtains and light outdoor haze. Dry Inferno remains dry. "
                     "No lighting rebake, new actors or gameplay changes.",
                     [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
                 slider("storm_volume","Thunder volume",&s.stormVolume,0,100,5,
                     "Thunder level, in percent. The standard sound-effects volume remains authoritative.",
-                    [](const Settings &d){return d.accelerated!=0&&d.weather!=0&&d.stormMode!=0;}),
+                    [](const Settings &d){return d.accelerated!=0&&d.stormMode!=0&&(d.weather!=0||
+                        (d.episodeAtmosphere!=0&&d.episodeLightning!=0));}),
                 check("worn_plates","Worn plates",&s.wornPlates,
                     "Plain metal plates show years of use: grime packed into their seams, dull blotches, boot scuffs low down, "
                     "and a duller sheen. Only on plates that are otherwise blank, such as the fronts of DOOM's computer desks."),

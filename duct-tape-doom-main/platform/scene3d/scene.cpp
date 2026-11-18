@@ -581,13 +581,20 @@ FrameView prepareFrame(int w,int h) {
         // The far rain sky.frag draws over the sky (weather.cpp's rain stops at the map's sky).
         camera.weather[0]=settings.weather&&camera.effects[2]==0?rainNow:0;
         camera.weather[1]=rainWind[0];camera.weather[2]=rainWind[1];
-        // Sky-only lightning intensity; baked lighting and indoor rooms unchanged.
-        camera.weather[3]=settings.weather&&camera.effects[2]==0?stormFlashNow:0;
+        // D1: dry Inferno electrical storms still illuminate the outdoor sky.
+        const bool inferno=episodeAtmosphereNow==1;
+        camera.weather[3]=(settings.weather||inferno)&&camera.effects[2]==0?
+            stormFlashNow:0;
         if(camera.weather[3]>0) {
             camera.style[1]=stormBoltAzimuthNow;
             camera.style[2]=stormBoltNow;
             camera.style[3]=stormBoltSeedNow;
         }
+        // style.w is otherwise only the [0,1] branch seed. Negative values
+        // encode the Inferno atmosphere and, independently, whether red bolts
+        // are enabled. No Camera layout or descriptor-binding changes.
+        if(inferno)camera.style[3]=
+            (settings.episodeLightning?-1.f:-2.f)-camera.style[3];
         renderFraction=fraction;
         // Caustics follow the liquid's frame and crossfade like its floor (surfaceBinding).
         if(!causticFrames.empty()&&causticSpeed>0&&leveltime>0) {
@@ -619,9 +626,16 @@ FrameView prepareFrame(int w,int h) {
         for(int c=0;c<3;++c)camera.fx[1+c]=skyTint[c];
         // Outdoor haze in the sky's horizon color (Game_Sun), with the fog.
         for(int c=0;c<3;++c)camera.haze[c]=horizon[c]*camera.mood[0]*camera.mood[1+c];
-        // Storm haze reuses the existing outdoor-only sector exposure path;
-        // never adds haze to enclosed rooms or disables the Fog F4 preference.
-        camera.haze[3]=settings.fog?(stormHazeNow>0.f?std::clamp(game.haze+stormHazeNow,0.f,1.f):game.haze):0;
+        // The outdoor-only sector-haze path also handles Inferno's dry,
+        // red-brown atmosphere. It never re-bakes lighting or fogs indoors.
+        if(episodeAtmosphereNow==1) {
+            const std::array<float,3> infernoHaze={.37f,.12f,.085f};
+            for(int c=0;c<3;++c)camera.haze[c]=
+                camera.haze[c]*.30f+infernoHaze[c]*.70f;
+        }
+        const float extraHaze=episodeAtmosphereNow==1?.18f:0.f;
+        camera.haze[3]=settings.fog?
+            std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f):0.f;
         buildMist(camera);
         buildShafts(camera);
         buildRings(camera);

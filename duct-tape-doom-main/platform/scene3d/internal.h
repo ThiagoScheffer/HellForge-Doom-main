@@ -703,6 +703,7 @@ extern float rainNow,wetNow,glassWetNow;
 extern float stormFlashNow; // Outdoor lightning pulse, reset per level.
 extern float stormBoltNow,stormBoltAzimuthNow,stormBoltSeedNow;
 extern float stormCurtainNow,stormHazeNow; // Optional Milestone C atmosphere; zero when disabled.
+extern int episodeAtmosphereNow; // 0 none, 1 Inferno; updated by weather.cpp.
 extern float rainWind[2];
 float paneSoak(int pane);
 // Where the rain blows (unit vector); the ground's wetness under the sky
@@ -719,6 +720,7 @@ void debrisLiquidSplash(float x,float y,float z,int sector,float size);
 void discoverRunoff(float x,float y,float z);
 void buildRain(const Uniforms &camera);
 void buildOutdoorWind(const Uniforms &camera);
+void buildEpisodeAtmosphere(const Uniforms &camera);
 void weatherShutdown();
 
 // wear.cpp

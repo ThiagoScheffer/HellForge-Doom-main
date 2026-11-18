@@ -14,6 +14,7 @@
 #include "internal.h"
 #include "storm_audio.h"
 #include "../storm_atmosphere.h"
+#include "../episode_atmosphere.h"
 extern "C" {
 #include "../audio/sound_options.h"
 }
@@ -22,6 +23,7 @@ namespace doom3d {
 float rainNow=0,wetNow=0,glassWetNow=0;
 float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
 float stormCurtainNow=0,stormHazeNow=0;
+int episodeAtmosphereNow=0; // doom_episode::Profile; shared by geometry and sky.
 float rainWind[2]={0,0};
 namespace {
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
@@ -31,6 +33,13 @@ float windSpeed=0;
 int weatherTic=-1;
 std::vector<float> soak;
 bool rainy() {return settings.weather==2||(settings.weather==1&&levelMood().rain);}
+// Conservative authored gate: use the existing game-profile authority rather
+// than guessing from sky color or assigning a custom PWAD the classic E3 look.
+doom_episode::Profile episodeProfile() {
+    return doom_episode::select(settings.episodeAtmosphere,
+        settings.authored!=0,Game_HasEffect(GAME_EFFECT_AUTHORED_EPISODES)!=0,
+        gamemode!=commercial,gameepisode);
+}
 uint32_t levelWeatherSeed() {
     return hash32((uint32_t)gameepisode*7919u+(uint32_t)gamemap*104729u+(uint32_t)skytexture*31u+17u);
 }
@@ -43,6 +52,7 @@ void newLevel() {
     doom_storm::reset(stormState);
     stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
+    episodeAtmosphereNow=static_cast<int>(episodeProfile());
     storm_audio::muteQueued();
     windSpeed=90+50*hashUnit(3,4,weatherSeed);
     rainNow=rainy()?downpour(0):0;wetNow=rainNow>0?1:0;glassWetNow=rainNow;
@@ -137,6 +147,7 @@ void watchWeather() {
     weatherTic=leveltime;
     float t=leveltime/(float)TICRATE,gust=valueNoise(t,0,4,weatherSeed^0x68e31da4u);
     const bool rainEnabled=rainy();
+    episodeAtmosphereNow=static_cast<int>(episodeProfile());
     // Independent slow storm front; regular rain is unchanged when the
     // advanced atmosphere setting is disabled (or storms are Off).
     const doom_storm::Atmosphere atmosphere=doom_storm::atmosphere(
@@ -173,7 +184,13 @@ void watchWeather() {
     I_AmbienceRain(settings.accelerated?rainNow:0);
     // Thunder lives on the game-tic clock, not camera distance or wall time.
     // This does not consume Doom gameplay RNG or alter rain simulation.
-    const bool active=settings.accelerated&&rainNow>.01f&&settings.weather!=0;
+    // Inferno's electrical sky is not water weather. Rain=Never remains dry,
+    // while a user-enabled Thunderstorms mode can still trigger crimson events.
+    // Storm mode Off always means no lightning or thunder.
+    const bool infernoDryStorm=episodeAtmosphereNow==int(doom_episode::Profile::Inferno)
+        &&settings.episodeLightning!=0;
+    const bool active=settings.accelerated&&(
+        (rainNow>.01f&&settings.weather!=0)||infernoDryStorm);
     doom_storm::Frame storm=doom_storm::advance(stormState,leveltime,TICRATE,
         settings.stormMode,active,settings.stormStrongFlashes!=0,
         weatherSeed^0x6a2b9b51u,settings.stormBolts!=0);
@@ -493,9 +510,94 @@ void buildRain(const Uniforms &camera) {
     }
 }
 
+// D1: Inferno particles are ephemeral analytic billboards, not persistent actors.
+// The original rain, dripping-window effects and wetness remain unchanged.
+// One candidate per 48-unit world cell; hard caps bound all generated geometry.
+// Each current position and its swept path must be under an actual sky ceiling.
+void buildEpisodeAtmosphere(const Uniforms &camera) {
+    if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
+       camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
+    constexpr float cell=48.f,reach=390.f;
+    const int density=std::clamp(settings.episodeParticles,0,2);
+    const int ashLimit=doom_episode::ashBudget(density);
+    const int emberLimit=doom_episode::emberBudget(density);
+    const float now=gameSeconds();
+    const float windLength=std::hypot(rainWind[0],rainWind[1]);
+    const float wx=windLength>1.f?rainWind[0]/windLength:1.f;
+    const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
+    const uint32_t salt=weatherSeed^0x4a71f2e9u;
+    const int cx=(int)std::floor(camera.eye[0]/cell);
+    const int cy=(int)std::floor(camera.eye[1]/cell);
+    int ash=0,embers=0;
+    for(int gy=cy-9;gy<=cy+9&&(ash<ashLimit||embers<emberLimit);++gy)
+    for(int gx=cx-9;gx<=cx+9&&(ash<ashLimit||embers<emberLimit);++gx) {
+        const uint32_t seed=hash32(uint32_t(gx)*0x632be59bu^
+                                   uint32_t(gy)*0x85157af5u^salt);
+        for(int kind=0;kind<2;++kind) {
+            const bool ember=kind!=0;
+            if(ember?embers>=emberLimit:ash>=ashLimit)continue;
+            const float selection=hashUnit(gx,gy,seed^(ember?0x874c13u:0x96e72bu));
+            if(selection>(ember?0.20f:0.65f))continue;
+            const float life=ember?5.5f:7.0f;
+            const float phase=hashUnit(gx,gy,seed^0x1c74d35bu);
+            const float clock=now+phase*life;
+            const int cycle=(int)std::floor(clock/life);
+            const float age=clock-float(cycle)*life;
+            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u);
+            const float x0=(gx+0.10f+0.80f*hashUnit(gx,gy,own^0x18u))*cell;
+            const float y0=(gy+0.10f+0.80f*hashUnit(gx,gy,own^0x29u))*cell;
+            const sector_t *origin=sectorAt(x0,y0);
+            if(!origin||origin->ceilingpic!=skyflatnum)continue;
+            const float floor=floorZ(origin),ceiling=ceilZ(origin);
+            const float height=ceiling-floor;
+            if(height<16.f)continue;
+            const float start=floor+std::min(height-5.f,8.f+height*
+                (0.10f+0.65f*hashUnit(gx,gy,own^0x4bu)));
+            const float velocity=ember?(6.f+6.f*hashUnit(gx,gy,own^0x5cu)):
+                -(5.f+6.f*hashUnit(gx,gy,own^0x6du));
+            const float speed=ember?7.f:12.f;
+            const float turbulence=4.f*std::sin(age*1.4f+phase*6.2831853f);
+            const float deltaX=wx*(speed*age)-wy*turbulence;
+            const float deltaY=wy*(speed*age)+wx*turbulence;
+            const float x=x0+deltaX,y=y0+deltaY,z=start+velocity*age;
+            const sector_t *at=sectorAt(x,y);
+            if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+2.f||
+               z>=ceilZ(at)-2.f)continue;
+            // Short conservative sweep: no particles traveling through rooms.
+            bool blocked=false;
+            for(int step=1;step<4;++step) {
+                const float u=float(step)/4.f;
+                const sector_t *through=sectorAt(x0+deltaX*u,y0+deltaY*u);
+                const float hz=start+velocity*age*u;
+                if(!through||through->ceilingpic!=skyflatnum||
+                   hz<=floorZ(through)+2.f||hz>=ceilZ(through)-2.f) {
+                    blocked=true;break;
+                }
+            }
+            if(blocked)continue;
+            const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
+            if(dist<14.f||dist>reach)continue;
+            const float fade=std::clamp(std::min({age*1.6f,(life-age)*1.6f,
+                         (reach-dist)/70.f,(dist-14.f)/25.f}),0.f,1.f);
+            if(fade<0.025f)continue;
+            const float light=std::clamp(lighting(at),0.22f,1.1f);
+            const float hue=hashUnit(gx,gy,own^0x7eu);
+            std::array<float,3> color=ember?
+                std::array<float,3>{.76f+.19f*hue,.19f+.21f*hue,.035f+.07f*hue}:
+                std::array<float,3>{.19f+.11f*hue,.13f+.08f*hue,.12f+.06f*hue};
+            for(float &c:color)c*=ember?(.74f+.26f*light):(.50f+.50f*light);
+            pixelBlock(particleVertices,camera,x,y,z,
+                       ember?.48f:.85f,ember?.75f:.93f,color,
+                       false,nullptr,false,nullptr,fade*(ember?.83f:.57f));
+            if(ember)++embers;else ++ash;
+        }
+    }
+}
+
 void weatherShutdown() {
     rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
+    episodeAtmosphereNow=0;
     soak.clear();weatherLevelSerial=~0u;soakPaneSerial=~0u;
     doom_storm::reset(stormState);storm_audio::stop();I_AmbienceRain(0);
 }
