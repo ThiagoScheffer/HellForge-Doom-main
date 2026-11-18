@@ -81,12 +81,25 @@ void main() {
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
     // D1/2: negative style.w encodes episode/profile and themed-lightning
     // switch without adding a Camera field. Inferno [-3,-1], Deimos [-5,-3].
-    bool deimos=c.style.w<=-3.0;
-    bool inferno=c.style.w<=-1.0&&!deimos;
+    // E1+: non-overlapping 2-wide ranges, reserved through Doom II SKY3.
+    // Old Inferno [-3,-1] and Deimos [-5,-3] retain identical decoding.
+    bool bloodHell=c.style.w<=-9.0;
+    bool city=c.style.w<=-7.0&&!bloodHell;
+    bool starport=c.style.w<=-5.0&&!city&&!bloodHell;
+    bool deimos=c.style.w<=-3.0&&!starport&&!city&&!bloodHell;
+    bool inferno=c.style.w<=-1.0&&!deimos&&!starport&&!city&&!bloodHell;
     bool crimson=inferno&&c.style.w>-2.0;
     bool coldElectrical=deimos&&c.style.w>-4.0;
     float boltSeed=inferno?((crimson?-1.0:-2.0)-c.style.w):
-        deimos?((coldElectrical?-3.0:-4.0)-c.style.w):c.style.w;
+        deimos?((coldElectrical?-3.0:-4.0)-c.style.w):
+        starport?-5.0-c.style.w:city?-7.0-c.style.w:
+        bloodHell?-9.0-c.style.w:c.style.w;
+    // E1 only: dusk sand scattering close to the low horizon, leaving
+    // the recognisable painted Starport cloud shapes visible.
+    if(starport) {
+        float dust=1.0-smoothstep(-0.15,0.75,rise);
+        color.rgb=mix(color.rgb,vec3(.42,.265,.155),.21*dust);
+    }
     // Lightning is behind the three virtual horizon layers and clouds.
     // The skyline therefore masks the bolt rather than being lit on top.
     if(c.style.z>0.0) {
@@ -107,6 +120,10 @@ void main() {
     if(hfMode>=2 && hfMode<=5) {
         color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
         color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
+        // E1 Starport: existing clouds become slightly heavier at sundown.
+        // No new layers or extra texture lookups are required.
+        if(starport)color.rgb=mix(color.rgb,vec3(.23,.185,.14),
+                                  .24*clamp(cloudCover,0.0,1.0));
         // Electrical glow scatters through the soft cloud layers; the
         // bolt itself stays beneath the silhouettes and cloud shading.
         if(c.weather.w>0.0) {

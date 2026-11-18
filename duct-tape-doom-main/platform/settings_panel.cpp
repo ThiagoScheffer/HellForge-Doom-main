@@ -457,14 +457,17 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Off: every map is lit as the WAD gives it, sun and all. Maps from custom WADs never get these looks.",hasAuthored)}},
             {"Weather and wear",{
                 choice("episode_atmosphere","Episode atmosphere",&s.episodeAtmosphere,
-                    {"Off","Authored episodes","Inferno (manual)","Deimos (manual)"},{0,1,2,3},
-                    "Authored E2 Deimos: alien ice crystals, drifting cold dust, violet-grey haze and pale electrical storms. "
-                    "Authored E3 Inferno: ash, embers, red-brown haze and crimson storms. "
-                    "Manual profiles work on custom WADs. Neither creates water rain or wet surfaces.",
+                    {"Off","Authored episodes","Inferno (manual)","Deimos (manual)",
+                     "Follow active SKY1/2/3","Starport duststorm (manual)"},{0,1,2,3,4,5},
+                    "Classic E2 Deimos and E3 Inferno retain their effects. DOOM II SKY1: strong sandy wind, "
+                    "airborne grit and warm dusk haze. SKY2 (Burning City) and SKY3 (Blood Hell) have reserved "
+                    "profiles for the next milestones. Follow active sky explicitly opts custom WADs in; "
+                    "Off disables the extra particles and haze. Dry dust does not create water rain or wetness.",
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("episode_particles","Episode atmosphere particles",&s.episodeParticles,
                     {"Low","Normal","High"},{0,1,2},
-                    "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 180/80, 320/144, 480/220. "
+                    "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 180/80, 320/144, 480/220; "
+                    "Starport fine sand/heavy grit: 80/16, 128/24, 160/32. "
                     "Only open-sky sectors and swept sky-exposed paths are eligible.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
                 choice("deimos_fog","Deimos blizzard visibility",&s.deimosFog,

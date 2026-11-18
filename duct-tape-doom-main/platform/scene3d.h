@@ -142,7 +142,7 @@ struct Settings {
     int stormBolts=1; // World-anchored procedural sky bolts, Off for simple flashes.
     float stormVolume=75; // Thunder sample gain percentage, also respects SFX volume.
     int stormAtmosphere=1; // Milestone C: gradual fronts, gusts, distant rain curtains and outdoor haze.
-    int episodeAtmosphere=1; // 0 Off, 1 authored E2 Deimos/E3 Inferno, 2 manual Inferno, 3 manual Deimos.
+    int episodeAtmosphere=1; // 0 Off, 1 authored, 2 Inferno, 3 Deimos, 4 follow SKY1/2/3, 5 Starport; 6/7 reserved.
     int episodeParticles=1; // 0 Low, 1 Normal, 2 High; capped episode particle budgets.
     int deimosFog=2; // D2.2: 0 Off, 1 Light, 2 Heavy (default), 3 Whiteout; Deimos only.
     int episodeLightning=1; // Themed lightning in Inferno/Deimos, including dry maps when storms are on.

@@ -6,9 +6,17 @@
 #include <cmath>
 #include <cstdint>
 namespace doom_episode {
-enum class Profile : int { None=0, Inferno=1, Deimos=2 };
-// `authoredSupported` uses the existing Game_HasEffect gate: modified WAD
-// content is not automatically labeled E3 from its sky color or map slot.
+// Keep the existing numeric values of Inferno and Deimos in graphics.cfg.
+// E2 and E3 may define particles later; the profile IDs are reserved now.
+enum class Profile : int { None=0, Inferno=1, Deimos=2,
+                           Starport=3, BurningCity=4, BloodHell=5 };
+// skyKind describes the *current logical sky texture*, not a hardcoded MAP range.
+// The renderer maps Doom II RSKY artwork through SKY1, SKY2 and SKY3.
+inline Profile commercialSky(int skyKind) {
+    return skyKind==1?Profile::Starport:
+           skyKind==2?Profile::BurningCity:
+           skyKind==3?Profile::BloodHell:Profile::None;
+}
 inline Profile select(int setting,bool authoredEnabled,bool authoredSupported,
                       bool classicDoom,int episode) {
     // Preserve D1's manual Inferno value for existing graphics.cfg entries.
@@ -19,6 +27,48 @@ inline Profile select(int setting,bool authoredEnabled,bool authoredSupported,
         if(episode==2)return Profile::Deimos;
     }
     return Profile::None;
+}
+// Never auto-assign themed weather by sampled sky color. A modified WAD may
+// deliberately replace SKY1 with unrelated artwork. Follow active sky is
+// an explicit option; Authored episodes retains the stock authoring gate.
+inline Profile selectSky(int setting,bool authoredEnabled,bool authoredSupported,
+                         bool classicDoom,int episode,bool commercial,int skyKind) {
+    // Preserve D1/D2 manual values even in a DOOM II/commercial game.
+    if(setting==2)return Profile::Inferno;
+    if(setting==3)return Profile::Deimos;
+    if(setting==4) return commercialSky(skyKind); // Explicit custom-WAD opt-in.
+    if(setting==5) return Profile::Starport;
+    if(setting==6) return Profile::BurningCity; // reserved for E2
+    if(setting==7) return Profile::BloodHell;   // reserved for E3
+    if(commercial) {
+        return setting==1&&authoredEnabled&&authoredSupported?
+               commercialSky(skyKind):Profile::None;
+    }
+    return select(setting,authoredEnabled,authoredSupported,classicDoom,episode);
+}
+// The authored gate uses the existing game-profile capability. Custom WADs
+// can opt in explicitly through Follow active sky or the manual profile.
+// E1: fixed per-frame dust budget; no persistent particles or actors.
+inline int sandBudget(int density) {return density<=0?80:density==1?128:160;}
+inline int sandGustBudget(int density) {return density<=0?16:density==1?24:32;}
+struct Sandstorm {float front=0.f,gust=0.f,intensity=0.f,windScale=1.f;};
+inline Sandstorm starportStorm(int tic,int rate,std::uint32_t seed) {
+    Sandstorm out{};
+    if(tic<0||rate<=0)return out;
+    float t=float(tic)/float(rate);
+    std::uint32_t h=(seed^(seed>>16))*0x7feb352du;
+    float phase=float(h&65535u)/65536.f;
+    float period=65.f+42.f*float((h>>16)&255u)/255.f;
+    out.front=.5f-.5f*std::cos(6.283185307f*(t/period+phase));
+    out.gust=std::clamp(.48f+.32f*std::sin(t*.67f+phase*6.283185307f)
+                   +.20f*std::sin(t*1.31f+phase*8.7f),0.f,1.f);
+    // Dust never disappears during a lull; no rain/wetness is generated.
+    out.intensity=std::clamp(.51f+.32f*out.front+.17f*out.gust,.51f,1.f);
+    out.windScale=1.10f+.85f*out.gust;
+    return out;
+}
+inline float starportHaze(float intensity) {
+    return std::clamp(.36f+.30f*intensity,.36f,.66f);
 }
 inline int ashBudget(int density) {return density<=0?48:density==1?96:128;}
 inline int emberBudget(int density) {return density<=0?12:density==1?24:32;}
