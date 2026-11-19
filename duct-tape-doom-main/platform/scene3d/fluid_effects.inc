@@ -26,6 +26,32 @@ static int fluidImage(int mask) {
     }
     return lump;
 }
+// E2.2: render-only outdoor smoke using the same alpha masks, shared GPU
+// image keys and per-texture batches as Fluid's weapon/indoor smoke.
+// Geometry::buildEpisodeAtmosphere runs AFTER buildImpacts/drawFluidEffects
+// have cleared these batches. Never add weapon particles or consume RNG.
+void fluidWeatherSmoke(const Uniforms &camera,float x,float y,float z,
+    float radiusX,float radiusZ,const std::array<float,3> &color,
+    float alpha,float rotation,int mask) {
+    if((mask!=13&&mask!=16)||alpha<=0.f||radiusX<=0.f||radiusZ<=0.f)return;
+    // 13 = NSHSF0 dense soft smoke, 16 = NSHSA0 wispy soft smoke.
+    const FluidMask &m=fluidMasks[mask];
+    const int lump=fluidImage(mask); // original image cache; no duplicate textures
+    auto &out=effectBatches[lump];
+    const float c=std::cos(rotation),s=std::sin(rotation);
+    const float opacity=std::clamp(alpha,0.f,1.f);
+    auto v=[&](float u,float a,float tu,float tv) {
+        const float xoff=c*u-s*a,yoff=s*u+c*a;
+        Vertex b={x+camera.right[0]*xoff+camera.up[0]*yoff,
+                  y+camera.right[1]*xoff+camera.up[1]*yoff,
+                  z+camera.right[2]*xoff+camera.up[2]*yoff,
+                  tu,tv,opacity,0u};
+        b.red=color[0];b.green=color[1];b.blue=color[2];
+        return b;
+    };
+    quad(out,v(-radiusX,radiusZ,0,0),v(radiusX,radiusZ,m.w,0),
+        v(radiusX,-radiusZ,m.w,m.h),v(-radiusX,-radiusZ,0,m.h));
+}
 static void resetFluidEffects() {
     if(fluidSerial!=r_levelserial){indoorSmoke.clear();rubbleParticles.clear();fluidParticles.clear();fluidBursts.clear();fluidMarks.clear();fluidSerial=r_levelserial;}
 }

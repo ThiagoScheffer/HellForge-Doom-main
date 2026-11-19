@@ -10,7 +10,7 @@
    under the sky lies wet in steps baked once (bakeWetness), the same all
    map long. The glass draws its drops itself (glass.frag), the ground its
    wetness (wear.glsl), the ambience its sound. Render-only, with its own
-   random numbers. update*/
+   random numbers. */
 #include "internal.h"
 #include "storm_audio.h"
 #include "../storm_atmosphere.h"
@@ -21,6 +21,14 @@ extern "C" {
 }
 
 namespace doom3d {
+// E2.2: soft Fluid smoke masks are appended to the existing textured-effect
+// batches after buildImpacts() has cleared them. No weapon particles,
+// gameplay RNG, or new image keys are involved. Implemented in
+// fluid_effects.inc; only called for SKY2 / Burning City.
+void fluidWeatherSmoke(const Uniforms &camera,float x,float y,float z,
+    float radiusX,float radiusZ,const std::array<float,3> &color,
+    float alpha,float rotation,int mask);
+
 float rainNow=0,wetNow=0,glassWetNow=0;
 float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
 float stormCurtainNow=0,stormHazeNow=0;
@@ -1011,12 +1019,12 @@ static void buildStarportAtmosphere(const Uniforms &camera) {
     }
 }
 
-// E2 — Burning City: drifting dark smoke, soot and scarce glowing embers.
-// No persistent particle actors, no rain/wetness and no scene-wide fog pass.
-// Each smoke puff is three overlapping, multi-tier lobes. Short tapered bands
-// form a rounded, irregular silhouette instead of two tall opaque rectangles.
-// 12 small billboards per smoke puff; hard bound at high density:
-// 12*citySmokeBudget + cityAshBudget = 1208 billboards (including ash).
+// E2.2 — Burning City: textured Fluid smoke masks, soot and rare embers.
+// Two alpha-masked quads per puff (NSHSF0 and NSHSA0), not rectangular
+// pixelBlock tiers. Reuses the existing Fluid GPU image cache and effect
+// pipeline, with no persistent actors, gameplay RNG, rain, or wetness.
+// Maximum at High: 2*96 smoke + 56 ash = 248 quads.
+// Renderer order: buildImpacts clears effectBatches BEFORE this function. 
 static void buildBurningCityAtmosphere(const Uniforms &camera) {
     if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
     constexpr float cell=38.f,reach=490.f;
@@ -1086,39 +1094,43 @@ static void buildBurningCityAtmosphere(const Uniforms &camera) {
             const float hue=hashUnit(gx,gy,own^0x86u);
             const float light=std::clamp(lighting(at),.20f,1.0f);
             if(!soot) {
-                // Three irregular lobes, each built from four short horizontal
-                // tiers. This makes the visible silhouette rounded: the outer
-                // tiers narrow and fade, while overlapping middle tiers have
-                // slightly different soot shades. The layout is seeded per puff
-                // and anchored to world coordinates; it never uses gameplay RNG.
-                const std::array<float,3> gray={.16f+.10f*hue,.145f+.08f*hue,.13f+.07f*hue};
-                const float opacity=fade*(.19f+.12f*intensity)*(.75f+.25f*light);
-                constexpr float bandWidth[4]={.58f,.96f,1.f,.63f};
-                constexpr float bandOpacity[4]={.52f,.86f,.88f,.46f};
-                constexpr float bandHeight[4]={-.94f,-.32f,.32f,.94f};
-                const float crossX=-wy,crossY=wx;
-                for(int lobe=0;lobe<3;++lobe) {
-                    const float offset=lobe==0?0.f:lobe==1?-2.0f:2.1f;
-                    const float riseOffset=lobe==0?0.f:lobe==1?1.55f:1.15f;
-                    const float radius=(lobe==0?2.85f:lobe==1?2.20f:2.40f)*
-                        (.86f+.28f*hashUnit(lobe,1,own^0x29f17u));
-                    const float pX=x+crossX*offset+wx*.7f*lobe;
-                    const float pY=y+crossY*offset+wy*.7f*lobe;
-                    const float top=ceilZ(at)-2.f,bottom=floorZ(at)+2.f;
-                    const float shade=.90f+.12f*hashUnit(lobe,2,own^0x7d912u);
-                    const std::array<float,3> lobeTint={gray[0]*shade,gray[1]*shade,gray[2]*shade};
-                    for(int band=0;band<4;++band) {
-                        const float tierZ=z+riseOffset+bandHeight[band]*radius;
-                        // Do not draw the top half of a puff through a roof
-                        // or the bottom half through the ground.
-                        if(tierZ-.425f*radius<bottom||
-                           tierZ+.425f*radius>top)continue;
-                        const float breadth=2.0f*radius*bandWidth[band];
-                        const float tierAlpha=opacity*bandOpacity[band]*
-                            (lobe==0?.60f:lobe==1?.49f:.53f);
-                        pixelBlock(particleVertices,camera,pX,pY,tierZ,
-                            breadth,.85f*radius,lobeTint,
-                            false,nullptr,false,nullptr,tierAlpha);
+                // The original Fluid mask NSHSF0 (13) has a dense soft centre,
+                // while NSHSA0 (16) provides wispy, feathered secondary edges.
+                // World-cell position and all variation remain deterministic.
+                // Build no weapon particles: append directly to the existing
+                // alpha-masked texture batches, shared with Fluid effects.
+                const std::array<float,3> gray={
+                    (.23f+.10f*hue)*(.75f+.25f*light),
+                    (.215f+.085f*hue)*(.75f+.25f*light),
+                    (.20f+.075f*hue)*(.75f+.25f*light)};
+                const float opacity=fade*(.35f+.18f*intensity);
+                // Clamp the textured quad to the local sky-sector clearance
+                // rather than allowing the soft sprite to cross a low roof.
+                const float clearance=std::min(z-floorZ(at),ceilZ(at)-z)-3.5f;
+                const float height=std::min(clearance,
+                    (5.4f+2.8f*hashUnit(gx,gy,own^0x29f17u))*(.82f+.045f*age));
+                if(height>1.5f) {
+                    const float radius=height*(1.08f+.25f*hue);
+                    const float roll=(hashUnit(gx,gy,own^0x7d912u)-.5f)*.60f;
+                    fluidWeatherSmoke(camera,x,y,z,radius,height,gray,opacity,roll,13);
+                    // A smaller displaced lobe makes the silhouette irregular.
+                    // The lobe remains inside the outdoor sector if the wind
+                    // drifts it near a wall or a covered neighboring sector.
+                    const float side=(hashUnit(gx,gy,own^0x47b2u)-.5f)*radius*.72f;
+                    const float px=x-wy*side,py=y+wx*side;
+                    const float offsetZ=height*.20f;
+                    const sector_t *wispy=sectorAt(px,py);
+                    if(wispy&&wispy->ceilingpic==skyflatnum) {
+                        const float wispyClearance=std::min(
+                            z+offsetZ-floorZ(wispy),ceilZ(wispy)-z-offsetZ)-3.5f;
+                        const float smallHeight=std::min(height*.75f,wispyClearance);
+                        if(smallHeight>1.5f) {
+                            const std::array<float,3> wispTint={
+                                gray[0]*.88f,gray[1]*.90f,gray[2]*.92f};
+                            fluidWeatherSmoke(camera,px,py,z+offsetZ,
+                                radius*.79f,smallHeight,wispTint,opacity*.66f,
+                                -roll*.67f,16);
+                        }
                     }
                 }
                 ++smoke;
