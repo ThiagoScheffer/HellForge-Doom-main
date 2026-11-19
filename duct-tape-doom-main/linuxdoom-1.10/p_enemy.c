@@ -2233,17 +2233,33 @@ static int P_FoodPath(mobj_t *actor,mobj_t *food) {
     }
     return 1;
 }
+static void P_FoodFaceStep(mobj_t *actor, fixed_t oldx, fixed_t oldy) {
+    // Feeding bypasses A_Chase's turn. Use the step that actually happened,
+    // including a detour, and keep facing steady if a door blocked movement.
+    if(actor->type==MT_SERGEANT&&(oldx!=actor->x||oldy!=actor->y))
+        actor->angle=R_PointToAngle2(oldx,oldy,actor->x,actor->y);
+}
 static int P_FoodMove(mobj_t *actor) {
     if(!actor->target)return 0;
+    fixed_t oldx=actor->x,oldy=actor->y;
     actor->movedir=(int)((R_PointToAngle2(actor->x,actor->y,actor->target->x,actor->target->y)+ANG45/2)>>29)&7;
-    if(P_Move(actor))return 1;
-    P_NewChaseDir(actor);return 0;
+    int moved=P_Move(actor);
+    if(!moved)P_NewChaseDir(actor);
+    P_FoodFaceStep(actor,oldx,oldy);
+    return moved;
 }
 static int P_FoodRetreat(mobj_t* actor,mobj_t* danger){
     static const int turns[8]={0,1,-1,2,-2,3,-3,4};
     int dir=danger?((R_PointToAngle2(danger->x,danger->y,actor->x,actor->y)+ANG45/2)>>29)&7:actor->movedir;
     if(dir<0||dir>7)dir=(int)(actor->angle>>29)&7;
-    for(int i=0;i<(danger?5:8);++i){actor->movedir=(dir+turns[i]+8)&7;if(P_Move(actor))return 1;}
+    fixed_t oldx=actor->x,oldy=actor->y;
+    for(int i=0;i<(danger?5:8);++i){
+        actor->movedir=(dir+turns[i]+8)&7;
+        if(P_Move(actor)){
+            P_FoodFaceStep(actor,oldx,oldy);
+            return 1;
+        }
+    }
     actor->movedir=DI_NODIR;return 0;
 }
 static void P_FoodAnimate(mobj_t *actor) {
@@ -2253,6 +2269,9 @@ static void P_FoodAnimate(mobj_t *actor) {
         return;
     }
     statenum_t state=(statenum_t)(actor->info->meleestate?actor->info->meleestate:actor->info->missilestate);
+    if(state!=S_NULL&&actor->type==MT_SERGEANT&&actor->target&&
+       (actor->x!=actor->target->x||actor->y!=actor->target->y))
+        actor->angle=R_PointToAngle2(actor->x,actor->y,actor->target->x,actor->target->y);
     if(state!=S_NULL)P_SetMobjState(actor,state);else P_WeakpointStopFeeding(actor);
 }
 static void P_FoodWake(mobj_t *actor){if(actor->state==&states[actor->info->spawnstate]&&actor->info->seestate!=S_NULL)P_SetMobjState(actor,(statenum_t)actor->info->seestate);}
