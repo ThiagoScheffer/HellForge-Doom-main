@@ -8,6 +8,7 @@
 #include "p_spec.h"
 #include "m_argv.h"
 #include "d_event.h"
+#include "i_system.h"
 #include "../platform/i_render3d.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -21,7 +22,7 @@ extern void I_RunEngine(void (*entry)(void));
 extern int I_TestBakeCacheStorage(void);
 extern int I_TestRelightRunning(void);
 extern void I_TestNativeCrash(void);
-static int storageMode,crashMode,autoLoadMode,startupMode;
+static int storageMode,crashMode,autoLoadMode,startupMode,relightQuitMode;
 extern int g_death_load_last_save;
 static int stage,begin,initialSerial,frames,cycles,goal=10,saveMode;
 static void effects(void) {
@@ -40,6 +41,16 @@ static void effects(void) {
 void I_TestFrame(void) {
     if(gamestate!=GS_LEVEL||!players[0].mo)return;
     if(++frames>30000){fprintf(stderr,"RELOAD FAIL timeout stage %d\n",stage);exit(3);}
+    if(relightQuitMode) {
+        // Simulate a nearby sector moving even on maps without a type-1 door.
+        if(frames==4)players[0].mo->subsector->sector->ceilingheight+=8*FRACUNIT;
+        if(frames>=4&&I_TestRelightRunning()) {
+            fprintf(stderr,"RELIGHT QUIT: active worker\n");
+            I_Quit();
+        }
+        if(frames>300){fprintf(stderr,"RELIGHT QUIT FAIL: no active worker\n");exit(6);}
+        return;
+    }
     if(startupMode) {
         if(frames>=4){fprintf(stderr,"STARTUP PASS 4 frames; normal quit\n");I_Quit();}
         return;
@@ -111,6 +122,7 @@ int main(int argc,char **argv) {
     if(argc<5)return 2;
     autoLoadMode=!strcmp(argv[3],"autoload");
     startupMode=!strcmp(argv[3],"startup");
+    relightQuitMode=!strcmp(argv[3],"relight-quit");
     crashMode=!strcmp(argv[3],"crash");storageMode=!strcmp(argv[3],"storage");saveMode=!strcmp(argv[3],"save");goal=atoi(argv[4]);if(goal<1||goal>50)return 2;
     char *args[128]={argv[0],"-iwad",argv[1],"-warp","1","-skill","1","-graphics",argv[2],
         "-config","reload-doom.cfg","-nosound","-nomusic","-width","960","-height","540"};

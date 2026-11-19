@@ -312,6 +312,7 @@ float flowLightAt(float x,float y,const sector_t *sector,float light);
 
 // relight.cpp
 void stopRelight();
+void cancelRelight(); // Scene teardown discards the lighting buffers.
 // A merged light (a bakeSourceKeys entry) lost shot-out tiles: its source
 // keeps the tiles left (remergeBakeSource) or goes dark, and the next
 // background re-bake follows.

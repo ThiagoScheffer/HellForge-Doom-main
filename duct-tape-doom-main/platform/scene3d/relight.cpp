@@ -17,6 +17,7 @@ struct Relight {
     std::exception_ptr error;
     std::unique_ptr<FrameWorkers> pool;
     std::atomic<bool> done{false};
+    std::atomic<bool> cancelled{false};
     bool running=false,lights=false,only=false,grid=false,sun=false;
     BakeMap map; // bakeMap as it was when the re-bake started.
     float sunDirection[3]={};
@@ -32,6 +33,7 @@ struct Relight {
     // cell each way).
     std::vector<BakeLight> gone,kept;
     std::vector<double> lost,left;
+    bool cancelling() const {return cancelled.load(std::memory_order_relaxed);}
 } relight;
 static std::vector<int> relightPending;
 static std::vector<SurfaceLightKey> brokenPending;
@@ -68,6 +70,7 @@ static void measureLoss(Relight &job) {
     job.lost.assign(numsectors,0);job.left.assign(numsectors,0);
     const int *b=job.lightBounds;
     for(int y=b[1];y<=b[3];y+=2)for(int x=b[0];x<=b[2];x+=2) {
+        if(job.cancelling())return;
         size_t i=(size_t)y*mapWidth+x;int sector=seamCells[i].own;
         if(!(job.cells[i]&1)||sector==noSector||job.map.sectors[sector].sky)continue;
         float px=mapOrigin[0]+(x+0.5f)*mapCell,py=mapOrigin[1]+(y+0.5f)*mapCell,before[3]={},after[3]={};
@@ -78,6 +81,7 @@ static void measureLoss(Relight &job) {
     }
     for(double &lost:job.lost)lost=std::max(lost,0.0);
     for(int y=0;y<mapHeight;y+=2)for(int x=0;x<mapWidth;x+=2) {
+        if(job.cancelling())return;
         size_t i=(size_t)y*mapWidth+x;int sector=seamCells[i].own;
         if(sector==noSector||job.lost[sector]<=0)continue;
         const uint8_t *cell=flatCell(floorLight,i);
@@ -150,7 +154,7 @@ static void startRelight() {
     job.gridList.clear();
     for(size_t i=0;i<job.gridCells.size();++i)if(job.gridCells[i])job.gridList.push_back(i);
     job.gridResults.assign(job.gridList.size(),{});
-    job.done=false;job.running=true;
+    job.cancelled=false;job.done=false;job.running=true;
     // Frame lighting already has its own workers. Reuse a smaller background
     // pool rather than creating half the logical CPUs' worth of threads for
     // every bake phase, competing with rendering while a door moves.
@@ -166,23 +170,26 @@ static void startRelight() {
         job.pool->each(y1-y0+1,[&](int row) {
             int y=y0+row;
             for(int x=0;x<mapWidth;++x) {
+                if(job.cancelling())return;
                 size_t i=(size_t)y*mapWidth+x;uint8_t mark=job.cells[i];
                 if(mark&1)lightCell(job.map,i,job.only);
                 if(mark&2)job.sunCells[(size_t)(y-sb[1])*(sb[2]-sb[0]+1)+(x-sb[0])]=(int16_t)sunCell(job.map,i,job.sunDirection);
             }
         });
         std::vector<int> strips;
-        for(int index:bakeOrder)if(job.strips[index])strips.push_back(index);
+        if(!job.cancelling())for(int index:bakeOrder)if(job.strips[index])strips.push_back(index);
         job.pool->each((int)strips.size(),[&](int n) {
+            if(job.cancelling())return;
             const BakeStrip &strip=bakeStrips[strips[n]];
             if(job.strips[strips[n]]&1)lightStrip(job.map,strip,job.only);
             if(job.strips[strips[n]]&2)sunStrip(job.map,strip,job.sunDirection);
         });
-        job.pool->each((int)job.gridList.size(),[&](int n) {
+        if(!job.cancelling())job.pool->each((int)job.gridList.size(),[&](int n) {
+            if(job.cancelling())return;
             size_t i=job.gridList[n];
             job.gridResults[n]=staticCellAt(job.map,(int)(i%staticWidth),(int)(i/staticWidth));
         });
-        if(job.lights&&!job.gone.empty())measureLoss(job);
+        if(!job.cancelling()&&job.lights&&!job.gone.empty())measureLoss(job);
         } catch(...) {job.error=std::current_exception();}
         job.done=true;
     });
@@ -241,6 +248,10 @@ void stopRelight() {
     if(relight.running){fprintf(stderr,"3D reload: joining active relight worker.\n");fflush(stderr);}
     finishRelight(false);relightPending.clear();brokenPending.clear();
     relight.map={};relight.gridList.clear();relight.gridResults.clear();
+}
+void cancelRelight() {
+    relight.cancelled.store(true,std::memory_order_relaxed);
+    stopRelight();
 }
 } // namespace doom3d
 

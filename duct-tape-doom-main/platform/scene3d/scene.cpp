@@ -290,7 +290,7 @@ void sceneShutdown() {
     arcadeRankTexture.reset();
     for(auto &texture:keyHandTextures)texture.reset();keyHandVisible=keyWeaponDrop=0;
     toastyTexture.reset();toastyVisible=0;romeroTexture.reset();romeroAge=-1;
-    stopRelight();
+    cancelRelight();
     R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();
