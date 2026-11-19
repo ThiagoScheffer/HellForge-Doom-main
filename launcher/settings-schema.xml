@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="27958068b098de20817da7a4f9b6625338afc8257acbef26a975218c89af45ae">
+<settings source="platform/settings_panel.cpp" source_sha256="6db7dbf0e88ef587b8d504ad4c622662d5fbb8c3b3bf08c432d7a6a883a56c62">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -59,6 +59,7 @@
   <option key="localized_injury_effects" title="Localized Injury Effects" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="elemental_damage_over_time" title="Elemental Damage Over Time" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="combat_event_messages" title="Colored Combat Notifications" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="severe_critical_bloodspill" title="Severe critical bloodspill" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="elemental_combat_fx" title="Elemental Combat FX" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="advanced_monster_reactions" title="Advanced Monster Reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="eye_injuries" title="Eye Injuries" category="Combat" kind="check" choices="0=Off|1=On" />

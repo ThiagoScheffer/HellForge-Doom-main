@@ -487,6 +487,7 @@ bool bloodOn();
 // Scoped source for synchronous blood creation. Marks store their colour;
 // no actor pointers survive in particles or decals.
 int monsterBloodTint(const mobj_t *thing);
+void severeBloodBurst(const wp_severe_burst_t *burst);
 Image &playerColourImage(Image &,int,int,int &,const byte *voxelNormals=nullptr);
 Image &bloodSpriteImage(int lump,int tint,int &key);
 byte monsterSkinBloodIndex(int type,float shade); // Uses monster-specific blood tint and the WAD's blood palette.

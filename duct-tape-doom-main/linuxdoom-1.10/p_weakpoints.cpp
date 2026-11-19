@@ -1,6 +1,7 @@
 #include "../platform/monster_profile.h"
 #include "../platform/monster_bench_state.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <climits>
 #include <cstring>
@@ -30,6 +31,8 @@ void (*P_WeakpointBleedVisual)(mobj_t*)=nullptr;
 int (*P_WeakpointBulletLocate)(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*)=nullptr;
 int (*P_WeakpointTargetAllowed)(const mobj_t*)=nullptr;
 int (*P_WeakpointLocate)(mobj_t*,mobj_t*,wp_impact_t*)=nullptr;
+int (*P_SevereBloodTint)(const mobj_t*)=nullptr;
+void (*P_SevereBloodBurst)(const wp_severe_burst_t*)=nullptr;
 namespace {
 struct Runtime {
     int dotUntil=0,dotNext=0,dotKind=0,dotDamage=0,dotPlayer=-1;
@@ -72,8 +75,66 @@ bool roll(int chance) {return chance>=100||(chance>0&&P_Random()*100/256<chance)
 bool heavy(int type){return type==MT_FATSO||type==MT_CYBORG;}
 bool mechanical(int type){return type==MT_BABY||type==MT_SPIDER;}
 bool floating(int type){return type==MT_HEAD||type==MT_PAIN;}
+struct SevereHit {
+    uintptr_t targetId=0;
+    int remaining=0;
+    wp_severe_burst_t burst{};
+};
+// Stock discharges have at most 20 pellets. Keep only copied data because
+// subsequent pellets and death actions can remove the target.
+std::array<SevereHit,32> severeHits;
+size_t severeCount=0;
+uint64_t severeSerial=0;
+bool severeMonster(int type) {
+    switch(type) {
+    case MT_TROOP:case MT_VILE:case MT_FATSO:case MT_BRUISER:
+    case MT_KNIGHT:case MT_HEAD:case MT_SERGEANT:return true;
+    default:return false;
+    }
+}
+void emitSevereHit(const wp_severe_burst_t &burst) {
+    P_HudNotify(HUD_SEVERE_CRITICAL,"SEVERE CRITICAL",0xFFFF4444u,3,88,burst.seed);
+    if(P_SevereBloodBurst)P_SevereBloodBurst(&burst);
+}
 struct DamageContext {const wp_damage_event_t *event;bool consumed;DamageContext *previous;};
 DamageContext *damageContext=nullptr;
+}
+void P_WeakpointRecordHealthLoss(const mobj_t *target,const mobj_t *source,int before,int after) {
+    if(!P_WeakpointActive()||totalkills>=200||!target->info||target->player||
+       (target->flags&MF_NOBLOOD)||!severeMonster(target->type)||before<=after)return;
+    const uintptr_t id=reinterpret_cast<uintptr_t>(target);
+    // Later pellets can finish a monster before the discharge ends.
+    if(shotId)for(size_t i=0;i<severeCount;++i) {
+        if(severeHits[i].targetId!=id)continue;
+        severeHits[i].remaining=after;
+        return;
+    }
+    const int full=target->info->spawnhealth;
+    if(full<=0||after<=0||int64_t(before)*4<=full||int64_t(after)*4>full)return;
+
+    wp_severe_burst_t burst{};
+    const auto *event=damageContext?damageContext->event:nullptr;
+    const float x=target->x/float(FRACUNIT),y=target->y/float(FRACUNIT);
+    float dx=source?x-source->x/float(FRACUNIT):0.f;
+    float dy=source?y-source->y/float(FRACUNIT):0.f;
+    float distance=std::hypot(dx,dy);
+    if(distance<.01f) {
+        const double angle=target->angle*(6.283185307179586/4294967296.0);
+        dx=-float(std::cos(angle));dy=-float(std::sin(angle));distance=1.f;
+    }
+    if(event&&event->target==target&&event->source==source&&event->impact.confidence==100) {
+        burst.impact=event->impact;
+    } else {
+        const float radius=target->radius/float(FRACUNIT)*.65f;
+        burst.impact.x=x-dx/distance*radius;
+        burst.impact.y=y-dy/distance*radius;
+        burst.impact.z=(target->z+target->height*.62f)/float(FRACUNIT);
+    }
+    burst.directionX=dx;burst.directionY=dy;
+    burst.tint=P_SevereBloodTint?P_SevereBloodTint(target):0;
+    burst.seed=++severeSerial;
+    if(!shotId)emitSevereHit(burst);
+    else if(severeCount<severeHits.size())severeHits[severeCount++]={id,after,burst};
 }
 static void combatExpansionTick(mobj_t*);
 static void combatExpansionReset();
@@ -248,7 +309,7 @@ void P_WeakpointApply(wp_damage_event_t *e) {
     e->resolved=2;
 }
 void P_WeakpointBeginShot(mobj_t *source,weapontype_t weapon) {
-    pellets.clear();shotSource=source;shotWeapon=weapon;shotId=++serial;
+    severeCount=0;pellets.clear();shotSource=source;shotWeapon=weapon;shotId=++serial;
 }
 void P_WeakpointEndShot(void) {
     if(p_wp_enhanced&&P_WeakpointActive()) {
@@ -281,7 +342,9 @@ void P_WeakpointEndShot(void) {
             }
         }
     }
-    pellets.clear();shotSource=nullptr;shotId=0;
+    if(totalkills<200)for(size_t i=0;i<severeCount;++i)
+        if(severeHits[i].remaining>0)emitSevereHit(severeHits[i].burst);
+    severeCount=0;pellets.clear();shotSource=nullptr;shotId=0;
 }
 void P_WeakpointProjectileSpawn(mobj_t *projectile,mobj_t *source,wp_damage_kind_t kind) {
     if(!P_WeakpointActive()||!source||!source->player||kind==WP_OTHER)return;
@@ -347,7 +410,7 @@ void P_WeakpointForget(mobj_t *actor){
         }}
 }
 void P_WeakpointDied(mobj_t *actor){auto *previous=deathCleanup;deathCleanup=actor;P_WeakpointForget(actor);deathCleanup=previous;}
-void P_WeakpointClear(void){combatExpansionReset();P_WeakpointFeedingReset();runtime.clear();pellets.clear();shotSource=nullptr;shotId=0;}
+void P_WeakpointClear(void){combatExpansionReset();P_WeakpointFeedingReset();runtime.clear();severeCount=0;pellets.clear();shotSource=nullptr;shotId=0;}
 size_t P_WeakpointRuntimeCount(void){return runtime.size();}
 
 void P_WeakpointNotify(wp_damage_event_t *e) {

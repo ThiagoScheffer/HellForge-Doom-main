@@ -20,6 +20,7 @@ using namespace doom3d;
 static std::string output;
 static bool visual=false;
 static bool visualEnhanced=false;
+static bool visualSevere=false;
 static bool visualFeedback=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
@@ -237,6 +238,89 @@ static void visualFrame() {
 #include "elemental2_visual.inc"
 #include "eye_injury_visual.inc"
 #include "e1m8_regression.inc"
+extern "C" int I_TestSevereWallMarks();
+extern "C" int I_TestSeverePools();
+static void severeVisualFrame() {
+    static int shot=-1;
+    static bool captured=false;
+    static int wallShot=-1;
+    static bool wallCaptured=false;
+    static bool falloutCaptured=false;
+    static std::string falloutPath;
+    auto *shooter=players[consoleplayer].mo;
+    if(shot<0) {
+        if(levelSerial!=r_levelserial||floors.empty())return;
+        check(I_Render3DIsAccelerated()!=0,"severe blood visual requires GPU renderer");
+        for(auto type:{MT_TROOP,MT_SERGEANT,MT_VILE,MT_FATSO,MT_BRUISER,MT_KNIGHT,MT_HEAD}) {
+            mobj_t actor{};
+            actor.type=type;
+            const int expected=type==MT_HEAD?1:(type==MT_BRUISER||type==MT_KNIGHT)?2:0;
+            check(monsterBloodTint(&actor)==expected,"stock severe monster uses its expected blood tint");
+        }
+        check(P_TeleportMove(shooter,0,fx(-64))!=0,"severe blood camera placement");
+        shooter->angle=ANG90;
+        shooter->z=shooter->floorz;
+        players[consoleplayer].viewz=shooter->z+41*FRACUNIT;
+        int n=0;
+        for(auto type:{MT_TROOP,MT_KNIGHT,MT_HEAD}) {
+            auto *target=P_SpawnMobj(fx(-92+92*n++),fx(128),ONFLOORZ,type);
+            target->angle=ANG270;
+            P_WeakpointBeginShot(shooter,wp_pistol);
+            wp_damage_event_t e{};
+            e.target=target;e.source=e.inflictor=shooter;e.kind=WP_BULLET;
+            e.baseDamage=1;
+            e.impact={WP_BODY,100,
+                      units(target->x),units(target->y-target->radius),
+                      units(target->z)+units(target->height)*.80f};
+            target->health=target->info->spawnhealth/4+1;
+            P_WeakpointApply(&e);P_WeakpointEndShot();
+            check(target->health>0&&int64_t(target->health)*4<=target->info->spawnhealth,
+                  "ordinary 1 HP body hit crosses severe health threshold");
+            target->momx=target->momy=target->momz=0;
+            target->tics=-1;
+        }
+        combat_notice_t notices[3]{};
+        check(P_HudNotices(notices)==3&&notices[0].kind==HUD_SEVERE_CRITICAL,
+              "three severe hits reached the HUD queue");
+        shot=leveltime;
+    } else if(!captured&&leveltime-shot>=5) {
+        visualCapture=output+"/severe-bloodspill.png";
+        I_Render3DScreenshotTo(visualCapture.c_str());
+        captured=true;
+    } else if(captured&&!falloutCaptured&&leveltime-shot>=26) {
+        check(I_TestSeverePools()>0&&I_TestSeverePools()<=32,"ballistic fallout collects in bounded pools");
+        falloutPath=output+"/severe-fallout.png";
+        I_Render3DScreenshotTo(falloutPath.c_str());
+        falloutCaptured=true;
+    } else if(falloutCaptured&&leveltime-shot>=30&&wallShot<0) {
+        FILE *f=std::fopen(visualCapture.c_str(),"rb");
+        check(f!=nullptr,"three-tint rupture screenshot saved");
+        std::fclose(f);
+        f=std::fopen(falloutPath.c_str(),"rb");
+        check(f!=nullptr,"fallout pool screenshot saved");
+        std::fclose(f);
+        check(P_TeleportMove(shooter,fx(342),fx(135))!=0,"severe wall camera placement");
+        shooter->angle=0;shooter->z=shooter->floorz;
+        players[consoleplayer].viewz=shooter->z+41*FRACUNIT;
+        wp_severe_burst_t wall{};
+        wall.impact.x=428;wall.impact.y=128;wall.impact.z=units(shooter->z)+42;
+        wall.directionX=-1;wall.seed=123;
+        severeBloodBurst(&wall);
+        wallShot=leveltime;
+    } else if(wallShot>=0&&!wallCaptured&&leveltime-wallShot>=11) {
+        check(I_TestSevereWallMarks()>0&&I_TestSevereWallMarks()<=4,
+              "pressurized streams reach the solid east wall and deposit bounded marks");
+        visualCapture=output+"/severe-wall-impact.png";
+        I_Render3DScreenshotTo(visualCapture.c_str());
+        wallCaptured=true;
+    } else if(wallCaptured&&leveltime-wallShot>=14) {
+        FILE *f=std::fopen(visualCapture.c_str(),"rb");
+        check(f!=nullptr,"wall impact screenshot saved");
+        std::fclose(f);
+        std::puts("PASS severe critical damage, monster tints, jets, wall marks and fallout pools");
+        I_Quit();
+    }
+}
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
     if(e1m8Mode){e1m8Frame();return;}
@@ -250,19 +334,21 @@ extern "C" void I_TestFrame() {
     if(visualSurvival){survivalVisualFrame();return;}
     if(visualFeedback){feedbackVisualFrame();return;}
     if(visualEnhanced){enhancedVisualFrame();return;}
+    if(visualSevere){severeVisualFrame();return;}
     if(visual){visualFrame();return;}
     run();featureSwitchConfig();enhancedCoverage();cachedHitBenchmark();balanceHitCounts();realProjectiles();localizedRockets();realBFGAndMovement();realShotgunDischarges();realInjuriesAndSave();feedbackAndStatusIntegration();survivalIntegration();std::printf("PASS %d total engine integration checks\n",checks);I_Quit();
 }
 int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
+    visualSevere=argc==5&&!std::strcmp(argv[4],"--visual-severe");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
     visualEyes=argc==5&&!std::strcmp(argv[4],"--visual-eye-injuries");
     visualElemental=argc==5&&!std::strcmp(argv[4],"--visual-elemental");
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -273,6 +359,11 @@ int main(int argc,char **argv) {
     f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);std::fclose(f);
     if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
+    if(visualSevere) {
+        f=std::fopen(graphics.c_str(),"a");if(!f)return 2;
+        std::fputs("enhanced_weak_points 1\ncombat_event_messages 1\nsevere_critical_bloodspill 1\nblood 1\nblood_spray 1\n",f);
+        std::fclose(f);
+    }
     }
     f=std::fopen(config.c_str(),"w");if(!f)return 2;std::fputs("show_messages 0\n",f);std::fclose(f);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");

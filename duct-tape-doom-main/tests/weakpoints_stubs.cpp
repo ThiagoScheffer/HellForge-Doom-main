@@ -6,6 +6,7 @@ extern "C" {
 #include "p_local.h"
 boolean netgame=false,demoplayback=false,demorecording=false;
 thinker_t thinkercap={};
+int totalkills=0;
 player_t players[MAXPLAYERS]={};
 void P_MobjThinker(mobj_t*){}
 int wp_test_sight=1;
@@ -17,6 +18,7 @@ void P_DamageMobj(mobj_t *target,mobj_t* inflictor,mobj_t *source,int damage){
     wp_test_last_source=source;++wp_test_damage_calls;int before=target->health;
     int kind=P_CombatDamageKind(inflictor,source),burn=P_CombatVisualKind(target);
     damage=P_WeakpointAdjustDamage(target,inflictor,source,damage);target->health-=damage;
+    P_WeakpointRecordHealthLoss(target,source,before,target->health);
     P_SessionDamage(target,source,before,damage);
     if(target->health<=0)P_WeakpointDied(target);
     P_CombatConfirmed(target,source,kind,damage,target->health<=0?burn:-1);

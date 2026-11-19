@@ -467,6 +467,17 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
 
 ## Project status
 
+- **Severe critical bloodspill.** Enable it in F4 → Combat to see short,
+  pressurized jets when damage drops one of seven supported monster types
+  into critical health.
+  Streams break into falling fragments as pressure drops. Jets leave colored
+  splashes on solid walls, and fallout collects in small pools on dry floors.
+  The effect needs Blood and Blood Spray and is limited to maps with fewer
+  than 200 kill-count monsters. The monster must cross from above 25% of
+  spawn health to 25% or less and survive the hit or shotgun discharge.
+  A red **SEVERE CRITICAL** notice uses Colored Combat
+  Notifications independently of the spray toggle.
+
 Recent source updates for this build family:
 
 - **Sunder 2308 MAP01 shutdown.** Closing the game during a background lighting

@@ -19,7 +19,8 @@ void P_HudNotify(combat_notice_kind_t kind,const char *text,unsigned color,int p
     expireNotices();
     uint64_t until=sessionStats.runtimeTics+(uint64_t)std::clamp(duration,1,350);
     for(int i=0;i<noticeCount;++i){auto &n=combatNotices[i];
-        if(n.kind==kind&&(key&&n.key==key||!std::strncmp(n.text,text,95)&&n.expires+9>=until)){
+        if(n.kind==kind&&(key&&n.key==key||
+           (kind!=HUD_SEVERE_CRITICAL&&!std::strncmp(n.text,text,95)&&n.expires+9>=until))){
             n.expires=until;n.priority=std::max(n.priority,priority);return;
         }
     }

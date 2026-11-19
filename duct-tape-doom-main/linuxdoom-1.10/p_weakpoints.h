@@ -30,6 +30,15 @@ typedef struct {
     uint64_t eventId,dischargeId;
 } wp_damage_event_t;
 typedef struct {
+    wp_impact_t impact;
+    float directionX,directionY;
+    int tint;
+    uint64_t seed;
+} wp_severe_burst_t;
+extern int (*P_SevereBloodTint)(const mobj_t*);
+extern void (*P_SevereBloodBurst)(const wp_severe_burst_t*);
+void P_WeakpointRecordHealthLoss(const mobj_t *target,const mobj_t *source,int before,int after);
+typedef struct {
     int humanoidHead,heavyHead,cyberHead,facePellet,eyeBullet,brainPellet;
     int heavyPlasma,cyberPlasma,floatingPlasma,mechanicalPlasma;
     int heavyRocket,brainRocket,legRocket;
@@ -49,7 +58,7 @@ extern int p_wp_enhanced,p_wp_vulnerabilities,p_wp_injuries;
 extern int p_wp_elemental,p_wp_reactions,p_wp_dot,p_wp_dot_damage;
 void P_CombatConfigureDot(int enabled);
 int P_CombatDotKind(mobj_t*);
-typedef enum { HUD_CRITICAL_BLEED,HUD_FRENZY,HUD_EYE,HUD_EYE_RAGE,HUD_CUSTOM } combat_notice_kind_t;
+typedef enum { HUD_CRITICAL_BLEED,HUD_FRENZY,HUD_EYE,HUD_EYE_RAGE,HUD_CUSTOM,HUD_SEVERE_CRITICAL } combat_notice_kind_t;
 typedef struct {int kind,priority;unsigned color;uint64_t key,expires;char text[96];} combat_notice_t;
 typedef struct {uint64_t attempts,deaths,streak,attemptTics,runtimeTics,dealt,taken;int episode,map;} combat_stats_t;
 void P_HudConfigure(int messages);

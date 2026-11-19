@@ -958,6 +958,7 @@ P_DamageMobj
     previousBurn=P_CombatVisualKind(target);
     healthBefore=target->health;
     target->health -= damage;	
+    P_WeakpointRecordHealthLoss(target,source,healthBefore,target->health);
     P_SessionDamage(target,source,healthBefore,damage);
     if (target->health <= 0)
     {

@@ -110,6 +110,7 @@ struct Settings {
     int bloodLevel=2; // Blood: 0 off, 1 splats and pools, 2 full (spray, shine).
     int blood=1; // Splats on floors and walls from hitscan hits; pools under corpses.
     int bloodSpray=1; // With blood: hits and kills throw drops that land as splats; wounds drip, sliding bodies smear, bodies thrown into walls splash them.
+    int severeBloodspill=0;
     int bloodShine=1; // Fresh blood glints under dynamic lights, then dries matte.
     int deathMotion=0; // Optional deaths jolt with the killing blow's push and height.
     int wounds=1; // Hitscan hits shoot holes through monsters' sprites, rimmed with blood; drawing only.

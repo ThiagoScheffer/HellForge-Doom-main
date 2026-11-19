@@ -264,8 +264,76 @@ static void bleedingAndFrenzy() {
 #include "eye_injury_rules.inc"
 #include "elemental_rules.inc"
 #include "elemental2_rules.inc"
+static void severeCriticalRules() {
+    static int bursts;
+    static wp_severe_burst_t last;
+    auto observe=[&](int type) {
+        reset(type);
+        totalkills=199;
+        bursts=0;
+        last={};
+        P_SevereBloodTint=+[](const mobj_t *m){return m->type==MT_HEAD?1:(m->type==MT_KNIGHT||m->type==MT_BRUISER)?2:0;};
+        P_SevereBloodBurst=+[](const wp_severe_burst_t *burst){last=*burst;++bursts;};
+        P_HudConfigure(1);
+    };
+    combat_notice_t notices[3]{};
+    for(int type:{MT_TROOP,MT_SERGEANT,MT_VILE,MT_FATSO,MT_BRUISER,MT_KNIGHT,MT_HEAD,MT_SHADOWS}) {
+        observe(type);
+        target.health=251;
+        auto hit=event(WP_BULLET,WP_BODY,1);
+        P_WeakpointBeginShot(&source,wp_pistol);
+        P_WeakpointApply(&hit);
+        check(target.health==250&&bursts==0,"ordinary damage queues feedback until the shot ends");
+        P_WeakpointEndShot();
+        const bool supported=type!=MT_SHADOWS;
+        check(bursts==int(supported),"each supported type qualifies on crossing 25 percent by 1 HP");
+        if(supported) {
+            check(P_HudNotices(notices)==1&&notices[0].kind==HUD_SEVERE_CRITICAL&&
+                  notices[0].color==0xFFFF4444u,"low health triggers the red notice");
+            check(last.tint==(type==MT_HEAD?1:(type==MT_BRUISER||type==MT_KNIGHT)?2:0),
+                  "low-health event retains monster blood tint");
+        }
+        check(wp_test_rng_calls==0,"low-health feedback consumes no gameplay RNG");
+    }
+    observe(MT_TROOP);
+    target.health=252;
+    P_HudConfigure(0);
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==0,"health above 25 percent gives no warning");
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==1&&P_HudNotices(notices)==0,"ordinary damage outside a hitscan discharge triggers the effect independently");
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==1,"further hits below the threshold do not repeat feedback");
+    target.health=251;
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==2,"crossing again after recovery can trigger feedback");
+    observe(MT_TROOP);
+    target.health=251;totalkills=200;
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==0&&P_HudNotices(notices)==0,"map cutoff still applies");
+    observe(MT_TROOP);
+    target.health=251;
+    P_DamageMobj(&target,&source,&source,251);
+    check(bursts==0&&P_HudNotices(notices)==0,"a dead monster does not give a low-health warning");
+    for(bool lethal:{false,true}) {
+        observe(MT_TROOP);
+        target.health=255;
+        P_WeakpointBeginShot(&source,wp_shotgun);
+        auto first=event(WP_SHOTGUN_PELLET,WP_BODY,5);
+        auto next=event(WP_SHOTGUN_PELLET,WP_BODY,lethal?250:5);
+        P_WeakpointApply(&first);P_WeakpointApply(&next);P_WeakpointEndShot();
+        check(bursts==int(!lethal),"shotgun warns once only if target survives the whole discharge");
+    }
+    observe(MT_TROOP);
+    target.health=251;
+    P_SevereBloodBurst=nullptr;
+    P_DamageMobj(&target,&source,&source,1);
+    check(P_HudNotices(notices)==1,"HUD warning works with the effect disabled");
+    P_SevereBloodTint=nullptr;totalkills=0;
+}
 int main() {
     matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();elementalRules();elemental2Rules();
+    severeCriticalRules();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");
     P_WeakpointReadBalance("wp_heavy_head",900);check(p_wp_balance.heavyHead==190,"out-of-range tuning is ignored");

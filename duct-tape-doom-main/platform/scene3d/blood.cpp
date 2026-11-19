@@ -1,5 +1,8 @@
 /* Blood splats on floors, walls and ceilings from hits, and pools under corpses. */
 #include "internal.h"
+extern "C" {
+#include "p_solid.h"
+}
 
 namespace doom3d {
 // Blood: decals drawn in the world pass and lit like the surface under them.
@@ -31,6 +34,7 @@ static byte bloodTintIndex(byte index,int tint) {
 }
 constexpr int bloodKeyBase=-0x40000000; // Image keys clear of walls and lumps.
 constexpr int bloodPool=0,bloodSplats=4,bloodSpeckFirst=1+bloodSplats,bloodSpecks=3,bloodDrip=bloodSpeckFirst+bloodSpecks,bloodSmear=bloodDrip+1;
+constexpr int bloodJet=bloodSmear+1;
 static std::vector<byte> bloodShades;static bool bloodShadesLoaded=false;
 const std::vector<byte> &bloodPalette() {
     if(bloodShadesLoaded)return bloodShades;
@@ -64,11 +68,12 @@ byte monsterSkinBloodIndex(int type,float shade) {
     const int tint=type==MT_HEAD?1:(type==MT_BRUISER||type==MT_KNIGHT)?2:0;
     return bloodTintIndex(bloodIndex(shade),tint);
 }
-std::array<float,3> bloodColor(float shade) {
+static std::array<float,3> bloodColorForTint(float shade,int tint) {
     if(bloodPalette().empty())return {0.5f,0,0};
-    const byte *rgb=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE)+bloodTintIndex(bloodIndex(shade),bloodSourceTint)*3;
+    const byte *rgb=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE)+bloodTintIndex(bloodIndex(shade),tint)*3;
     return {rgb[0]/255.0f,rgb[1]/255.0f,rgb[2]/255.0f};
 }
+std::array<float,3> bloodColor(float shade) {return bloodColorForTint(shade,bloodSourceTint);}
 Image &bloodSpriteImage(int lump,int tint,int &key) {
     key=-1-lump;
     if(!tint)return lumpImage(lump,false);
@@ -83,15 +88,25 @@ static Image &bloodImage(int variant) {
     auto found=images.find(key);if(found!=images.end())return found->second;
     int tint=variant/32;variant%=32;
     uint32_t seed=hash32(variant*7919u+17u);
-    int width=variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
-    int height=variant==bloodDrip?40:variant==bloodSmear?16:width;
+    int width=variant==bloodJet?48:variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
+    int height=variant==bloodJet?12:variant==bloodDrip?40:variant==bloodSmear?16:width;
     std::vector<byte> pixels((size_t)width*height*2,0);
     auto put=[&](int x,int y,float shade) {
         if(x<0||y<0||x>=width||y>=height)return;
         size_t i=((size_t)y*width+x)*2;
         pixels[i]=bloodTintIndex(bloodIndex(shade),tint);pixels[i+1]=255;
     };
-    if(variant==bloodDrip) {
+    if(variant==bloodJet) {
+        for(int x=0;x<width;++x) {
+            float u=(x+0.5f)/width;
+            float center=height*.5f+std::sin(u*12.f)*u;
+            float reach=(4.8f-3.1f*u)*(0.8f+0.25f*hashUnit(x,0,seed));
+            for(int y=0;y<height;++y) {
+                float coverage=std::clamp(reach-std::abs(y+0.5f-center),0.f,1.f);
+                pixels[((size_t)y*width+x)*2+1]=(byte)(255*coverage);
+            }
+        }
+    } else if(variant==bloodDrip) {
         // A run one texel wide down to a bead three wide: drawn from the
         // bottom up as it grows, so the bead leads.
         for(int y=0;y<height-4;++y)put(1,y,0.22f+0.12f*valueNoise(0,(float)y,3,seed));
@@ -154,8 +169,260 @@ struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool fl
 struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; };
 struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
+static std::vector<BloodWall> severeWallMarks;
+static std::vector<BloodPool> severePools;
 static std::unordered_map<const mobj_t*,bool> pooledCorpses;
 static unsigned bloodLevelSerial;
+namespace {
+constexpr size_t severeBurstLimit=5,severeElementLimit=25,severeGlobalLimit=250;
+constexpr float severeLifetime=.86f,jetTravel=.36f,jetLifetime=.58f,fallGravity=650.f;
+constexpr int jetSegments=3;
+constexpr int severeFragments=9;
+struct SevereJet {
+    float dx=0,dy=0,lift=0,travel=jetTravel;
+    WallHit wall{};
+    bool marked=false;
+};
+struct SevereFragment {
+    float x=0,y=0,z=0,vx=0,vy=0,vz=0;
+    float release=0,end=0,size=0;
+    int sector=-1;
+    bool deposited=false;
+    std::array<float,3> position(float t) const {
+        return {x+vx*t,y+vy*t,z+vz*t-fallGravity*t*t};
+    }
+};
+struct SevereBurst {
+    wp_severe_burst_t event{};
+    float born=-1,heading=0;
+    uint32_t seed=0;
+    int jets=0,fragments=0;
+    std::array<SevereJet,4> streams{};
+    std::array<SevereFragment,severeFragments> fallout{};
+    size_t elements() const {return size_t(jets*(jetSegments+1)+fragments);}
+};
+std::array<SevereBurst,severeBurstLimit> severeBursts{};
+unsigned severeLevel=~0u;
+const sector_t *severeSectorAt(float x,float y) {
+    return R_PointInSubsector(fixed_t(x*FRACUNIT),fixed_t(y*FRACUNIT))->sector;
+}
+void planSevereFall(SevereFragment &drop) {
+    drop.end=severeLifetime-drop.release;
+    const auto finish=drop.position(drop.end);
+    const float distance=std::hypot(finish[0]-drop.x,finish[1]-drop.y);
+    // Trace the ballistic arc in short chords. A blocked fragment cannot
+    // leave a pool in another room, or cross a solid-map obstruction.
+    const int steps=std::max(1,int(std::ceil(distance/24.f)));
+    for(int n=0;n<steps;++n) {
+        const float previous=drop.end*n/steps,next=drop.end*(n+1)/steps;
+        const auto a=drop.position(previous),b=drop.position(next);
+        const float dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2];
+        const float reach=std::hypot(dx,dy);
+        WallHit hit;
+        float stop=1.f;
+        if(reach>.01f&&firstSolidWall(a[0],a[1],a[2],dx/reach,dy/reach,dz/reach,reach,hit))
+            stop=hit.t/reach;
+        if(SV_Active())stop=std::min(stop,SV_Trace(a[0],a[1],a[2],dx,dy,dz,nullptr,nullptr));
+        const auto *sector=severeSectorAt(b[0],b[1]);
+        const float floor=floorZ(sector);
+        if(b[2]<=floor&&a[2]>floor) {
+            const float contact=(a[2]-floor)/(a[2]-b[2]);
+            if(contact<stop||stop==1.f) {
+                drop.end=previous+(next-previous)*contact;
+                const auto p=drop.position(drop.end);
+                const auto *landing=severeSectorAt(p[0],p[1]);
+                if(std::abs(p[2]-floorZ(landing))<=2.f)drop.sector=int(landing-sectors);
+                return;
+            }
+        }
+        if(stop<1.f||b[2]<=floor|| (sector->ceilingpic!=skyflatnum&&b[2]>=ceilZ(sector))) {
+            drop.end=previous+(next-previous)*stop;
+            return;
+        }
+    }
+}
+void collectSevereFall(const SevereBurst &burst,const SevereFragment &drop) {
+    if(drop.sector<0||drop.sector>=numsectors)return;
+    const size_t sector=size_t(drop.sector);
+    if(sector<sectorMist.size()&&sectorMist[sector].liquid)return;
+    const auto p=drop.position(drop.end);
+    if(std::abs(p[2]-floorZ(&sectors[sector]))>3.f)return;
+    for(auto &pool:severePools) {
+        if(pool.sector!=drop.sector||pool.tint!=burst.event.tint||
+           std::hypot(pool.x-p[0],pool.y-p[1])>14.f)continue;
+        pool.size=std::min(25.f,pool.size+2.5f);
+        return;
+    }
+    constexpr size_t poolLimit=32;
+    if(severePools.size()>=poolLimit)severePools.erase(severePools.begin());
+    severePools.push_back({p[0],p[1],burst.born+drop.release+drop.end,
+                           7.f+drop.size*2.f,burst.heading,drop.sector,burst.event.tint});
+}
+void markSevereWall(const SevereBurst &burst,int index) {
+    const auto &jet=burst.streams[index];
+    const auto &hit=jet.wall;
+    WallSpan span;
+    if(!wallSpan(lines[hit.line],hit.side,hit.section,span)||span.texture<=0||span.texture==skytexture)return;
+    const auto &origin=burst.event.impact;
+    const float x=origin.x+jet.dx*jet.travel,y=origin.y+jet.dy*jet.travel,z=origin.z+jet.lift*jet.travel;
+    const float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
+    if(len<1||z<span.bottom||z>span.top)return;
+    const float along=std::clamp(((x-span.a.x)*ex+(y-span.a.y)*ey)/len,0.f,len);
+    constexpr size_t markLimit=32;
+    if(severeWallMarks.size()>=markLimit)severeWallMarks.erase(severeWallMarks.begin());
+    const uint32_t hash=hash32(burst.seed+uint32_t(index));
+    severeWallMarks.push_back({hit.line,hit.side,hit.section,along,z-span.anchor,
+        burst.born+jet.travel,18.f+10.f*hashUnit(index,26,burst.seed),1.3f,
+        1+int(hash%bloodSplats)+32*burst.event.tint,(hash&4u)!=0,0,{},{}});
+}
+bool severeBloodOn() {
+    return settings.accelerated&&settings.severeBloodspill&&settings.bloodSpray&&
+           levelSerial==r_levelserial&&totalkills<200&&bloodOn();
+}
+void expireSevereBlood(float now) {
+    if(severeLevel!=r_levelserial||!severeBloodOn()) {
+        severeLevel=r_levelserial;
+        severeBursts={};
+        severeWallMarks.clear();
+        severePools.clear();
+        return;
+    }
+    for(auto &burst:severeBursts) {
+        if(burst.born<0)continue;
+        if(now<burst.born)burst={};
+        else if(now-burst.born>=severeLifetime) {
+            for(auto &drop:burst.fallout)
+                if(!drop.deposited)collectSevereFall(burst,drop);
+            burst={};
+        }
+    }
+}
+}
+void severeBloodBurst(const wp_severe_burst_t *event) {
+    if(!severeBloodOn())return;
+    const float now=leveltime/float(TICRATE);
+    expireSevereBlood(now);
+    auto slot=std::find_if(severeBursts.begin(),severeBursts.end(),
+                           [](const SevereBurst &burst){return burst.born<0;});
+    if(slot==severeBursts.end())return;
+    const uint32_t seed=hash32(uint32_t(event->seed)^uint32_t(event->seed>>32));
+    const int jets=2+int(seed%3);
+    const int fragments=std::min(severeFragments,int(severeElementLimit)-jets*(jetSegments+1));
+    size_t active=0;
+    for(const auto &burst:severeBursts)active+=burst.elements();
+    if(active+size_t(jets*(jetSegments+1)+fragments)>severeGlobalLimit)return;
+    // Aim outward from the struck surface, toward the side the shot came from.
+    const float heading=std::atan2(-event->directionY,-event->directionX);
+    *slot={*event,now,heading,seed,jets,fragments};
+    const auto &origin=event->impact;
+    for(int j=0;j<jets;++j) {
+        const float spread=(j-(jets-1)*.5f)*.45f;
+        const float angle=heading+spread+(hashUnit(j,1,seed)-.5f)*.16f;
+        const float speed=325.f+135.f*hashUnit(j,2,seed);
+        auto &jet=slot->streams[j];
+        const float ux=std::cos(angle),uy=std::sin(angle);
+        jet.dx=ux*speed;jet.dy=uy*speed;
+        jet.lift=12.f+55.f*hashUnit(j,3,seed);
+        if(firstSolidWall(origin.x,origin.y,origin.z,ux,uy,jet.lift/speed,speed*jet.travel,jet.wall))
+            jet.travel=jet.wall.t/speed;
+        if(SV_Active()) {
+            const float travel=jet.travel;
+            const float solid=SV_Trace(origin.x,origin.y,origin.z,jet.dx*travel,jet.dy*travel,jet.lift*travel,nullptr,nullptr);
+            if(solid<.98f) {jet.travel*=solid;jet.wall={};}
+        }
+    }
+    for(int i=0;i<fragments;++i) {
+        const auto &jet=slot->streams[i%jets];
+        auto &drop=slot->fallout[i];
+        // Later fragments separate farther along the flow, inheriting some
+        // of the stream's speed before tumbling along their own arc.
+        drop.release=.085f+.29f*hashUnit(i,9,seed);
+        const float along=std::min(drop.release,jet.travel)*(.24f+.65f*hashUnit(i,10,seed));
+        drop.x=origin.x+jet.dx*along;drop.y=origin.y+jet.dy*along;drop.z=origin.z+jet.lift*along;
+        const float direction=std::atan2(jet.dy,jet.dx)+(hashUnit(i,11,seed)-.5f)*1.16f;
+        const float speed=std::hypot(jet.dx,jet.dy)*(.20f+.35f*hashUnit(i,12,seed));
+        drop.vx=std::cos(direction)*speed;drop.vy=std::sin(direction)*speed;
+        drop.vz=jet.lift*.5f+(hashUnit(i,13,seed)-.5f)*100.f;
+        drop.size=.95f+1.65f*hashUnit(i,14,seed);
+        planSevereFall(drop);
+    }
+}
+
+static void buildSevereBlood(const Uniforms &camera) {
+    const float now=gameSeconds();
+    expireSevereBlood(now);
+    if(std::none_of(severeBursts.begin(),severeBursts.end(),
+                   [](const SevereBurst &burst){return burst.born>=0;}))return;
+    const auto &jetMask=bloodImage(bloodJet);
+    const auto &speckMask=bloodImage(bloodSpeckFirst);
+    auto &jetVertices=effectBatches[-1-(bloodKeyBase+bloodJet)];
+    auto &speckVertices=effectBatches[-1-(bloodKeyBase+bloodSpeckFirst)];
+    for(auto &burst:severeBursts) {
+        if(burst.born<0)continue;
+        const float age=now-burst.born;
+        const float pressure=1.f-std::clamp((age-.17f)/(jetLifetime-.17f),0.f,1.f);
+        const auto &origin=burst.event.impact;
+        const auto color=bloodColorForTint(.54f,burst.event.tint);
+        auto vertex=[&](const std::array<float,3> &p,const std::array<float,3> &axis,
+                        float halfWidth,float u,float v,float opacity) {
+            Vertex result={p[0]+axis[0]*halfWidth,p[1]+axis[1]*halfWidth,
+                           p[2]+axis[2]*halfWidth,u,v,opacity,0u};
+            result.red=color[0];result.green=color[1];result.blue=color[2];
+            return result;
+        };
+        for(int j=0;j<burst.jets;++j) {
+            auto &jet=burst.streams[j];
+            if(!jet.marked&&jet.wall.line>=0&&age>=jet.travel) {
+                markSevereWall(burst,j);
+                jet.marked=true;
+            }
+            const float front=std::min(age+.018f,jet.travel);
+            const float tail=std::max(0.f,(age-.27f)*.82f);
+            if(front<=tail)continue;
+            std::array<Vertex,jetSegments+1> left{},right{};
+            for(int s=0;s<=jetSegments;++s) {
+                const float u=s/float(jetSegments), t=tail+(front-tail)*u;
+                const std::array<float,3> p={origin.x+jet.dx*t,origin.y+jet.dy*t,origin.z+jet.lift*t};
+                const float vx=camera.eye[0]-p[0],vy=camera.eye[1]-p[1],vz=camera.eye[2]-p[2];
+                std::array<float,3> side={jet.dy*vz-jet.lift*vy,jet.lift*vx-jet.dx*vz,jet.dx*vy-jet.dy*vx};
+                const float length=std::hypot(side[0],side[1],side[2]);
+                for(int axis=0;axis<3;++axis)side[axis]=length>.001f?side[axis]/length:camera.right[axis];
+                const float surge=.85f+.15f*std::sin(age*47.f+j*2.1f-u*4.f);
+                const float width=(1.2f+pressure*3.8f)*(1.f-.32f*u)*surge;
+                const float opacity=pressure*(.95f-.25f*u)*surge;
+                left[s]=vertex(p,side,-width,u*jetMask.width,0,opacity);
+                right[s]=vertex(p,side,width,u*jetMask.width,float(jetMask.height),opacity);
+            }
+            for(int s=0;s<jetSegments;++s) {
+                const float split=.25f+.12f*hashUnit(j,s,burst.seed);
+                // Lose the outer sections first, then leave a gap near
+                // the wound while the last piece keeps moving outward.
+                if((s==2&&age>split+.08f)||(s==0&&age>split+.12f)||(s==1&&age>split+.20f))continue;
+                quad(jetVertices,left[s],left[s+1],right[s+1],right[s]);
+            }
+        }
+        for(int i=0;i<burst.fragments;++i) {
+            auto &drop=burst.fallout[i];
+            const float t=age-drop.release;
+            if(t<=0)continue;
+            if(t>=drop.end) {
+                if(!drop.deposited) {collectSevereFall(burst,drop);drop.deposited=true;}
+                continue;
+            }
+            const auto p=drop.position(t);
+            const std::array<float,3> right={camera.right[0],camera.right[1],camera.right[2]};
+            const float size=drop.size,elongation=1.f+.75f*std::min(1.f,t*3.f);
+            auto corner=[&](float x,float y,float u,float v) {
+                auto point=p;
+                for(int axis=0;axis<3;++axis)point[axis]+=camera.up[axis]*y*size*elongation;
+                return vertex(point,right,x*size,u,v,.86f*std::clamp((severeLifetime-age)/.16f,0.f,1.f));
+            };
+            quad(speckVertices,corner(-1,1,0,0),corner(1,1,float(speckMask.width),0),
+                 corner(1,-1,float(speckMask.width),float(speckMask.height)),
+                 corner(-1,-1,0,float(speckMask.height)));
+        }
+    }
+}
 constexpr size_t maxFloorBlood=320,maxWallBlood=160;
 static void checkBloodLevel() {
     if(bloodLevelSerial==r_levelserial)return;
@@ -276,6 +543,7 @@ static float rainWash(bool rained,float age,float &dark,float &spread) {
     return wash>=1?-1:pale*2+wash;
 }
 void buildBlood(const Uniforms &camera) {
+    buildSevereBlood(camera);
     if(!settings.blood||bloodPalette().empty())return;
     checkBloodLevel();
     float now=gameSeconds();
@@ -319,6 +587,17 @@ void buildBlood(const Uniforms &camera) {
         if(wash<0)continue;
         flatBlood(bloodPool+32*pool.tint,pool.sector,pool.x,pool.y,pool.size*grow*spread,pool.angle,1,false,false,wet,dark,wash,camera);
     }
+    severePools.erase(std::remove_if(severePools.begin(),severePools.end(),
+        [&](const BloodPool &pool){return now<pool.born||now-pool.born>45.f;}),severePools.end());
+    for(const auto &pool:severePools) {
+        const float age=now-pool.born;
+        if(camera.eye[2]<floorZ(&sectors[pool.sector]))continue;
+        const float grow=.45f+.55f*std::min(1.f,age*1.5f);
+        float wet,dark;bloodAge(age,2,6,wet,dark);
+        float spread,wash=rainWash(rainedOn(pool.sector,pool.x,pool.y),age,dark,spread);
+        if(wash>=0)flatBlood(bloodPool+32*pool.tint,pool.sector,pool.x,pool.y,
+            pool.size*grow*spread,pool.angle,1,false,false,wet,dark,wash,camera);
+    }
     bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){return now-d.born>180;}),bloodFloors.end());
     for(const auto &d:bloodFloors) {
         if(now<d.born)continue;
@@ -330,7 +609,9 @@ void buildBlood(const Uniforms &camera) {
     }
     // Wall splats stay matte; thin spray doesn't glint believably.
     bloodWalls.erase(std::remove_if(bloodWalls.begin(),bloodWalls.end(),[&](const BloodWall &d){return now-d.born>180;}),bloodWalls.end());
-    for(const auto &d:bloodWalls) {
+    severeWallMarks.erase(std::remove_if(severeWallMarks.begin(),severeWallMarks.end(),
+        [&](const BloodWall &d){return now<d.born||now-d.born>45;}),severeWallMarks.end());
+    for(const auto *wallMarks:{&bloodWalls,&severeWallMarks})for(const auto &d:*wallMarks) {
         if(now<d.born)continue;
         WallSpan span;if(!wallSpan(lines[d.line],d.side,d.section,span))continue;
         float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
@@ -374,12 +655,17 @@ void buildBlood(const Uniforms &camera) {
     buildSpray(camera);
 }
 void bloodShutdown() {
+    severeBursts={};severeLevel=~0u;
+    severeWallMarks.clear();
+    severePools.clear();
     bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();bloodShades.clear();bloodShadesLoaded=false;
     sprayShutdown();
 }
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestSevereWallMarks() {return int(doom3d::severeWallMarks.size());}
+extern "C" int I_TestSeverePools() {return int(doom3d::severePools.size());}
 extern "C" int I_TestCombatBloodWalls(int *out,int capacity) {
     int count=(int)doom3d::bloodWalls.size();
     for(int i=0;i<std::min(count,capacity);++i)out[i]=doom3d::bloodWalls[count-std::min(count,capacity)+i].line;

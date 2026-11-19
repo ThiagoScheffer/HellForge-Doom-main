@@ -209,6 +209,8 @@ void applySettings() {
     P_WeakpointConfigureEyes(settings.accelerated&&settings.eyeInjuries);
     P_CombatConfigureDot(settings.accelerated&&settings.elementalDot);
     P_HudConfigure(settings.accelerated&&settings.combatMessages);
+    P_SevereBloodTint=settings.accelerated?monsterBloodTint:nullptr;
+    P_SevereBloodBurst=settings.accelerated?severeBloodBurst:nullptr;
     P_CombatConfigure(settings.accelerated&&settings.elementalCombatFX,settings.accelerated&&settings.advancedMonsterReactions);
     P_CombatVisual=settings.accelerated?combatElemental:nullptr;
     P_WeakpointConfigureFeeding(settings.accelerated&&settings.monsterFeeding);
@@ -283,6 +285,7 @@ void sceneShutdown() {
     P_WeakpointConfigureFeeding(0);
     P_WeakpointConfigureEyes(0);
     P_CombatConfigureDot(0);P_HudConfigure(0);P_CombatConfigure(0,0);P_CombatVisual=nullptr;
+    P_SevereBloodTint=nullptr;P_SevereBloodBurst=nullptr;
     P_WeakpointLocate=nullptr;P_WeakpointTargetAllowed=nullptr;P_WeakpointConfigure(0,0,0);
     P_CriticalBegin=nullptr;P_CriticalThing=nullptr;p_critical_trace=0;
     prepareCriticalSurface=nullptr;criticalVoxelModel=nullptr;
