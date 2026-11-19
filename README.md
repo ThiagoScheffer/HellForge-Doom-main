@@ -295,6 +295,7 @@ full campaign or performance certification.
 · [Survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)
 · [Build and test instructions](BUILDING.md)
 · [Documentation index](docs/README.md)
+· [Bug and debugging log](Log-Status.md)
 
 ## Download and play
 
@@ -466,6 +467,20 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
 
 ## Project status
 
+Recent source updates for this build family:
+
+- **Sunder 2308 MAP01 shutdown.** Closing the game during a background lighting
+  update now cancels the remaining work. The in-game probe went from at least
+  88 seconds before timeout to a clean exit in 0.17 seconds. [HF-001](Log-Status.md#hf-001--sunder-2308-waits-on-exit)
+- **Pinky feeding and retreat.** Pinky faces the direction of its actual step
+  and turns toward food before biting. The Windows engine and launcher were
+  rebuilt. The in-game visual check is still open. [HF-003](Log-Status.md#hf-003--pinky-faces-the-player-while-moving-away)
+- **DOOM II atmosphere profiles.** Episode Atmosphere includes Starport
+  duststorms (SKY1), Burning City smoke and ash (SKY2), and Blood Hell rain and
+  fog (SKY3). Burning City uses the Fluid smoke masks for its puffs. The F4 menu
+  offers manual profiles and a mode that follows the active sky, including on
+  custom WADs when selected. [Atmosphere settings](duct-tape-doom-main/platform/settings_panel.cpp)
+
 **README baseline: build 2026.11.15.6.** The sky, soft sun-shaft, HUD bloom,
 monster skin-damage, decoration-ambience and Corpse Decomposition M1/M2 updates
 above were developed as incremental source patches for this build family.
@@ -475,11 +490,10 @@ repair. These reports establish the acceptance of the tested changes, **not**
 comprehensive PWAD compatibility, per-effect GPU-memory savings or FPS results.
 No new release/build identifier is asserted solely because a patch package exists.
 
-The latest survival/retaliation changes have a rebuilt native engine and focused
-rule/real-core verification; their launcher package was **not** rebuilt in that
-update. Rebuild the launcher to include them. Visual steering, crowded-map
-performance and animation presentation still need in-game review; see the
-[dated survival report](docs/changes/SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md).
+The survival and retaliation update has focused rules and real engine checks.
+See the dated report for its original build coverage and remaining in-game
+checks for visual steering, crowded-map performance, and animation.
+[Survival and retaliation report](docs/changes/SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md)
 
 Build 2026.11.14.1 was an earlier integration milestone. New performance
 controls remain optional. Idle-search reuse is restricted to classic geometry;

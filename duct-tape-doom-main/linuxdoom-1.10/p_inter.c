@@ -55,13 +55,10 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #endif
 #include "p_inter.h"
 #include "d_deh.h"
-#include "../platform/toasty_chance.h"
 
 unsigned p_toasty_serial;
 int p_toasty_tic;
 int p_toasty_preview;
-static doom_toasty_state toasty_state={0x746f6173u};
-extern unsigned r_levelserial;
 
 
 #define BONUSADD	6
@@ -776,10 +773,6 @@ P_KillMobj
     {
 	P_PhotoEvent(16,target);
 	P_SetMobjState (target, target->info->xdeathstate);
-        if(!target->player && (target->info->flags&MF_COUNTKILL) && doom_toasty_gib(&toasty_state,r_levelserial)) {
-            p_toasty_tic=leveltime;
-            ++p_toasty_serial;
-        }
     }
     else
 	P_SetMobjState (target, target->info->deathstate);
