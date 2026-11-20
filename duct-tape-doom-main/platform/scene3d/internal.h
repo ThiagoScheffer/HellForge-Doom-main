@@ -24,6 +24,7 @@
 extern "C" {
 #include "doomdef.h"
 #include "../../linuxdoom-1.10/p_weakpoints.h"
+#include "../../linuxdoom-1.10/p_acid.h"
 #include "doomstat.h"
 #include "r_state.h"
 #ifdef DOOM_BOOM_SECTORS
@@ -479,6 +480,8 @@ bool addBrokenFlat(std::vector<Vertex> &out,int leaf,int sector,bool ceiling,con
 
 // blood.cpp
 void bloodShutdown();
+// acid.cpp
+void buildAcid(const Uniforms &camera);
 // Opaque blood-sprite palette indices, ordered from dark to bright.
 const std::vector<byte> &bloodPalette();
 // Blood shown at all: switched on, in a level, the WAD's blood sprite found.

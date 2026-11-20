@@ -172,6 +172,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("hanging_fragments","Delay before fragments fall",&s.hangingFragments,"Unsupported geometry briefly hangs before collapsing. Off makes it fall immediately. Requires Local chain collapses.",[](const Settings &d){return d.breakableWalls&&d.chainCollapses;}),
                 choice("collapse_size","Largest detached fragment",&s.collapseSize,{"Small","Medium","Large"},{4,12,24},"Maximum connected field nodes in a removable fragment. Larger pieces cost more to check. Anchored structures remain intact.",[](const Settings &d){return d.breakableWalls&&d.chainCollapses;})}},
             {"Combat",{
+                check("corrosive_barrels","Corrosive Barrels",&s.corrosiveBarrels,
+                    "Damaged barrels seep green acid; ruptures splash nearby actors and leave persistent corrosive pools. Monsters and players take 5 HP every 17 tics, with two seconds of residual exposure; Radiation Suits protect the player. Single-player only; disabled in multiplayer and demos. Acid decals require the accelerated 3D renderer. Off preserves classic barrel behavior."),
                 check("critical_parts","Critical parts",&s.criticalParts,
                     "Player bullets hit visible human enemy sprite pixels; headshots deal 2x damage. "
                     "Zombiemen, shotgun guys, chaingunners and Wolfenstein SS only. "

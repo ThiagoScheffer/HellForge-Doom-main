@@ -45,6 +45,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #include "am_map.h"
 
 #include "p_local.h"
+#include "p_acid.h"
 #include "p_encounter.h"
 #include "r_state.h"
 
@@ -958,19 +959,21 @@ P_DamageMobj
     previousBurn=P_CombatVisualKind(target);
     healthBefore=target->health;
     target->health -= damage;	
-    P_WeakpointRecordHealthLoss(target,source,healthBefore,target->health);
+    if (target->type==MT_BARREL && damage>0)
+        P_AcidBarrelDamaged(target,source,healthBefore,target->health);
+    if(!P_AcidDamageActive())P_WeakpointRecordHealthLoss(target,source,healthBefore,target->health);
     P_SessionDamage(target,source,healthBefore,damage);
     if (target->health <= 0)
     {
 	P_NoticeKill(source,target,inflictor);
 	P_KillMobj (source, target);
-        P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
+        if(!P_AcidDamageActive())P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
 	return;
     }
 
-    P_CombatConfirmed(target,source,elementKind,damage,-1);
+    if(!P_AcidDamageActive())P_CombatConfirmed(target,source,elementKind,damage,-1);
     if(p_wp_bleed_damage||p_wp_dot_damage)return;
-    if(damage>0){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}
+    if(damage>0&&!P_AcidDamageActive()){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}
 
     if ( (P_Random () < target->info->painchance)
 	 && !(target->flags&MF_SKULLFLY) )

@@ -1,4 +1,5 @@
 #include "p_weakpoints.h"
+#include "p_acid.h"
 #include "p_arena.h"
 #include "m_arcade.h"
 #include "p_notices.h"
@@ -482,6 +483,7 @@ static int sessionDemoLoad=0;
 void G_DoLoadLevel (void)
 {
     int             i;
+    P_AcidClear(); /* Acid pools and exposure never cross a map boundary. */
 
     // Set the sky map.
     // First thing, we have a dummy sky texture name,
@@ -1332,6 +1334,7 @@ void G_DoLoadGame (void)
     P_UnArchiveSpecials ();
     length-=(int)ED_Load(savebuffer,(size_t)length);
     length-=(int)P_BoomLoad(savebuffer,(size_t)length);
+    length-=(int)P_AcidLoad(savebuffer,(size_t)length);
     length-=(int)P_WeakpointLoad(savebuffer,(size_t)length);
 
     if (*save_p != 0x1d)
@@ -1385,7 +1388,7 @@ void G_DoSaveGame (void)
 	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot);
     description = savedescription;
 
-    size_t capacity = ED_Save(NULL)+P_BoomSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
+    size_t capacity = ED_Save(NULL)+P_BoomSave(NULL)+P_AcidSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
     save_p = savebuffer = calloc(1, capacity);
     if (!savebuffer) I_Error("Could not allocate savegame buffer");
 
@@ -1418,6 +1421,7 @@ void G_DoSaveGame (void)
     save_p += SV_Save(save_p);
     save_p += P_ArenaSave(save_p);
     save_p += P_WeakpointSave(save_p);
+    save_p += P_AcidSave(save_p);
     save_p += P_BoomSave(save_p);
     save_p += ED_Save(save_p);
     length = save_p - savebuffer;
@@ -1531,6 +1535,7 @@ G_InitNew
   int		map )
 {
     int             i;
+    P_AcidClear();
     Arcade_NewGame();
     P_NoticeNewGame();
 

@@ -125,6 +125,7 @@ void main() {
     // color has darkened while drying, and the rain on it (blood.cpp
     // rainWash): its pale step (0-4) times two plus how much is washed away.
     bool blood=(vMode&MODE_BLOOD)!=0u;
+    bool acid=!sprite&&(vMode&MODE_ACID)!=0u;
     uint bakeFlags=uint(c.flashlightTint.w);
     // FEATURE_GLOSSY_SCREENS: monitor glass in computer textures. Its curved CRT dome
     // shapes light highlights and an edge sheen, and like a weak lens it
@@ -185,6 +186,16 @@ void main() {
     if(!sprite&&(vMode&MODE_ROCK)!=0u)color.rgb*=unpackUnorm4x8(vLampTint).rgb;
     // Animated flats and walls crossfade toward their next frame.
     if(blend>0.0) color=mix(color,surfaceTexture(nextImage,uv,texelPixel,lod),blend);
+    if(acid) {
+        // Procedural green slick: the decal's alpha mask supplies the ragged
+        // edge while world-space ripples keep the liquid from reading as paint.
+        float ripple=0.5+0.5*sin(vUV.x*0.19+sin(vUV.y*0.13+vWorld.x*0.035)*1.7+
+                                 sin((vUV.x+vUV.y)*0.055+vWorld.y*0.025)*1.2);
+        float vein=smoothstep(0.76,0.96,ripple);
+        color.rgb=mix(vec3(0.008,0.105,0.004),vec3(0.10,0.72,0.018),0.22+0.56*ripple);
+        color.rgb+=vec3(0.012,0.075,0.004)*vein;
+        color.rgb*=mix(0.35,1.0,saturate(vTint.r));
+    }
     // Big pools: with distance the liquid's artwork fades into detail on a
     // steady average color, its contrast kept down to cycleMean.a, so far
     // water reads as one body instead of a tiled floor and no longer pulses
@@ -296,7 +307,7 @@ void main() {
         emission=eyeGlow(image,uv);
         illumination=max(illumination,vec3(emission*1.2));
     }
-    if(!sprite&&c.materials.x>0.0&&c.effects.z==0.0) {
+    if(!sprite&&!acid&&c.materials.x>0.0&&c.effects.z==0.0) {
         // The blue channel carries a mask, independent of palette/coverage.
         vec2 at=c.effects.x==2.0?sharpen(uv,texelPixel+c.texFilter.x):uv;
         emission=maskAt(image,at,c.effects.x>0.0);
@@ -310,6 +321,11 @@ void main() {
         emission*=unpackUnorm4x8(vLampTint).a;
         emission=max(emission,edgeGlow);
         illumination=max(illumination,vec3(emission));
+    }
+    if(acid&&c.effects.z==0.0) {
+        float shimmer=0.5+0.5*sin(c.fog.w*3.2+vWorld.x*0.08+vWorld.y*0.06);
+        illumination=max(illumination,vec3(0.025,0.11+0.045*shimmer,0.012));
+        specular+=vec3(0.008,0.035,0.004)*shimmer;
     }
     // FEATURE_DAMP_SHORES: damp walls and banks above liquids (shoreWet), darker and
     // a little stained by the liquid; glowing texels stay dry.

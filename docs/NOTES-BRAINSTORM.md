@@ -1,10 +1,28 @@
 add doc:
 
+I'll retrieve only the files needed for each subsystem.
+No GitHub connection, authorization or commits. We'll work locally with copies of source files and produce a ZIP for you to apply manually.
+
+
+Inspect their complete relevant implementations and dependencies.
+
+
+
+Develop changes against the actual HELLFORGE source.
+
+
+
+Prepare a ZIP containing modified/new files and application instructions.
+
+
+
+Include test results and anything requiring your Windows runtime verification.
+
 We will be working on engine tweak and some ideas - to brainstorn and build codex prompt later.
 this main build is a separated and modifed version of the https://github.com/tuin-boop/Tuin-Doom-Enhanced - and https://github.com/robongrui/derp
 so if need to understand the base source can be used as.
 
-use DOOM: HELLFORGE as the primary project and Tuin-Doom-Enhanced as the upstream reference whenever we need to investigate inherited engine behavior, rendering systems, or original implementations. DERP is the more updated modern version, can be used if needed.
+use DOOM: HELLFORGE https://github.com/ThiagoScheffer/HellForge-Doom-main as the primary project and Tuin-Doom-Enhanced as the upstream reference whenever we need to investigate inherited engine behavior, rendering systems, or original implementations. DERP is the more updated modern version, can be used if needed.
 
 It establishes the following working context:
 - Current build: 2026.11.15.6
@@ -29,26 +47,78 @@ Ready for the first engine tweak or idea.
 
 --------------------------------------------------------
 
-FX FEATURES:
+Understood. I'll use this as the working technical baseline for all upcoming DOOM: HELLFORGE engine discussions.
 
-- alternative small imp fireball - new better fx - same as rocket smooth fire fx -> rocked fire effect = soft glow
-- same to Cacodemon, we create a new soft glow mixed blue/red that will create a deep color energy small ball from it.
-- mancubus also a new long fireball Fx that feels hot like plasma and fire. when it hit ground it looks like melted hot glass.
-- arachnotron also a new plasma small energy ball green. 
--- all done--
+I've also received and reviewed the uploaded `README.md`. It establishes the documented feature set and build baseline for **HELLFORGE 2026.11.15.6**.&#x20;
 
-
-first: we do have - Wound holes - that damage and make monsters with a permanent hole like.
-
-- can we use the same idea, for add blood fx on monsters? the more they get hurt we can visually see blood and scratches on the body - ignore head part-&#x20;
-- we can focus only on more monsters like: Barons,imps,mancubus,archville,cyberdemon,pinkdemons. - these have a visual body that can expose as skin.
-- This will be a separated option that can display bloodfx on skin
+README(10).md
 
 
 
+## **Project hierarchy and source authority**
 
+We'll follow this order:
 
-BUG:
-- modern hud background shadow not at same position of the current text or main headface - fixed
+PRIMARY — source of truth
 
-- 4000 monster map - not running anymore. - fixed
+**DOOM: HELLFORGE**
+
+Your independently modified project. All implementation decisions, compatibility requirements and existing behavior must be evaluated against this codebase.
+
+[HELLFORGE GitHub repository](https://github.com/ThiagoScheffer/HellForge-Doom-main?utm_source=chatgpt.com)
+
+UPSTREAM REFERENCE
+
+**Tuin-Doom-Enhanced**
+
+Reference for inherited engine behavior, original implementations, rendering architecture and historical modifications.
+
+[Tuin-Doom-Enhanced repository](https://github.com/tuin-boop/Tuin-Doom-Enhanced?utm_source=chatgpt.com)
+
+SECONDARY REFERENCE
+
+**DERP**
+
+Reference for more modern renderer implementations, architectural improvements, optimizations and alternative technical approaches.
+
+[DERP repository](https://github.com/robongrui/derp?utm_source=chatgpt.com)
+
+**Important:** HELLFORGE is always authoritative. An upstream implementation is not evidence that the same implementation exists in your fork.
+
+## **How we'll evaluate each idea**
+
+I'll use the following engineering approach:
+
+| Stage                      | Objective                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| 1. Brainstorm              | Explore possibilities, benefits, limitations and alternatives.                      |
+| 2. Technical investigation | Identify actual source files, functions, dependencies and existing behavior.        |
+| 3. Architecture            | Design the implementation and account for compatibility, performance and lifecycle. |
+| 4. Risk assessment         | Identify regressions, edge cases, save/load implications and rendering conflicts.   |
+| 5. Codex prompt            | Produce a precise implementation task with guardrails and acceptance criteria.      |
+
+## **Engineering principles**
+
+These will be our standing priorities:
+
+1. **Preserve classic DOOM/Boom compatibility.** Avoid breaking existing WADs and established game mechanics.
+2. **Protect existing HELLFORGE features.** New functionality must coexist with destruction, lighting, sprite combat, survival AI, weapons and HUD systems.
+3. **Performance matters.** Avoid unnecessary allocations, repeated expensive calculations, unbounded caches and excessive per-tick processing.
+4. **Save/load integrity.** New persistent gameplay state must have a deliberate serialization strategy.
+5. **Rendering correctness.** Respect SDL3/Vulkan architecture, resource lifetimes, cache invalidation and shader dependencies.
+6. **Minimal invasive modifications.** Prefer targeted changes over unnecessarily rewriting established engine systems.
+7. **Verify the actual source.** Never assume that an upstream function, structure or subsystem is identical in HELLFORGE.
+
+I'll also distinguish three evidence levels throughout our discussions:
+
+- **Verified:** Confirmed directly in the HELLFORGE source.
+- **Documented:** Described in project documentation but not yet independently verified in source.
+- **Hypothesis:** A proposed technical explanation or implementation that still needs investigation.
+
+**We're ready.**
+
+We can explore ambitious engine changes, rendering improvements, monster behavior, AI, physics, environmental effects, optimization, gameplay systems or entirely new mechanics.
+
+No need to rush into implementation. We'll challenge ideas, examine alternatives and refine the technical design before writing a Codex prompt.
+
+**HELLFORGE is the project. The upstream repositories are references, not restrictions.**

@@ -41,6 +41,7 @@ extern int st_helmet_style;
 int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 #include "../audio/sound_options.h"
 #include "../../linuxdoom-1.10/p_local.h"
+#include "../../linuxdoom-1.10/p_acid.h"
 #include "../../linuxdoom-1.10/p_swarm.h"
 }
 #include "../settings_panel.h"
@@ -153,6 +154,7 @@ void applySettings() {
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
+    P_AcidConfigure(settings.corrosiveBarrels);
     p_breakablewalls=settings.breakableWalls&&!netgame;
     p_throughwalls=settings.throughWalls;
     p_breachdoors=settings.breakableWalls&&settings.breachDoors;
@@ -250,7 +252,7 @@ void applySettings() {
 static void earlyDirectorSettings(){
  static bool loaded=false;if(loaded)return;loaded=true;
  int arg=M_CheckParm((char*)"-graphics");if(arg&&arg+1<myargc)graphicsConfig=myargv[arg+1];
- loadSettings();ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
+ loadSettings();P_AcidConfigure(settings.corrosiveBarrels);ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
 }
 struct DirectorStartupSettings {DirectorStartupSettings(){ED_StartupSettings=earlyDirectorSettings;}};
 static DirectorStartupSettings directorStartupSettings;
@@ -260,6 +262,7 @@ void sceneInit(SDL_Window *window) {
     if(config&&config+1<myargc)graphicsConfig=myargv[config+1];
     loadSettings();if(M_CheckParm((char*)"-classic"))settings.accelerated=0;
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
+    P_AcidConfigure(settings.corrosiveBarrels);
     if(M_CheckParm((char*)"-ambushsightreuse"))settings.ambushSightReuse=1;
     P_SetAmbushSightReuse(settings.ambushSightReuse);
     if(M_CheckParm((char*)"-rendercheck"))settings.accelerated=1;
@@ -691,6 +694,7 @@ FrameView prepareFrame(int w,int h) {
                 doom_episode::bloodHellHaze(bloodHellMistNow):
                 std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
         buildMist(camera);
+        buildAcid(camera); // Acid decals are added after map-light bakes, before masks are assigned.
         buildShafts(camera);
         buildRings(camera);
         updateExposure(camera);

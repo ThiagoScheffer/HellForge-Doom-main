@@ -90,6 +90,7 @@ set(DOOM_SOURCES
     linuxdoom-1.10/p_pspr.c
     linuxdoom-1.10/p_encounter.cpp
     linuxdoom-1.10/p_weakpoints.cpp
+    linuxdoom-1.10/p_acid.cpp
     linuxdoom-1.10/p_saveg.c
     linuxdoom-1.10/p_setup.c
     linuxdoom-1.10/p_sight.c
@@ -352,6 +353,7 @@ if(DOOM_BUILD_SDL)
         platform/scene3d/bake_sun.cpp
         platform/scene3d/glass_light.cpp
         platform/scene3d/blood.cpp
+        platform/scene3d/acid.cpp
         platform/scene3d/decoration_ambience.cpp
         platform/scene3d/spray.cpp
         platform/scene3d/body_motion.cpp
