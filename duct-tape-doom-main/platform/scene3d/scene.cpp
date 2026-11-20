@@ -694,7 +694,7 @@ FrameView prepareFrame(int w,int h) {
                 doom_episode::bloodHellHaze(bloodHellMistNow):
                 std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
         buildMist(camera);
-        buildAcid(camera); // Acid decals are added after map-light bakes, before masks are assigned.
+        buildAcid(camera); // Append to the depth-tested effect pass after its batches are cleared.
         buildShafts(camera);
         buildRings(camera);
         updateExposure(camera);

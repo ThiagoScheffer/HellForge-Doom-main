@@ -825,12 +825,13 @@ P_KillMobj
 // Source can be NULL for slime, barrel explosions
 // and other environmental stuff.
 //
-void
-P_DamageMobj
+static void
+damageMobj
 ( mobj_t*	target,
   mobj_t*	inflictor,
   mobj_t*	source,
-  int 		damage )
+  int 		damage,
+  boolean acid )
 {
     unsigned	ang;
     int		saved;
@@ -844,21 +845,21 @@ P_DamageMobj
     if ( !(target->flags & MF_SHOOTABLE) )
 	return;	// shouldn't happen...
 		
-    if(R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)R_DamageHit(target,inflictor,source,damage);
+    if(!acid&&R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)R_DamageHit(target,inflictor,source,damage);
 
     if (target->health <= 0)
 	return;
 
-    damage=P_WeakpointAdjustDamage(target,inflictor,source,damage);
+    if(!acid)damage=P_WeakpointAdjustDamage(target,inflictor,source,damage);
 
-    if(!p_wp_dot_damage)P_AggressiveContact(target,inflictor,source);
+    if(!acid&&!p_wp_dot_damage)P_AggressiveContact(target,inflictor,source);
 
     if ( target->flags & MF_SKULLFLY )
     {
 	target->momx = target->momy = target->momz = 0;
     }
 
-    if (R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)
+    if (!acid&&R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)
 	R_DamageHit (target, inflictor, source, damage);
 	
     player = target->player;
@@ -951,29 +952,29 @@ P_DamageMobj
     }
     
     // do the damage	
-    if(!p_wp_bleed_damage&&!p_wp_dot_damage)P_AggressiveDamage(target,inflictor,source,damage);
-    if(damage>0)Arcade_Impact(inflictor,source,target);
+    if(!acid&&!p_wp_bleed_damage&&!p_wp_dot_damage)P_AggressiveDamage(target,inflictor,source,damage);
+    if(!acid&&damage>0)Arcade_Impact(inflictor,source,target);
     Arcade_Damage(source,target,damage);
     if(damage>0)P_PhotoEvent(2,target);
-    elementKind=P_CombatDamageKind(inflictor,source);
-    previousBurn=P_CombatVisualKind(target);
+    elementKind=acid?0:P_CombatDamageKind(inflictor,source);
+    previousBurn=acid?0:P_CombatVisualKind(target);
     healthBefore=target->health;
     target->health -= damage;	
-    if (target->type==MT_BARREL && damage>0)
+    if (!acid && target->type==MT_BARREL && damage>0)
         P_AcidBarrelDamaged(target,source,healthBefore,target->health);
-    if(!P_AcidDamageActive())P_WeakpointRecordHealthLoss(target,source,healthBefore,target->health);
+    if(!acid)P_WeakpointRecordHealthLoss(target,source,healthBefore,target->health);
     P_SessionDamage(target,source,healthBefore,damage);
     if (target->health <= 0)
     {
 	P_NoticeKill(source,target,inflictor);
 	P_KillMobj (source, target);
-        if(!P_AcidDamageActive())P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
+        if(!acid)P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
 	return;
     }
 
-    if(!P_AcidDamageActive())P_CombatConfirmed(target,source,elementKind,damage,-1);
+    if(!acid)P_CombatConfirmed(target,source,elementKind,damage,-1);
     if(p_wp_bleed_damage||p_wp_dot_damage)return;
-    if(damage>0&&!P_AcidDamageActive()){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}
+    if(damage>0&&!acid){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}
 
     if ( (P_Random () < target->info->painchance)
 	 && !(target->flags&MF_SKULLFLY) )
@@ -998,4 +999,14 @@ P_DamageMobj
 	    P_SetMobjState (target, target->info->seestate);
     }
 			
+}
+
+void P_DamageMobj(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage)
+{
+    damageMobj(target,inflictor,source,damage,false);
+}
+
+void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage)
+{
+    damageMobj(target,NULL,source,damage,true);
 }

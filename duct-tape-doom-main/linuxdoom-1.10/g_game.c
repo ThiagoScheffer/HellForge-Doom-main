@@ -1334,7 +1334,11 @@ void G_DoLoadGame (void)
     P_UnArchiveSpecials ();
     length-=(int)ED_Load(savebuffer,(size_t)length);
     length-=(int)P_BoomLoad(savebuffer,(size_t)length);
-    length-=(int)P_AcidLoad(savebuffer,(size_t)length);
+    /* AC01 can consume only data after the archived vanilla game. */
+    if(length>save_p-savebuffer)
+        length-=(int)P_AcidLoad(save_p,(size_t)(length-(save_p-savebuffer)));
+    else
+        P_AcidClear();
     length-=(int)P_WeakpointLoad(savebuffer,(size_t)length);
 
     if (*save_p != 0x1d)

@@ -53,7 +53,7 @@
   <option key="chain_collapses" title="Local chain collapses" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="hanging_fragments" title="Delay before fragments fall" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="collapse_size" title="Largest detached fragment" category="Destruction" kind="choice" choices="4=Small|12=Medium|24=Large" />
-  <option key="corrosive_barrels" title="Corrosive Barrels" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="corrosive_barrels" title="Corrosive Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="critical_parts" title="Critical parts" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="enhanced_weak_points" title="Enhanced Monster Weak Points" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="monster_weapon_vulnerabilities" title="Monster Weapon Vulnerabilities" category="Destruction" kind="check" choices="0=Off|1=On" />

@@ -40,7 +40,6 @@ struct Exposure {
 };
 
 bool enabled = false;
-int damageDepth = 0;
 int lastPoolSweep = -1;
 std::vector<AcidPool> pools;
 std::unordered_map<mobj_t*, Exposure> exposures;
@@ -103,19 +102,41 @@ void addPool(fixed_t x, fixed_t y, fixed_t radius, int sector, int kind,
 
 bool touches(const mobj_t *actor, const AcidPool &pool) {
     if (!actor || !actor->subsector || !actor->subsector->sector) return false;
-    if ((int)(actor->subsector->sector - sectors) != pool.sector) return false;
-    /* Only actors at floor level are exposed; a monster jumping over a pool
-       or standing on a different-height sector is not hit through the air. */
-    if ((int64_t)actor->z > (int64_t)actor->floorz + 4LL * FRACUNIT) return false;
+    const fixed_t floor = sectors[pool.sector].floorheight;
+    if (std::llabs(int64_t(actor->z)-floor)>4LL*FRACUNIT ||
+        int64_t(actor->z)>int64_t(actor->floorz)+4LL*FRACUNIT) return false;
     const double dx = ((double)actor->x - (double)pool.x) / FRACUNIT;
     const double dy = ((double)actor->y - (double)pool.y) / FRACUNIT;
-    const double reach = ((double)actor->radius + (double)pool.radius) / FRACUNIT;
-    return dx * dx + dy * dy <= reach * reach;
+    const double radius = actor->radius/double(FRACUNIT);
+    const double reach=radius+pool.radius/double(FRACUNIT);
+    const double distanceSquared=dx*dx+dy*dy;
+    if(distanceSquared>reach*reach)return false;
+    auto *origin=R_PointInSubsector(pool.x,pool.y);
+    if(!origin||origin->sector!=&sectors[pool.sector])return false;
+    if(actor->subsector->sector!=origin->sector) {
+        // The pool remains clipped to its sector. An adjacent actor can
+        // touch it only if its footprint overlaps that sector at this height.
+        if(actor->subsector->sector->floorheight!=floor||distanceSquared==0)return false;
+        const double edge=std::min(radius/std::sqrt(distanceSquared),1.0);
+        if(sectorAt(fixed_t(actor->x-dx*edge*FRACUNIT),
+                    fixed_t(actor->y-dy*edge*FRACUNIT),-1)!=pool.sector)return false;
+    }
+    if(!distanceSquared)return true;
+    mobj_t from{},to{};
+    from.x=pool.x;from.y=pool.y;
+    from.z=fixed_t(std::min(int64_t(floor)+FRACUNIT,int64_t(INT32_MAX)-2*FRACUNIT));
+    from.height=FRACUNIT;from.subsector=origin;
+    to=from;to.x=actor->x;to.y=actor->y;to.subsector=actor->subsector;
+    return P_CheckSight(&from,&to)!=0;
 }
 
 bool validVictim(const mobj_t *actor) {
-    if (!actor || actor->health <= 0 || (actor->flags & MF_CORPSE)) return false;
-    return actor->player || (actor->flags & MF_COUNTKILL) != 0;
+    if (!actor || actor->health <= 0 || !(actor->flags & MF_SHOOTABLE) ||
+        (actor->flags & (MF_CORPSE|MF_MISSILE)) || actor->type==MT_BARREL ||
+        actor->type==MT_KEEN) return false; // The hanging switch actor is not hostile.
+    if(actor->player||actor->type==MT_SKULL||(actor->flags&MF_COUNTKILL))return true;
+    return actor->info&&actor->info->seestate!=S_NULL&&
+           (actor->info->meleestate!=S_NULL||actor->info->missilestate!=S_NULL);
 }
 
 bool radiationProtected(const mobj_t *actor) {
@@ -138,10 +159,10 @@ void splashExposure(mobj_t *barrel, mobj_t *source) {
         const double dz = (actorMid - barrelMid) / FRACUNIT;
         const double reach = 64.0 + (double)actor->radius / FRACUNIT;
         if (dx*dx + dy*dy + dz*dz > reach*reach || !P_CheckSight(barrel, actor)) continue;
-        Exposure &exposure = exposures[actor];
+        auto &exposure = exposures[actor];
+        if(!exposure.nextDamage||exposure.until<leveltime)exposure.nextDamage = leveltime + acidDamageInterval;
         exposure.until = leveltime + acidAfterExposure;
-        exposure.nextDamage = leveltime + acidDamageInterval;
-        if (source) exposure.source = source;
+        exposure.source = source;
     }
 }
 
@@ -159,6 +180,12 @@ void spillOffset(mobj_t *barrel, double angle, fixed_t distance, fixed_t radius,
     const int64_t floorDelta = (int64_t)sectors[sector].floorheight -
                                (int64_t)barrel->floorz;
     if (std::llabs(floorDelta) > 16LL * FRACUNIT) return;
+    mobj_t landing{};
+    landing.x=x;landing.y=y;
+    landing.z=fixed_t(std::min(int64_t(sectors[sector].floorheight)+FRACUNIT,int64_t(INT32_MAX)-2*FRACUNIT));
+    landing.height=FRACUNIT;landing.subsector=R_PointInSubsector(x,y);
+    if(!landing.subsector||landing.subsector->sector!=&sectors[sector]||
+       !P_CheckSight(barrel,&landing))return;
     addPool(x, y, radius, sector, P_ACID_POOL_SPILL, nullptr, source, spillLifetime);
 }
 } // namespace
@@ -166,7 +193,6 @@ void spillOffset(mobj_t *barrel, double angle, fixed_t distance, fixed_t radius,
 extern "C" int P_AcidEnabled(void) {
     return enabled && !netgame && !demoplayback && !demorecording;
 }
-extern "C" int P_AcidDamageActive(void) { return damageDepth > 0; }
 
 extern "C" void P_AcidConfigure(int value) {
     const bool next = value != 0;
@@ -179,7 +205,6 @@ extern "C" void P_AcidClear(void) {
     exposures.clear();
     rupturedBarrels.clear();
     lastPoolSweep = -1;
-    damageDepth = 0;
 }
 
 extern "C" void P_AcidBarrelDamaged(mobj_t *barrel, mobj_t *source, int healthBefore, int healthAfter) {
@@ -216,12 +241,12 @@ extern "C" void P_AcidBarrelExplode(mobj_t *barrel, mobj_t *source) {
     const int sector = (int)(barrel->subsector->sector - sectors);
     if (sector < 0 || sector >= numsectors) return;
     if (!source) source = barrel->target;
-    splashExposure(barrel, source);
-
     auto leak = std::find_if(pools.begin(), pools.end(),
         [barrel](const AcidPool &pool) {
             return pool.kind == P_ACID_POOL_LEAK && pool.owner == barrel;
         });
+    if(!source&&leak!=pools.end())source=leak->source;
+    splashExposure(barrel,source);
     if (leak != pools.end()) {
         leak->radius = 48 * FRACUNIT;
         leak->born = leveltime;
@@ -251,7 +276,10 @@ extern "C" void P_AcidTick(mobj_t *actor) {
     if (actor->type == MT_BARREL && actor->health > 0) {
         if (leveltime % 35 == 0) {
             for (AcidPool &pool : pools) {
-                if (pool.kind == P_ACID_POOL_LEAK && pool.owner == actor) {
+                if (pool.kind == P_ACID_POOL_LEAK && pool.owner == actor &&
+                    actor->subsector&&actor->subsector->sector) {
+                    pool.x=actor->x;pool.y=actor->y;
+                    pool.sector=int(actor->subsector->sector-sectors);
                     pool.expires = leveltime + leakLifetime;
                     pool.radius = std::min(pool.radius + FRACUNIT, 30 * FRACUNIT);
                 }
@@ -260,6 +288,7 @@ extern "C" void P_AcidTick(mobj_t *actor) {
         return;
     }
 
+    if(pools.empty()&&exposures.empty())return;
     if (!validVictim(actor) || radiationProtected(actor)) {
         exposures.erase(actor);
         return;
@@ -282,7 +311,7 @@ extern "C" void P_AcidTick(mobj_t *actor) {
             it = exposures.emplace(actor, state).first;
         } else {
             it->second.until = leveltime + acidAfterExposure;
-            if (contact->source) it->second.source = contact->source;
+            it->second.source = contact->source;
         }
     }
     if (it == exposures.end()) return;
@@ -294,10 +323,8 @@ extern "C" void P_AcidTick(mobj_t *actor) {
 
     mobj_t *source = it->second.source;
     it->second.nextDamage = leveltime + acidDamageInterval;
-    ++damageDepth;
-    P_DamageMobj(actor, nullptr, source, acidDamage);
-    --damageDepth;
-    if (actor->health <= 0) exposures.erase(actor);
+    P_DamageMobjAcid(actor,source,acidDamage);
+    if (actor->thinker.function.acv==(actionf_v)(-1)||actor->health<=0)exposures.erase(actor);
 }
 
 extern "C" void P_AcidForget(mobj_t *actor) {
@@ -305,7 +332,7 @@ extern "C" void P_AcidForget(mobj_t *actor) {
     exposures.erase(actor);
     rupturedBarrels.erase(actor);
     for (AcidPool &pool : pools) {
-        if (pool.owner == actor) pool.owner = nullptr;
+        if (pool.owner == actor) {pool.owner = nullptr;pool.kind=P_ACID_POOL_SPILL;}
         if (pool.source == actor) pool.source = nullptr;
     }
     for (auto &entry : exposures)
@@ -320,29 +347,25 @@ extern "C" int P_AcidPoolCount(void) {
 extern "C" int P_AcidPoolGet(int index, p_acid_pool_view_t *out) {
     if (!out || index < 0 || !P_AcidEnabled()) return 0;
     sweepPools();
-    int visible = 0;
-    for (const AcidPool &pool : pools) {
-        if (pool.expires <= leveltime) continue;
-        if (visible++ != index) continue;
-        out->x = pool.x;
-        out->y = pool.y;
-        out->radius = pool.radius;
-        out->sector = pool.sector;
-        out->age = std::max(0, leveltime - pool.born);
-        out->remaining = std::max(0, pool.expires - leveltime);
-        out->kind = pool.kind;
-        out->hasOwner = pool.owner != nullptr;
-        if (pool.owner) {
-            out->ownerX = pool.owner->x;
-            out->ownerY = pool.owner->y;
-            out->ownerZ = pool.owner->z;
-            out->ownerHeight = pool.owner->height;
-        } else {
-            out->ownerX = out->ownerY = out->ownerZ = out->ownerHeight = 0;
-        }
-        return 1;
+    if(size_t(index)>=pools.size())return 0;
+    const AcidPool &pool=pools[size_t(index)];
+    out->x = pool.x;
+    out->y = pool.y;
+    out->radius = pool.radius;
+    out->sector = pool.sector;
+    out->age = std::max(0, leveltime - pool.born);
+    out->remaining = std::max(0, pool.expires - leveltime);
+    out->kind = pool.kind;
+    out->hasOwner = pool.owner && pool.owner->health>0;
+    if (out->hasOwner) {
+        out->ownerX = pool.owner->x;
+        out->ownerY = pool.owner->y;
+        out->ownerZ = pool.owner->z;
+        out->ownerHeight = pool.owner->height;
+    } else {
+        out->ownerX = out->ownerY = out->ownerZ = out->ownerHeight = 0;
     }
-    return 0;
+    return 1;
 }
 
 extern "C" size_t P_AcidSave(unsigned char *destination) {
@@ -382,13 +405,14 @@ extern "C" size_t P_AcidSave(unsigned char *destination) {
     set32(out, poolCountOffset, poolCount);
 
     uint32_t exposureCount = 0;
-    for (const auto &entry : exposures) {
-        if (!entry.first || entry.first->health <= 0 ||
-            entry.second.until < leveltime) continue;
-        put32(out, actorId(ids, entry.first));
-        put32(out, (uint32_t)std::clamp(entry.second.until - leveltime, 0, acidAfterExposure));
-        put32(out, (uint32_t)std::clamp(entry.second.nextDamage - leveltime, 0, acidDamageInterval));
-        put32(out, actorId(ids, entry.second.source));
+    for (size_t i=0;i<actors.size();++i) {
+        auto it=exposures.find(actors[i]);
+        if(it==exposures.end())continue;
+        const auto &state=it->second;
+        put32(out, uint32_t(i+1));
+        put32(out, (uint32_t)std::clamp(state.until - leveltime, 0, acidAfterExposure));
+        put32(out, (uint32_t)std::clamp(state.nextDamage - leveltime, 0, acidDamageInterval));
+        put32(out, actorId(ids, state.source));
         ++exposureCount;
     }
     set32(out, exposureCountOffset, exposureCount);
@@ -431,14 +455,18 @@ extern "C" size_t P_AcidLoad(const unsigned char *data, size_t length) {
         pool.sector = (int)get32(record + 12);
         const uint32_t remaining = std::min(get32(record + 16), (uint32_t)spillLifetime);
         const uint32_t age = std::min(get32(record + 20), (uint32_t)spillLifetime);
-        pool.kind = get32(record + 24) == P_ACID_POOL_LEAK ? P_ACID_POOL_LEAK : P_ACID_POOL_SPILL;
+        const uint32_t kind=get32(record+24);
+        if(kind!=P_ACID_POOL_LEAK&&kind!=P_ACID_POOL_SPILL)continue;
+        pool.kind=int(kind);
         pool.owner = actorRef(get32(record + 28));
         pool.source = actorRef(get32(record + 32));
         if (!remaining || pool.radius <= 0 || pool.radius > 96 * FRACUNIT ||
-            pool.sector < 0 || pool.sector >= numsectors)
+            pool.sector < 0 || pool.sector >= numsectors ||
+            sectorAt(pool.x,pool.y,-1)!=pool.sector)
             continue;
-        if (pool.kind == P_ACID_POOL_LEAK && (!pool.owner || pool.owner->type != MT_BARREL))
-            pool.kind = P_ACID_POOL_SPILL;
+        if (pool.kind == P_ACID_POOL_LEAK &&
+            (!pool.owner || pool.owner->type != MT_BARREL || pool.owner->health<=0))continue;
+        if(pool.kind==P_ACID_POOL_SPILL)pool.owner=nullptr;
         pool.born = leveltime - (int)age;
         pool.expires = leveltime + (int)remaining;
         pools.push_back(pool);
@@ -448,7 +476,7 @@ extern "C" size_t P_AcidLoad(const unsigned char *data, size_t length) {
         mobj_t *actor = actorRef(get32(record));
         const uint32_t until = std::min(get32(record + 4), (uint32_t)acidAfterExposure);
         const uint32_t next = std::min(get32(record + 8), (uint32_t)acidDamageInterval);
-        if (!actor || actor->health <= 0 || !until) continue;
+        if (!validVictim(actor)||radiationProtected(actor))continue;
         Exposure state;
         state.until = leveltime + (int)until;
         state.nextDamage = leveltime + (int)next;

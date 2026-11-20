@@ -30,7 +30,6 @@
 #define MODE_DEAD_GLOW       8192u // a shot-out lamp or screen: its glowing texels go dark (shot_lights.cpp)
 #define MODE_VOXEL           16384u // sprite lighting on native voxel mesh faces
 #define MODE_LAMP_OFF        16384u // temporarily unpowered, without physical glass damage
-#define MODE_ACID             4096u // non-sprite acid decal; shares the sprite-only glowing-eyes bit
 // Bits from here up carry sector+1 for map-space lighting; 0 means none.
 #define MODE_SECTOR_SHIFT    15
 #define MODE_WOUND           8192u // sprites only: blood paint from the WAD palette, preserving coverage and normals

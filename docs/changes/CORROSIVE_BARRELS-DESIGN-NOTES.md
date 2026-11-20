@@ -1,5 +1,7 @@
 # Corrosive Barrels — implementation notes
 
+These notes describe the original v1 design. The [v2 implementation report](CORROSIVE_BARRELS_FINAL_REPORT.md) records the current damage, save and rendering paths.
+
 ## Runtime behavior
 
 - A non-lethal hit on an `MT_BARREL` creates or expands a leak pool below the barrel.

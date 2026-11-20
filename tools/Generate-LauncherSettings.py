@@ -33,7 +33,7 @@ for m in re.finditer(r'\b(check|choice|slider|key)\(\s*"',s):
     category=next((g for g in prior[-1].groups() if g),'Advanced') if prior else 'Advanced'
     if category=='Effects': category='Destruction'
     if key in {'encounter_random_seed','encounter_max_local_threat','encounter_max_spawn_attempts','encounter_debug'}: category='ED Advanced'
-    if key.startswith('wp_') or any(x in key for x in ['critical','bleed','frenzy','feeding','weakpoint','eye_injur','elemental','monster_skin']): category='Combat'
+    if key=='corrosive_barrels' or key.startswith('wp_') or any(x in key for x in ['critical','bleed','frenzy','feeding','weakpoint','eye_injur','elemental','monster_skin']): category='Combat'
     attrs=dict(key=key,title=' '.join(strings(a[1])),category=category,kind=m.group(1))
     if m.group(1)=='check': attrs['choices']='0=Off|1=On'
     if m.group(1)=='choice' and len(a)>5:

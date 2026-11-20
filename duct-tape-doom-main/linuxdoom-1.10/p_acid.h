@@ -24,7 +24,7 @@ typedef struct {
 
 void P_AcidConfigure(int enabled);
 int P_AcidEnabled(void);
-int P_AcidDamageActive(void);
+void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage);
 void P_AcidBarrelDamaged(mobj_t *barrel, mobj_t *source, int healthBefore, int healthAfter);
 void P_AcidBarrelExplode(mobj_t *barrel, mobj_t *source);
 void P_AcidTick(mobj_t *actor);

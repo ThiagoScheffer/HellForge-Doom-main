@@ -1,5 +1,7 @@
 # Corrosive Barrels v1 — test report
 
+This is the historical report for the partial source snapshot. See the [v2 Windows test report](CORROSIVE_BARRELS_TEST_REPORT.md) for current results.
+
 ## Automated/static checks
 
 **Passed**

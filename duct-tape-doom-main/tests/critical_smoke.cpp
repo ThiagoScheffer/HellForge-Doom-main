@@ -8,6 +8,7 @@
 #include "../platform/settings_panel.h"
 extern "C" {
 #include "p_local.h"
+#include "p_acid.h"
 #include "d_main.h"
 #include "i_system.h"
 #include "m_argv.h"
@@ -21,6 +22,7 @@ static std::string output;
 static bool visual=false;
 static bool visualEnhanced=false;
 static bool visualSevere=false;
+static bool acidMode=false,visualAcid=false;
 static bool visualFeedback=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
@@ -238,6 +240,7 @@ static void visualFrame() {
 #include "elemental2_visual.inc"
 #include "eye_injury_visual.inc"
 #include "e1m8_regression.inc"
+#include "acid_smoke.inc"
 extern "C" int I_TestSevereWallMarks();
 extern "C" int I_TestSeverePools();
 static void severeVisualFrame() {
@@ -323,6 +326,8 @@ static void severeVisualFrame() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(acidMode){acidIntegration();I_Quit();return;}
+    if(visualAcid){acidVisualFrame();return;}
     if(e1m8Mode){e1m8Frame();return;}
     if(!settingsCase.empty()){settingsPersistenceFrame();return;}
     if(eyeMode){eyeIntegration();I_Quit();return;}
@@ -342,13 +347,17 @@ int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     visualSevere=argc==5&&!std::strcmp(argv[4],"--visual-severe");
+    const bool solidAcid=argc==5&&!std::strcmp(argv[4],"--acid-solid");
+    acidMode=solidAcid||(argc==5&&!std::strcmp(argv[4],"--acid"));
+    solidMode=solidMode||solidAcid;
+    visualAcid=argc==5&&!std::strcmp(argv[4],"--visual-acid");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
     visualEyes=argc==5&&!std::strcmp(argv[4],"--visual-eye-injuries");
     visualElemental=argc==5&&!std::strcmp(argv[4],"--visual-elemental");
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualAcid||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -364,12 +373,17 @@ int main(int argc,char **argv) {
         std::fputs("enhanced_weak_points 1\ncombat_event_messages 1\nsevere_critical_bloodspill 1\nblood 1\nblood_spray 1\n",f);
         std::fclose(f);
     }
+    if(acidMode||visualAcid) {
+        f=std::fopen(graphics.c_str(),"a");if(!f)return 2;
+        std::fputs("corrosive_barrels 1\nblood 0\nblood_spray 0\n",f);
+        std::fclose(f);
+    }
     }
     f=std::fopen(config.c_str(),"w");if(!f)return 2;std::fputs("show_messages 0\n",f);std::fclose(f);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
-        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":visual?"1":"4"};
+        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode)?"1":"4"};
     if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
