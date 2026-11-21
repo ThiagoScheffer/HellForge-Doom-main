@@ -552,6 +552,9 @@ void drawVileFire(const mobj_t &fire,const mobj_t &vile,const mobj_t &victim,
                   const Uniforms &camera,float fraction);
 void drawVileHands(mobj_t &vile,const mobj_t *victim,const Uniforms &camera,float fraction);
 void drawVileBursts(const Uniforms &camera,float fraction);
+void resetRevenantSouls();
+void revenantDeath(const mobj_t *revenant);
+void drawRevenantSouls(const Uniforms &camera,float fraction);
 void watchBodies();
 void bodyMotionShutdown();
 bool bodyPose(const mobj_t &thing,float fraction,BodyPose &pose);

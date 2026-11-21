@@ -773,6 +773,9 @@ P_KillMobj
   mobj_t*	target )
 {
     mobj_t*	mo;
+
+    if (R_RevenantDeath && target->type == MT_UNDEAD && !(target->flags & MF_CORPSE))
+        R_RevenantDeath(target);
 	
     ED_Died(target);
     P_WeakpointDied(target);

@@ -72,6 +72,7 @@ void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z);
 void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
 void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
 void (*R_VileHurt)(const mobj_t *vile);
+void (*R_RevenantDeath)(const mobj_t *revenant);
 void (*R_VileImpact)(fixed_t x,fixed_t y,fixed_t z);
 boolean (*R_PlaneImpact)(sector_t *sector, boolean ceiling, fixed_t x, fixed_t y, fixed_t z);
 void (*R_ShotPassed)(line_t *line, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy);

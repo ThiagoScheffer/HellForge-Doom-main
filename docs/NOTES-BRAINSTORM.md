@@ -189,7 +189,7 @@ teleports - from gate1 to  gate4 textures - give a moving and pulsating effect a
  now need to check how to improve and make the other type of barrels on fire - to be also explode and spread oil and fire around it.
  
  
- need fix : arch vile when bleeding or severe damaged it will run away or hunt to steal life from other monster - bug is the moviment direction is wrong - sometimes its even walking backwards. fix moviment direction to match where it want to go.
+ need fix : arch vile when bleeding or severe damaged it will run away or hunt to steal life from other monster - bug is the moviment direction is wrong - sometimes its even walking backwards. fix moviment direction to match where it want to go. check cacodemon also for direction bug.
  
  
  new options for balance game: avoid monster with common weapons to drop tis weapon, but make it drop ammo when it dies. idea is to make the level weapons worth discovery.
@@ -200,6 +200,18 @@ teleports - from gate1 to  gate4 textures - give a moving and pulsating effect a
 
 
 need to fix the critical blood FX - still looks horrible like a blood jet. it should be some detail that make it easy to see its critical but not looks like a 3 jet spread.
+
+
+tree on fire from Inferno: use the same fire effect but bigger as the falling fireball temporary ground fires - repalce current sprit look bad one with the ground fires  effect which is good to use.
+
+well kill a revenants - a ghou soul effect like will leave the body
+
+
+better Hud: improve the speedrun to allow add secrets,itens, health,armor,ammo - to allow a simple customized hud and clean screen.
+user can create 2 dif columms that can be separated on screen sides.
+so map related info can be adjusted on left side and player info can be on right, or use the already one row mode with player can add what he want to be showed.
+option to disable all other huds, and use only new Speedrun hud. so it save memory and keep it clean.
+
 
 
 ----------

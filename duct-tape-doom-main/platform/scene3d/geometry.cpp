@@ -1246,6 +1246,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         }
         if (vileFx)
             drawVileBursts(camera, fraction);
+        if (settings.revenantSoulRelease)
+            drawRevenantSouls(camera, fraction);
         timing(7);
         profileAdd(profile.frame.spritesMs, spritesStart);
         std::sort(casters.begin(), casters.end(), [](const Caster &a, const Caster &b)
