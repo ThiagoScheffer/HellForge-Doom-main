@@ -1,0 +1,117 @@
+Oku MAP01 quick performance audit -- 22 November 2026 (New Zealand)
+
+Result: slow rendering is reproducible with monsters removed. CPU frame
+preparation is the first optimization target. This is an audit, not a
+performance fix or a completed interactive movement/stutter investigation.
+
+Configuration and evidence
+--------------------------
+Used the current release build and a copy of the saved normal-launcher profile:
+  %APPDATA%/Local Games/DOOM Hellforge/graphics.cfg
+Profile SHA256: 1803AB7997BFCD019A61382D2E59B662E838D348E3DA1AC131CEEE1DF9BF6A2A
+Saved profile remained unchanged. Launcher selected DOOM2.WAD and Oku, plus
+Sound Bulb and the Kolibri music WAD. Included the launcher's Fluid packs,
+-solidmaps and -uzmovement. Set -nomonsters. Retained fullscreen, FOV 90,
+50% rendering scale and all saved graphics options. Actual display 3072x1920;
+internal render resolution 1536x960; FIFO presentation.
+
+Oku SHA256: C7DFCDBBAF33B5F7B13C8405A0B36C562C3C7D9E7F63AD48743C999DCCB85061
+The test-references copy and launcher-selected external WAD match.
+
+Artifacts: build/oku-quick-audit/
+  run.ps1: reproducible coarse audit command using a fresh profile copy.
+  run-info.txt, hashes.txt: arguments, version and input hashes.
+  baseline/report.txt, baseline/views.csv: 16 positions, four directions each.
+  baseline/MAP01.png: large-area view, HUD 18 FPS and KILLS 0/0.
+  stdout.log, renderer.log: gameplay and renderer stage traces.
+  repeat/: independent fixed-position confirmation and no-monster assertion.
+
+The harness pauses simulation during view sampling, disables sound/music, and
+waits for a GPU fence each frame. Its CPU/GPU measurements are separate, and
+the HUD/frame intervals include profiling overhead. This is not a measurement
+of ordinary pipelined play FPS. A coarse 8192-unit grid is not an exhaustive
+map sweep. No claim is made that moving-sector stutter has been isolated.
+
+Measured baseline
+-----------------
+Map: 24,023 lines, 3,797 sectors, 4,197 remaining things (items, decorations,
+voodoo/player actors, etc.). Removing monsters does not remove these things.
+All 64 sampled views exceeded the 16.67 ms budget for 60 FPS.
+
+                                 Median across views
+CPU frame preparation/submission          36.44 ms
+GPU fence time                           11.07 ms
+Scene preparation                        33.06 ms
+Geometry stage                           25.04 ms
+Actor presentation/lighting                6.04 ms (inside geometry)
+Light-mask stage                          0.87 ms
+World triangles                        122,036
+
+Slowest confirmed view, median of five frames:
+  Position (4102,-11945), sector 2160, east.
+  CPU 39.1 ms; GPU 12.3 ms; scene 36.1 ms; geometry 25.6 ms.
+  122,140 world triangles; zero submitted dynamic lights at this view.
+  Removing bloom: GPU -0.6 / CPU -0.4 ms.
+  Removing fog: GPU +0.5 / CPU +2.3 ms.
+  Removing mist/sunbeams: GPU -0.9 / CPU +1.1 ms.
+Small differences are noise in this short diagnostic. These effects do not
+explain the large CPU cost at this view. Other views can behave differently.
+
+Fixed-position repeat passed the explicit zero-monster assertion. It measured
+CPU 42.3 ms versus GPU 13.0 ms, with 4,197 remaining things. All five lighting
+cache stages hit; renderer loading fell to about 2.65 s (runner load 3.0 s),
+but steady rendering remained CPU-bound. The harness still labels its four
+samples east/north/west/south when -at forces the same east-facing camera;
+these repeat rows are repeated samples, not four different directions.
+
+Across the sweep, geometry trace averages include flats 4.60 ms, walls 3.89 ms,
+surface lights 1.67 ms and actors 6.31 ms. These nested timings must not be
+added to the inclusive CPU/geometry totals.
+
+Do not take the automatic report's "mostly finding wall blockers" wording
+literally: lightsMs combines light collection and light-word packing. The
+slowest view has zero final dynamic lights; the counter does not establish
+that blocker traversal itself caused the cost.
+
+Startup and stutter
+-------------------
+An isolated empty diagnostic cache caused a cold lighting bake: about 16.3 s
+inside renderer loading, including about 9.7 s for 97,347 static lights
+(94,426 window panels), plus about 2 s each for bounce and sky/occlusion.
+This does not mean the user's existing cache misses every launch.
+It also does not account for all process startup time.
+
+After startup, sampled paused relight stages were small (median 0.035 ms,
+maximum 0.073 ms in the selected middle-of-sweep trace). This does not test
+active moving-sector relighting. The screenshot frame incurred an approximately
+890 ms capture/readback interval; exclude that diagnostic artifact from claims
+about gameplay stutter. View changes and effect isolation also invalidate a
+continuous-gameplay p95/p99 interpretation of this sweep.
+
+Prioritized follow-up
+---------------------
+1. Investigate caching static floor/wall batches and limiting rebuilds to changed
+   sectors. geometry.cpp currently visits all subsectors and map lines. Triangle
+   submission stays around 121k-123k despite different positions/directions.
+   Measure a conservative visibility/cache change at these same coordinates.
+2. Profile remaining item/decoration presentation before expanding monster
+   optimizations. The actor stage still costs about 6 ms without monsters;
+   geometry.cpp scans sector thing lists and prepares lighting/presentation.
+3. Split light collection/packing and geometry timing further. Retain this
+   profile's bake-only lighting when testing; don't assume the reported lightsMs
+   is pure dynamic-light blocker work.
+4. Record a normal-rendering traversal through the exact reported area and
+   moving-sector triggers to attribute intermittent stalls. Keep cold startup,
+   screenshot readback, view-sweep measurements and live gameplay separate.
+
+Diagnostic runner repair
+------------------------
+The original perf runner called G_DeferedInitNew. G_DoNewGame clears nomonsters,
+so its reload spawned monsters even with -nomonsters on the command line.
+Stopped and excluded that run; retained logs under invalid-monster-reload/.
+The test-only runner now uses G_InitNew for map changes and asserts both the
+nomonsters flag and zero monster actors when -nomonsters was requested.
+The native game/launcher and production performance behavior were not changed.
+Rebuilt doom-perf-smoke successfully; completed the corrected coarse sweep.
+The final fixed-position repeat completed with the new invariant enabled.
+Both diagnostic game processes exited; no audit process remains running.

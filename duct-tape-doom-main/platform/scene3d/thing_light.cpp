@@ -37,7 +37,14 @@ static StaticSample traceStatic(float x,float y,float z,int sector,const BakeMap
 // lights again. Private, bounded caches avoid locks between frame workers.
 // Only the raw sample is retained; flicker, bounce and sector dimming stay live.
 static uint64_t sampleRevision=1;
-void invalidateStaticSamples() {++sampleRevision;}
+static std::atomic<uint64_t> sampleHits{0},sampleMisses{0},sampleTraceNs{0},sampleInvalidations{0};
+static bool lightingDiagnostic(){static const bool enabled=M_CheckParm((char*)"-profilelighting")!=0;return enabled;}
+void invalidateStaticSamples() {++sampleRevision;if(lightingDiagnostic())++sampleInvalidations;}
+void reportStaticSamples() {
+    if(lightingDiagnostic())fprintf(stderr,"Lighting samples tic %d: hits %llu misses %llu invalidations %llu trace_cpu %.3f ms grid %d\n",gametic,
+        (unsigned long long)sampleHits.exchange(0),(unsigned long long)sampleMisses.exchange(0),
+        (unsigned long long)sampleInvalidations.exchange(0),sampleTraceNs.exchange(0)/1e6,gridLightActive());
+}
 static StaticSample cachedStatic(float x,float y,float z,int sector) {
     struct Entry {uint64_t revision=0;std::array<uint32_t,4> key{};StaticSample sample;};
     thread_local std::vector<Entry> cache(4096);
@@ -45,11 +52,14 @@ static StaticSample cachedStatic(float x,float y,float z,int sector) {
     uint32_t hash=2166136261u;for(uint32_t word:key){hash^=word;hash*=16777619u;hash^=hash>>16;}
     auto &entry=cache[hash&(cache.size()-1)];
     if(entry.revision!=sampleRevision||entry.key!=key) {
+        uint64_t begin=lightingDiagnostic()?SDL_GetTicksNS():0;
         entry.sample=traceStatic(x,y,z,sector);entry.key=key;entry.revision=sampleRevision;
+        if(lightingDiagnostic()){++sampleMisses;sampleTraceNs+=SDL_GetTicksNS()-begin;}
     } else if(M_CheckParm((char*)"-verifylightthreads")) {
         auto fresh=traceStatic(x,y,z,sector);
         if(memcmp(&fresh,&entry.sample,sizeof(fresh)))I_Error((char*)"Cached static sprite sample differs from tracing");
     }
+    else if(lightingDiagnostic())++sampleHits;
     return entry.sample;
 }
 // Grid lighting (settings.gridSpriteLight): a StaticSample every 32 units,

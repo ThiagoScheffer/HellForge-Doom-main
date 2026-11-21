@@ -603,6 +603,11 @@ FrameView prepareFrame(int w,int h) {
         // mouselook turns that look (I_Render3DLook) so its aiming agrees.
         float gameLook;
         float look=netgame&&!lan_session?0:Game_LookPitch(&gameLook)?gameLook:demoplayback&&!director_demo?0:pitch;
+        // Diagnostic camera override; no gameplay pitch or aiming changes.
+        if(profile.enabled) {
+            int p=M_CheckParm((char*)"-profilepitch");
+            if(p&&p+1<myargc)look=std::clamp((float)atof(myargv[p+1]),-89.f,89.f)*(float)doomPi/180;
+        }
         tourpitch=look;freeaim=(!netgame||lan_session)&&settings.look&&(!demoplayback||director_demo);
         camera.right[0]=sin(yaw);camera.right[1]=-cos(yaw);
         camera.forward[0]=cos(yaw)*cos(look);camera.forward[1]=sin(yaw)*cos(look);camera.forward[2]=sin(look);

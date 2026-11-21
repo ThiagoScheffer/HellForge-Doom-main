@@ -62,6 +62,8 @@ typedef struct {
     double gpuMs;     /* From submission until the GPU finished. */
     double prepareMs; /* Scene build, including level-load bakes. */
     double geometryMs, lightsMs, spritesMs, masksMs;
+      double worldGeometryMs; /* World build before actors/effects, includes visibility setup. */
+      int worldSubsectors,worldRejectedSubsectors,worldLines,worldRejectedLines,worldTriangles;
     int lights, blockers, triangles, litTriangles, lightTriangles, reflection;
     I_Render3DLightProfile light[64];
 } I_Render3DFrameProfile;

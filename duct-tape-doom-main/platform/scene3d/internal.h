@@ -170,6 +170,7 @@ float liquidDetailFloor(int pic);
 extern std::vector<std::vector<Point>> floors;
 extern std::vector<std::vector<int>> sectorFloors;
 extern std::vector<std::array<float,4>> floorBounds;
+extern std::vector<std::array<float,4>> wallBounds;
 extern std::vector<SectorMist> sectorMist;
 extern float fogReferenceHeight;
 extern std::vector<SeamCell> seamCells;

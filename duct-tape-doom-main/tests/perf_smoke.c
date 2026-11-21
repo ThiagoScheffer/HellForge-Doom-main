@@ -43,6 +43,7 @@ extern void D_Display(void);
 #include "m_argv.h"
 #include "m_bbox.h"
 #include "p_local.h"
+#include "p_spec.h"
 #include "r_main.h"
 #include "r_sky.h"
 #include "r_state.h"
@@ -88,6 +89,10 @@ static const char *out_dir = "perf-report";
 static const char *map_filter;
 static unsigned shot_skip;
 static int combat_seconds,combat_realtime,combat_cells;
+static int view_shots,live_seconds,live_door;
+static line_t *live_door_line;
+static fixed_t live_x,live_y;
+static double live_distance;
 static uint64_t combat_start;
 static double combat_times[120000],combat_intervals[120000];static int combat_count;
 static uint64_t combat_previous;
@@ -131,7 +136,7 @@ extern int key_fire;
 static FILE *report, *csv;
 static summary_t summaries[MAX_MAPS];
 
-static enum { START, LOADING, SETTLING, SAMPLING, CONFIRMING, ABLATING, SHOT_PREP, SHOT, COMBAT, DOOR, FINISHED } state = START;
+static enum { START, LOADING, SETTLING, SAMPLING, CONFIRMING, ABLATING, SHOT_PREP, SHOT, COMBAT, LIVE, DOOR, FINISHED } state = START;
 static unsigned seen_serial, level_serial;
 static uint64_t request_time;
 static double load_ms;
@@ -148,6 +153,11 @@ static double timed_gpu[TIMED_FRAMES], timed_cpu[TIMED_FRAMES];
 static int timed_frame = -1;
 static int worst;             /* Index into samples. */
 static char shot_path[512];
+static void view_shot(int spot,int yaw) {
+    if(!view_shots)return;
+    snprintf(shot_path,sizeof(shot_path),"%s/view-%03d-%d.png",out_dir,spot,yaw);
+    I_Render3DScreenshotTo(shot_path);
+}
 
 static void out(const char *format, ...)
 {
@@ -300,7 +310,9 @@ static void request_map(void)
     fflush(stdout);
     level_serial = r_levelserial;
     request_time = SDL_GetTicksNS();
-    G_DeferedInitNew(skill_given ? gameskill : sk_hard, map->episode, map->map);
+    /* G_DoNewGame clears nomonsters. Initialize directly so diagnostic map
+       changes retain the command-line simulation flags. */
+    G_InitNew(skill_given ? gameskill : sk_hard, map->episode, map->map);
     state = LOADING;
 }
 
@@ -312,11 +324,12 @@ static void record(int spot, int yaw, const I_Render3DFrameProfile *frame)
     for (int i = 0; i < frame->lights; ++i)
         if (frame->light[i].blockers > most) most = frame->light[i].blockers;
     const spot_t *s = &spots[spot];
-    fprintf(csv, "%s,%d,%d,%d,%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d\n",
+    fprintf(csv, "%s,%d,%d,%d,%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%.3f,%d,%d,%d,%d,%d\n",
             maps[map_index].name, spot, s->x >> FRACBITS, s->y >> FRACBITS, s->sector, facing_names[yaw],
             cost(frame), frame->cpuMs, frame->gpuMs, frame->prepareMs, frame->geometryMs, frame->lightsMs,
             frame->spritesMs, frame->masksMs, frame->lights, frame->blockers, most, frame->triangles,
-            frame->litTriangles, frame->lightTriangles, frame->reflection);
+            frame->litTriangles, frame->lightTriangles, frame->reflection,frame->worldGeometryMs,
+            frame->worldSubsectors,frame->worldRejectedSubsectors,frame->worldLines,frame->worldRejectedLines,frame->worldTriangles);
 }
 
 /* The slowest view of each of the slowest spots, by their single frames. */
@@ -579,7 +592,7 @@ void I_TestFrame(void)
         if (!report || !csv) I_Error("Performance smoke: cannot write to %s", out_dir);
         fputs("map,spot,x,y,sector,facing,frame_ms,cpu_ms,gpu_ms,scene_ms,geometry_ms,light_blockers_ms,"
               "sprite_light_ms,light_masks_ms,lights,blockers,most_light_blockers,triangles,lit_triangles,"
-              "light_triangles,reflection\n", csv);
+              "light_triangles,reflection,world_geometry_ms,subsectors,rejected_subsectors,linedefs,rejected_linedefs,world_triangles\n", csv);
         {
             int count = 0, w = 0, h = 0, fullscreen = 0;
             SDL_Window **windows = SDL_GetWindows(&count);
@@ -619,6 +632,15 @@ void I_TestFrame(void)
     case LOADING:
         if (gameaction != ga_nothing || gamestate != GS_LEVEL || r_levelserial == level_serial || !players[consoleplayer].mo)
             return;
+        if (M_CheckParm("-nomonsters"))
+        {
+            int monsters = 0;
+            for (int i = 0; i < numsectors; ++i)
+                for (mobj_t *thing = sectors[i].thinglist; thing; thing = thing->snext)
+                    if ((thing->flags & MF_COUNTKILL) || thing->type == MT_SKULL) ++monsters;
+            if (!nomonsters || monsters) I_Error("Performance smoke: -nomonsters lost during map load (%d monsters)", monsters);
+            out("No-monster validation: flag retained, zero monster actors.\n");
+        }
         paused = true; /* G_InitNew unpauses. */
         settle_frames = 0;
         state = SETTLING;
@@ -725,6 +747,31 @@ void I_TestFrame(void)
             }
             find_spots();
             if (!spot_count) { worst = 0; report_map(); goto next_map; }
+            if(live_seconds) {
+                extern int key_up,key_left;
+                place(&spots[0],0);players[consoleplayer].cheats|=CF_GODMODE;
+                if(live_door) {
+                    for(int i=0;i<numlines;++i)if(lines[i].special==1&&lines[i].frontsector&&lines[i].backsector) {
+                        live_door_line=&lines[i];double dx=lines[i].dx/(double)FRACUNIT,dy=lines[i].dy/(double)FRACUNIT,len=hypot(dx,dy);
+                        if(len<1)continue;
+                        spot_t door={(lines[i].v1->x/2+lines[i].v2->x/2)+(fixed_t)(dy/len*48*FRACUNIT),
+                            (lines[i].v1->y/2+lines[i].v2->y/2)-(fixed_t)(dx/len*48*FRACUNIT),0};
+                        place(&door,0);players[consoleplayer].mo->angle=(angle_t)(int64_t)(atan2(dx,-dy)*4294967296.0/(2*3.141592653589793));
+                        break;
+                    }
+                    if(!live_door_line)I_Error("No manual door for live test");
+                    door_heights=calloc((size_t)numsectors*2,sizeof(fixed_t));door_changes=0;door_action=0;
+                    if(!door_heights)I_Error("No door height storage");
+                    for(int i=0;i<numsectors;++i){door_heights[i*2]=sectors[i].floorheight;door_heights[i*2+1]=sectors[i].ceilingheight;}
+                }
+                live_x=players[consoleplayer].mo->x;live_y=players[consoleplayer].mo->y;live_distance=0;
+                fclose(csv);char path[512];snprintf(path,sizeof(path),"%s/live.csv",out_dir);csv=fopen(path,"w");
+                if(!csv)I_Error("Cannot write live timings");
+                fputs("seconds,interval_ms,world_geometry_ms,world_triangles,rejected_subsectors,rejected_linedefs,x,y\n",csv);
+                paused=false;combat_start=SDL_GetTicksNS();combat_count=0;combat_previous=0;
+                if(!live_door){event_t move={ev_keydown,key_up,0,0},turn={ev_keydown,key_left,0,0};D_PostEvent(&move);D_PostEvent(&turn);}
+                state=LIVE;I_Render3DProfile(0,0);fprintf(stderr,"LIGHTING LIVE BEGIN tic %d\n",gametic);return;
+            }
             if(combat_seconds) {
                 place(&spots[0],0);
                 player_t *p=&players[consoleplayer];p->cheats|=CF_GODMODE;
@@ -760,6 +807,7 @@ void I_TestFrame(void)
             if ((view / 5) % 20 == 0) { printf("  %d of %d spots\r", view / 5, spot_count); fflush(stdout); }
         }
         place(&spots[view / 5], view % 5 ? view % 5 - 1 : 0);
+        if(view%5)view_shot(view/5,view%5-1);
         return;
     case CONFIRMING:
     {
@@ -829,6 +877,36 @@ void I_TestFrame(void)
         }
         return;
     }
+    case LIVE: {
+        uint64_t now=SDL_GetTicksNS();double elapsed=(now-combat_start)/1e9;
+        mobj_t *p=players[consoleplayer].mo;
+        if(live_door) {
+            if(!door_action&&elapsed>=2){EV_VerticalDoor(live_door_line,p);++door_action;}
+            for(int i=0;i<numsectors;++i){
+                if(door_heights[i*2]!=sectors[i].floorheight||door_heights[i*2+1]!=sectors[i].ceilingheight)++door_changes;
+                door_heights[i*2]=sectors[i].floorheight;door_heights[i*2+1]=sectors[i].ceilingheight;
+            }
+        }
+        live_distance+=hypot((double)p->x-live_x,(double)p->y-live_y)/FRACUNIT;live_x=p->x;live_y=p->y;
+        if(elapsed>1&&combat_previous&&combat_count<120000) {
+            double interval=(now-combat_previous)/1e6;combat_intervals[combat_count++]=interval;
+            fprintf(csv,"%.6f,%.3f,%.3f,%d,%d,%d,%.2f,%.2f\n",elapsed,interval,frame->worldGeometryMs,frame->worldTriangles,
+                frame->worldRejectedSubsectors,frame->worldRejectedLines,p->x/(double)FRACUNIT,p->y/(double)FRACUNIT);
+        }
+        combat_previous=now;
+        if(elapsed>=live_seconds+1) {
+            fprintf(stderr,"LIGHTING LIVE END tic %d\n",gametic);
+            double total=0;for(int i=0;i<combat_count;++i)total+=combat_intervals[i];
+            qsort(combat_intervals,combat_count,sizeof(double),compare_doubles);
+            if(!combat_count)I_Error("No live frames");
+            out("Normal gameplay: %d frames, %.2f FPS, median %.3f p95 %.3f p99 %.3f max %.3f ms; travelled %.1f units.\n",
+                combat_count,1000*combat_count/total,combat_intervals[combat_count/2],combat_intervals[combat_count*95/100],
+                combat_intervals[combat_count*99/100],combat_intervals[combat_count-1],live_distance);
+            if(live_door){out("Moving door: %d sector height changes.\n",door_changes);if(door_changes<10)I_Error("Door did not move");free(door_heights);}
+            fclose(report);fclose(csv);report=csv=NULL;state=FINISHED;I_Quit();
+        }
+        return;
+    }
     case DOOR: {
         uint64_t now=SDL_GetTicksNS();double elapsed=(now-combat_start)/1e9;
         if(monster_test) {
@@ -871,6 +949,9 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc && count < 240; ++i)
     {
         if (!strcmp(argv[i], "-maps") && i + 1 < argc) map_filter = argv[++i];
+        else if (!strcmp(argv[i], "-view-shots")) view_shots=1;
+        else if (!strcmp(argv[i], "-live-door")) live_door=1;
+        else if (!strcmp(argv[i], "-live-seconds") && i+1<argc) live_seconds=atoi(argv[++i]);
         else if (!strcmp(argv[i], "-door-save") && i + 1 < argc) door_save=argv[++i];
         else if (!strcmp(argv[i], "-monster-sim")) monster_sim=1;
         else if (!strcmp(argv[i], "-monster-save") && i + 1 < argc) {door_save=argv[++i];monster_test=1;}
@@ -894,7 +975,7 @@ int main(int argc, char **argv)
             args[count++] = argv[i];
         }
     }
-    if (spacing < 32 || budget <= 0 || combat_seconds<0 || combat_seconds>120) { fprintf(stderr, "Invalid -spacing or -budget\n"); return 1; }
+    if (spacing < 32 || budget <= 0 || combat_seconds<0 || combat_seconds>120 || live_seconds<0 || live_seconds>120) { fprintf(stderr, "Invalid spacing, budget or duration\n"); return 1; }
     if (!graphics)
     {
         /* The player's settings, read but never written. */

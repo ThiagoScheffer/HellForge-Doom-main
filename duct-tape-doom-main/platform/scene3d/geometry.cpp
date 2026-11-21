@@ -5,6 +5,7 @@
 #include "frame_workers.h"
 #include "../sprite_frustum.h"
 #include "../sprite_visibility.h"
+#include "../world_frustum.h"
 #include "p_digwall.h"
 #include "../../../scene.h"
 #include "../../../map_world.h"
@@ -17,6 +18,10 @@ extern float SV_DoorRenderZ(float fraction);
 namespace doom3d
 {
 static float floorOverhang(const mobj_t*,int,const Image&);
+    void reportStaticSamples();
+    static doom_world_frustum::Frustum worldFrustum;
+    static bool cullWorld=false;
+    static unsigned processedLeaves=0,rejectedLeaves=0,processedLines=0,rejectedLines=0;
 
     bool customGunPuff(const mobj_t *puff);
     void quad(std::vector<Vertex> &out, Vertex a, Vertex b, Vertex c, Vertex d)
@@ -310,6 +315,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     {
         for (int i = 0; i < numsubsectors; ++i)
         {
+            ++processedLeaves;
+            if(cullWorld&&worldFrustum.outside(floorBounds[i])) {++rejectedLeaves;continue;}
             const auto &poly = floors[i];
             if (poly.size() < 3)
                 continue;
@@ -393,6 +400,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         };
         for (int i = 0; i < numlines; ++i)
         {
+            ++processedLines;
+            bool rejected=cullWorld&&worldFrustum.outside(wallBounds[i]);
+            if(rejected)++rejectedLines;
             const line_t &line = lines[i];
             if (digMeshEnabled() && ((line.frontsector && line.frontsector->tag == 19001) || (line.backsector && line.backsector->tag == 19001)))
                 continue;
@@ -404,7 +414,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 const sector_t *front = s.sector, *back = side ? line.frontsector : line.backsector;
                 Point a = {units((side ? line.v2 : line.v1)->x), units((side ? line.v2 : line.v1)->y)};
                 Point b = {units((side ? line.v1 : line.v2)->x), units((side ? line.v1 : line.v2)->y)};
-                bool facing = allSides || (b.x - a.x) * (camera.eye[1] - a.y) - (b.y - a.y) * (camera.eye[0] - a.x) <= 0;
+                // Keep span/light collection, including emitters outside the view.
+                // addWall exits after wallLights, before generating vertices.
+                bool facing = !rejected&&(allSides || (b.x - a.x) * (camera.eye[1] - a.y) - (b.y - a.y) * (camera.eye[0] - a.x) <= 0);
                 if (!facing && P_GlobalDigEnabled())
                 {
                     float damage[4];
@@ -465,7 +477,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                         addWall(line, side, a, b, bottom, top, s.midtexture, anchor, light, facing, 3);
                     }
                 }
-                if (front->ceilingpic == skyflatnum)
+                if (!rejected&&front->ceilingpic == skyflatnum)
                     skyWall(front, a, b, back && back->ceilingpic == skyflatnum ? std::max(skyTop[back - sectors], floor) : ceil, skyTop[front - sectors]);
             }
         }
@@ -1067,9 +1079,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     void geometry(const Uniforms &camera, float fraction)
     {
         MP_AUTO(MP_GEOMETRY);
+        const bool visibilityTrace=M_CheckParm((char*)"-profileworldvisibility")!=0;
+        uint64_t visibilityStart=(visibilityTrace||profile.enabled)?SDL_GetTicksNS():0;
+        processedLeaves=rejectedLeaves=processedLines=rejectedLines=0;
         prepareVoxelModels();
         const bool spike = M_CheckParm((char *)"-profilespikes") != 0;
-        const bool detailed = spike || M_CheckParm((char *)"-profilegeometry") != 0;
+        const bool lightingTrace=M_CheckParm((char*)"-profilelighting")!=0;
+        const bool detailed = spike || lightingTrace || M_CheckParm((char *)"-profilegeometry") != 0;
         uint64_t mark = detailed ? SDL_GetTicksNS() : 0;
         static std::array<double, 10> totals{};
         static int frames = 0;
@@ -1110,18 +1126,40 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         transferredSkies.clear();
         translucentWorld.clear();
         const auto &skyTop = skyTops(fraction);
+        const bool captures=planGlassCaptures(camera);
+        // Secondary cameras, baking and displaced/damaged surfaces keep the
+        // complete original batches. Bounds describe only ordinary map faces.
+        const auto *world=SV_MapWorld();
+        cullWorld=!M_CheckParm((char*)"-noworldculling")&&!reflectionActive&&!settings.glassReflections&&
+            !captures&&!bakesPending()&&!loadingOnThisThread()&&!P_GlobalDigEnabled()&&!digMeshEnabled()&&
+            !(world&&world->cutCount())&&floorBounds.size()==(size_t)numsubsectors&&wallBounds.size()==(size_t)numlines;
+        worldFrustum=doom_world_frustum::Frustum({{camera.eye[0],camera.eye[1],camera.eye[2]},
+            {camera.right[0],camera.right[1],camera.right[2]},{camera.up[0],camera.up[1],camera.up[2]},
+            {camera.forward[0],camera.forward[1],camera.forward[2]},camera.projection[0],camera.projection[1],camera.projection[2]});
         timing(2);
         if (!buildSolidScene(fraction))
         {
             flatGeometry(skyTop);
             timing(3);
-            wallGeometry(camera, skyTop, planGlassCaptures(camera));
+            wallGeometry(camera, skyTop, captures);
             std::stable_sort(translucentWorld.begin(), translucentWorld.end(), [](const auto &a, const auto &b)
                              { return a.distance > b.distance; });
             buildDigMesh();
             buildSolidMapMesh();
         }
         timing(4);
+        if(visibilityTrace||profile.enabled) {
+            size_t triangles=skyVertices.size()/3;
+            for(const auto &b:batches)triangles+=b.second.size()/3;
+            for(const auto &b:transferredSkies)triangles+=b.second.size()/3;
+            for(const auto &b:translucentWorld)triangles+=b.vertices.size()/3;
+            profile.frame.worldSubsectors=processedLeaves;profile.frame.worldRejectedSubsectors=rejectedLeaves;
+            profile.frame.worldLines=processedLines;profile.frame.worldRejectedLines=rejectedLines;
+            profile.frame.worldTriangles=(int)triangles;
+            profile.frame.worldGeometryMs=(SDL_GetTicksNS()-visibilityStart)/1e6;
+            if(visibilityTrace)fprintf(stderr,"World visibility tic %d: enabled %d subsectors %u rejected %u lines %u rejected %u triangles %zu geometry %.3f ms\n",
+                gametic,cullWorld,processedLeaves,rejectedLeaves,processedLines,rejectedLines,triangles,profile.frame.worldGeometryMs);
+        }
         collectSurfaceLights();
         timing(5);
         buildImpacts(camera);
@@ -1270,6 +1308,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         buildHellfire(camera);
         buildBubbles(camera);
         timing(9);
+        if(lightingTrace) {
+            fprintf(stderr,"Lighting stages tic %d: flashes %.3f flats %.3f surface %.3f actors %.3f ms\n",gametic,current[0],current[1],current[5],current[7]);
+            reportStaticSamples();
+        }
         if (spike)
         {
             double sum = 0;

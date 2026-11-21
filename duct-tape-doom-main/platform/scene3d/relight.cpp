@@ -2,6 +2,7 @@
    (doors, lifts, lowering walls) and shot-out lights. */
 #include "internal.h"
 #include "frame_workers.h"
+#include "../relight_regions.h"
 
 namespace doom3d {
 // Moving sectors re-light (settings.movingRelight): bakeMap follows doors,
@@ -13,6 +14,9 @@ namespace doom3d {
 // can throw it. Bounce, sky light, flow and sunbeams keep the level's start.
 // One re-bake runs at a time; changes meanwhile wait for the next.
 struct Relight {
+    bool diagnostic=false;
+    uint64_t markNs=0,markCalls=0,stripTests=0,sourceTests=0;
+    double setupMs=0,workerMs=0;
     std::thread worker;
     std::exception_ptr error;
     std::unique_ptr<FrameWorkers> pool;
@@ -23,6 +27,8 @@ struct Relight {
     float sunDirection[3]={};
     // Per map cell, wall strip and grid cell: 1 re-light, 2 re-sun.
     std::vector<uint8_t> cells,strips,gridCells;
+    std::vector<uint8_t> markedSources,markedAreas;
+    std::vector<uint8_t> verifyStrips;
     int lightBounds[4],sunBounds[4]; // Marked cells: x0, y0, x1, y1 inclusive.
     std::vector<int16_t> sunCells; // Floor sun over sunBounds; -1 unchanged.
     std::vector<size_t> gridList;
@@ -37,6 +43,17 @@ struct Relight {
 } relight;
 static std::vector<int> relightPending;
 static std::vector<SurfaceLightKey> brokenPending;
+static RelightRegions stripRegions;
+static unsigned stripRegionsLevel=~0u;
+static void prepareStripRegions() {
+    if(stripRegionsLevel==r_levelserial)return;
+    std::vector<RelightRegions::Entry> entries;entries.reserve(bakeOrder.size());
+    for(int index:bakeOrder) {
+        const BakeStrip &s=bakeStrips[index];float bx=s.ax+s.dx*s.length,by=s.ay+s.dy*s.length;
+        entries.push_back({{std::min(s.ax,bx),std::min(s.ay,by),std::max(s.ax,bx),std::max(s.ay,by)},index});
+    }
+    stripRegions.reset(std::move(entries));stripRegionsLevel=r_levelserial;
+}
 void relightBrokenLight(const SurfaceLightKey &cell) {brokenPending.push_back(cell);}
 // The height a sector's floor or ceiling takes in bakeMap.
 static float bakeHeight(int sector,bool ceiling) {
@@ -45,22 +62,34 @@ static float bakeHeight(int sector,bool ceiling) {
     return std::round(now/8)*8;
 }
 static void markRelight(float x0,float y0,float x1,float y1,uint8_t bit) {
+    static const bool legacy=M_CheckParm((char*)"-linearrelightmarks")!=0;
+    static const bool verify=M_CheckParm((char*)"-verifyrelightmarks")!=0;
+    uint64_t begin=relight.diagnostic?SDL_GetTicksNS():0;
+    if(relight.diagnostic)++relight.markCalls;
     int cx0=std::clamp((int)std::floor((x0-mapOrigin[0])/mapCell),0,mapWidth-1),cx1=std::clamp((int)std::floor((x1-mapOrigin[0])/mapCell),0,mapWidth-1);
     int cy0=std::clamp((int)std::floor((y0-mapOrigin[1])/mapCell),0,mapHeight-1),cy1=std::clamp((int)std::floor((y1-mapOrigin[1])/mapCell),0,mapHeight-1);
     for(int y=cy0;y<=cy1;++y)for(int x=cx0;x<=cx1;++x)relight.cells[(size_t)y*mapWidth+x]|=bit;
     int *b=bit==1?relight.lightBounds:relight.sunBounds;
     b[0]=std::min(b[0],cx0);b[1]=std::min(b[1],cy0);b[2]=std::max(b[2],cx1);b[3]=std::max(b[3],cy1);
-    for(int index:bakeOrder) {
+    auto linear=[&](std::vector<uint8_t> &marked) {for(int index:bakeOrder) {
         const BakeStrip &strip=bakeStrips[index];
         float bx=strip.ax+strip.dx*strip.length,by=strip.ay+strip.dy*strip.length;
         if(std::max(strip.ax,bx)<x0||std::min(strip.ax,bx)>x1||std::max(strip.ay,by)<y0||std::min(strip.ay,by)>y1)continue;
-        relight.strips[index]|=bit;
+        marked[index]|=bit;
+    }};
+    if(legacy) {
+        if(relight.diagnostic)relight.stripTests+=bakeOrder.size();
+        linear(relight.strips);
+    } else {
+        stripRegions.each({x0,y0,x1,y1},[&](int index){relight.strips[index]|=bit;if(relight.diagnostic)++relight.stripTests;});
     }
+    if(verify)linear(relight.verifyStrips);
     if(bit==1&&relight.grid) {
         int gx0=std::clamp((int)std::floor((x0-mapOrigin[0])/staticCell),0,staticWidth-1),gx1=std::clamp((int)std::floor((x1-mapOrigin[0])/staticCell),0,staticWidth-1);
         int gy0=std::clamp((int)std::floor((y0-mapOrigin[1])/staticCell),0,staticHeight-1),gy1=std::clamp((int)std::floor((y1-mapOrigin[1])/staticCell),0,staticHeight-1);
         for(int y=gy0;y<=gy1;++y)for(int x=gx0;x<=gx1;++x)relight.gridCells[(size_t)y*staticWidth+x]=1;
     }
+    if(relight.diagnostic)relight.markNs+=SDL_GetTicksNS()-begin;
 }
 // How much of each sector's floor light the shot-out tiles gave (their
 // merged lights before, less what is left of them), against what the
@@ -91,6 +120,9 @@ static void measureLoss(Relight &job) {
 }
 static void startRelight() {
     Relight &job=relight;
+    job.diagnostic=M_CheckParm((char*)"-profilelighting")!=0;
+    uint64_t setupBegin=job.diagnostic?SDL_GetTicksNS():0;
+    job.markNs=job.markCalls=job.stripTests=job.sourceTests=0;
     job.lights=settings.bakedLights&&lightBakeKey>=0&&lightBakeKey==lightBakeInputs()&&!bakeGrid.empty()&&wallBakeTexture&&flatLightTexture;
     job.only=job.lights&&wallDirectionTexture&&flatDirectionTexture; // Directions, as bakeLights made them.
     job.grid=job.lights&&staticSerial==lightBakeSerial&&!staticGrid.empty();
@@ -111,7 +143,13 @@ static void startRelight() {
         job.kept.push_back(bakeSources[n]);
     }
     if(!job.lights&&!job.sun)return;
+    const bool legacy=M_CheckParm((char*)"-linearrelightmarks")!=0;
+    if(!legacy)prepareStripRegions();
+    // Several moving sectors often reach the same source. Mark its unchanged
+    // rectangle once per job; all marks are ORs, including sun and broken lights.
+    job.markedSources.assign(bakeSources.size(),0);job.markedAreas.assign(bakeAreas.size(),0);
     job.cells.assign((size_t)mapWidth*mapHeight,0);job.strips.assign(bakeStrips.size(),0);
+    if(M_CheckParm((char*)"-verifyrelightmarks"))job.verifyStrips.assign(bakeStrips.size(),0);
     job.gridCells.assign(job.grid?staticGrid.size():0,0);
     for(int *b:{job.lightBounds,job.sunBounds}) {b[0]=b[1]=INT_MAX;b[2]=b[3]=-1;}
     if(job.lights)for(const auto *changed:{&job.gone,&job.kept})for(const BakeLight &light:*changed)
@@ -129,13 +167,21 @@ static void startRelight() {
         }
         if(x1<x0)continue;
         if(job.lights) {
-            for(const BakeLight &light:bakeSources) {
+            if(job.diagnostic)job.sourceTests+=bakeSources.size();
+            for(size_t n=0;n<bakeSources.size();++n) {
+                const BakeLight &light=bakeSources[n];
+                if(!legacy&&job.markedSources[n])continue;
                 float dx=std::max({x0-light.x,0.0f,light.x-x1}),dy=std::max({y0-light.y,0.0f,light.y-y1});
-                if(dx*dx+dy*dy<light.radius*light.radius)
+                if(dx*dx+dy*dy<light.radius*light.radius) {
+                    job.markedSources[n]=1;
                     markRelight(light.x-light.radius,light.y-light.radius,light.x+light.radius,light.y+light.radius,1);
+                }
             }
-            for(const BakeArea &area:bakeAreas) {
+            for(size_t n=0;n<bakeAreas.size();++n) {
+                const BakeArea &area=bakeAreas[n];
+                if(!legacy&&job.markedAreas[n])continue;
                 if(area.high[0]+area.radius<x0||area.low[0]-area.radius>x1||area.high[1]+area.radius<y0||area.low[1]-area.radius>y1)continue;
+                job.markedAreas[n]=1;
                 markRelight(area.low[0]-area.radius,area.low[1]-area.radius,area.high[0]+area.radius,area.high[1]+area.radius,1);
             }
         }
@@ -147,6 +193,10 @@ static void startRelight() {
         }
     }
     if(job.lightBounds[2]<0&&job.sunBounds[2]<0)return;
+    if(M_CheckParm((char*)"-verifyrelightmarks")) {
+        if(job.strips!=job.verifyStrips)I_Error((char*)"Indexed relight strips differ from linear overlap");
+        fprintf(stderr,"Lighting region verification: exact light/sun strip masks, %zu strips.\n",job.strips.size());
+    }
     job.map=bakeMap;
     for(int c=0;c<3;++c)job.sunDirection[c]=sunDirection[c];
     const int *sb=job.sunBounds;
@@ -160,7 +210,9 @@ static void startRelight() {
     // every bake phase, competing with rendering while a door moves.
     if(!job.pool)job.pool=std::make_unique<FrameWorkers>(std::clamp(std::thread::hardware_concurrency()/4,1u,4u));
     job.error=nullptr;
+    if(job.diagnostic)job.setupMs=(SDL_GetTicksNS()-setupBegin)/1e6;
     job.worker=std::thread([&] {
+        uint64_t workerBegin=job.diagnostic?SDL_GetTicksNS():0;
         try {
 #ifdef DOOM_TEST_DRIVER
         if(M_CheckParm((char*)"-holdrelight"))SDL_Delay(100);
@@ -191,6 +243,7 @@ static void startRelight() {
         });
         if(!job.cancelling()&&job.lights&&!job.gone.empty())measureLoss(job);
         } catch(...) {job.error=std::current_exception();}
+        if(job.diagnostic)job.workerMs=(SDL_GetTicksNS()-workerBegin)/1e6;
         job.done=true;
     });
 }
@@ -200,6 +253,7 @@ void finishRelight(bool apply) {
     job.worker.join();job.running=false;
     if(!apply){job.error=nullptr;return;}
     if(job.error)std::rethrow_exception(job.error);
+    uint64_t uploadBegin=job.diagnostic?SDL_GetTicksNS():0;
     const int *lb=job.lightBounds,*sb=job.sunBounds;
     if(job.lights&&lb[2]>=0) {
         int w=lb[2]-lb[0]+1,h=lb[3]-lb[1]+1;
@@ -228,6 +282,9 @@ void finishRelight(bool apply) {
     }
     gpuUpdateTexture(wallBakeTexture,GpuFormat::RGBA8,rects,wallBakeCells.data(),atlasStride*4);
     gpuUpdateTexture(wallDirectionTexture,GpuFormat::RGBA8,directions,wallDirectionCells.data(),atlasWidth*4);
+    if(job.diagnostic)fprintf(stderr,"Lighting relight tic %d: sources %llu marks %llu strip_tests %llu setup %.3f mark %.3f worker %.3f upload_cpu %.3f ms\n",
+        gametic,(unsigned long long)job.sourceTests,(unsigned long long)job.markCalls,(unsigned long long)job.stripTests,
+        job.setupMs,job.markNs/1e6,job.workerMs,(SDL_GetTicksNS()-uploadBegin)/1e6);
 }
 // Called each frame before geometry: follows sector heights into bakeMap,
 // applies a finished re-bake and starts the next.
@@ -248,6 +305,7 @@ void stopRelight() {
     if(relight.running){fprintf(stderr,"3D reload: joining active relight worker.\n");fflush(stderr);}
     finishRelight(false);relightPending.clear();brokenPending.clear();
     relight.map={};relight.gridList.clear();relight.gridResults.clear();
+    stripRegions.reset();stripRegionsLevel=~0u;
 }
 void cancelRelight() {
     relight.cancelled.store(true,std::memory_order_relaxed);

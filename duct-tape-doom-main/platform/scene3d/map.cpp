@@ -7,6 +7,7 @@ namespace doom3d {
 std::vector<std::vector<Point>> floors;
 std::vector<std::vector<int>> sectorFloors;
 std::vector<std::array<float,4>> floorBounds;
+std::vector<std::array<float,4>> wallBounds;
 std::vector<SectorMist> sectorMist;
 float fogReferenceHeight=0;
 constexpr float seamBand=16,contactRange=48;
@@ -293,6 +294,11 @@ void buildMap() {
         auto &b=floorBounds[i];b[0]=std::min(b[0],p.x);b[1]=std::min(b[1],p.y);
         b[2]=std::max(b[2],p.x);b[3]=std::max(b[3],p.y);
     }
+    wallBounds.resize(numlines);
+    for(int i=0;i<numlines;++i) {
+        float ax=units(lines[i].v1->x),ay=units(lines[i].v1->y),bx=units(lines[i].v2->x),by=units(lines[i].v2->y);
+        wallBounds[i]={std::min(ax,bx),std::min(ay,by),std::max(ax,bx),std::max(ay,by)};
+    }
     classifySectorMist();
     buildSurfaceMaps(minx,miny,maxx,maxy);
     size_t triangles=0; for(auto &p:floors) if(p.size()>2) triangles+=p.size()-2;
@@ -326,7 +332,7 @@ float lighting(const sector_t *sector,bool bright) {
     return level;
 }
 void mapShutdown() {
-    floors.clear();floorBounds.clear();sectorFloors.clear();seamCells.clear();contactCells.clear();sectorMist.clear();
+    floors.clear();floorBounds.clear();wallBounds.clear();sectorFloors.clear();seamCells.clear();contactCells.clear();sectorMist.clear();
     seamTexture=nullptr;contactTexture=nullptr;
 }
 } // namespace doom3d

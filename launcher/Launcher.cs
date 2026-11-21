@@ -131,6 +131,27 @@ internal static class Data {
             f.Position=offset;for(int n=0;n<count;++n){r.ReadInt32();r.ReadInt32();if(Encoding.ASCII.GetString(r.ReadBytes(8)).TrimEnd('\0').Equals(wanted,StringComparison.OrdinalIgnoreCase))return true;}
         }return false;
     }
+    internal static bool MapWad(string path) {
+        if(!Path.GetExtension(path).Equals(".wad",StringComparison.OrdinalIgnoreCase))return false;
+        try {
+            using(var f=File.OpenRead(path))using(var r=new BinaryReader(f)) {
+                if(f.Length<12)return false;
+                string magic=Encoding.ASCII.GetString(r.ReadBytes(4));if(magic!="PWAD"&&magic!="IWAD")return false;
+                int count=r.ReadInt32(),offset=r.ReadInt32();if(count<1||count>100000||offset<12||(long)offset+count*16L>f.Length)return false;
+                f.Position=offset;bool marker=false;
+                for(int i=0;i<count;++i) {
+                    r.ReadInt32();r.ReadInt32();string name=Encoding.ASCII.GetString(r.ReadBytes(8)).TrimEnd('\0').ToUpperInvariant();
+                    if(marker&&(name=="THINGS"||name=="TEXTMAP"))return true;
+                    marker=(name.Length==5&&name.StartsWith("MAP",StringComparison.Ordinal)&&Char.IsDigit(name[3])&&Char.IsDigit(name[4]))||
+                        (name.Length==4&&name[0]=='E'&&Char.IsDigit(name[1])&&name[2]=='M'&&Char.IsDigit(name[3]));
+                }
+            }
+        }catch(IOException){}catch(UnauthorizedAccessException){}
+        return false;
+    }
+    internal static string[] Loadout(string map,IEnumerable<string> addons) {
+        return (String.IsNullOrEmpty(map)?Enumerable.Empty<string>():new[]{map}).Concat(addons).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
     // Extract embedded resources with bounded buffers instead of duplicating the
     // entire engine and PK3 archives in managed memory. The content-addressed
     // path retains the original layout expected by the build and game engine.
@@ -213,7 +234,7 @@ internal static class SettingsBackup {
     internal static XDocument ReadLauncher(Stream input) {
         using(var reader=XmlReader.Create(input,new XmlReaderSettings { DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,MaxCharactersInDocument=MaxFileSize })) {
             var document=XDocument.Load(reader);
-            if(document.Root==null || document.Root.Name!="launcher" || document.Root.Elements().Any(e=>e.Name!="iwad"&&e.Name!="selected"&&e.Name!="mod"&&e.Name!="performance"))
+            if(document.Root==null || document.Root.Name!="launcher" || document.Root.Elements().Any(e=>e.Name!="iwad"&&e.Name!="selected"&&e.Name!="mod"&&e.Name!="map"&&e.Name!="selectedMap"&&e.Name!="performance"))
                 throw new InvalidDataException("This file does not contain launcher settings.");
             return document;
         }
@@ -552,6 +573,10 @@ internal sealed class ParallaxHero : Control {
 internal sealed class Launcher : Form {
     private readonly ComboBox games=new ComboBox();
     private readonly ListBox mods=new ListBox();
+    private readonly ListBox maps=new ListBox();
+    private readonly TabControl loadoutTabs=new TabControl();
+    private readonly Label emptyMaps=new Label();
+    private readonly Label mapHint=new Label();
     private readonly Label status=new Label();
     private readonly Label libraryInfo=new Label();
     private readonly Label modHint=new Label();
@@ -563,9 +588,10 @@ internal sealed class Launcher : Form {
     private readonly Font tagFont=new Font("Segoe UI Semibold",9f,FontStyle.Bold);
     private readonly Font listFont=new Font("Segoe UI",9.5f);
     private readonly Font listMono=new Font("Consolas",9f);
-    private Surface libraryCard,modsCard,footer;
+    private Surface libraryCard,modsCard,mapsCard,footer;
     private ParallaxHero hero;
     private ModernButton scan,play,lan,browseGame,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll;
+    private ModernButton addMaps,removeMap,baseMaps;
     private bool scanning,launching,gameRunning;
     private CancellationTokenSource scanCancellation;
 
@@ -601,16 +627,22 @@ internal sealed class Launcher : Form {
         two.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,56));
         two.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.Controls.Add(two,0,1);
         libraryCard=new Surface {Dock=DockStyle.Fill,Margin=new Padding(0,0,7,0)};
-        modsCard=new Surface {Dock=DockStyle.Fill,Margin=new Padding(7,0,0,0)};
-        two.Controls.Add(libraryCard,0,0);two.Controls.Add(modsCard,1,0);
+        modsCard=new Surface {Dock=DockStyle.Fill,Margin=Padding.Empty};
+        mapsCard=new Surface {Dock=DockStyle.Fill,Margin=Padding.Empty};
+        loadoutTabs.Dock=DockStyle.Fill;loadoutTabs.Margin=new Padding(7,0,0,0);loadoutTabs.Font=tagFont;
+        var addonPage=new TabPage("ADD-ON LOADOUT"){BackColor=Palette.Card,Padding=Padding.Empty};
+        var mapPage=new TabPage("MAP WADS"){BackColor=Palette.Card,Padding=Padding.Empty};
+        addonPage.Controls.Add(modsCard);mapPage.Controls.Add(mapsCard);loadoutTabs.TabPages.Add(addonPage);loadoutTabs.TabPages.Add(mapPage);
+        two.Controls.Add(libraryCard,0,0);two.Controls.Add(loadoutTabs,1,0);
         footer=new Surface {Dock=DockStyle.Fill,Margin=new Padding(0,14,0,0)};root.Controls.Add(footer,0,2);
 
-        BuildLibrary();BuildMods();BuildFooter();
+        BuildLibrary();BuildMods();BuildMaps();BuildFooter();
         games.SelectedIndexChanged+=(s,e)=>hero.LoadMonster(games.SelectedItem as string);
         libraryCard.Resize+=(s,e)=>LayoutLibrary();
         modsCard.Resize+=(s,e)=>LayoutMods();
+        mapsCard.Resize+=(s,e)=>LayoutMaps();
         footer.Resize+=(s,e)=>LayoutFooter();
-        LayoutLibrary();LayoutMods();LayoutFooter();
+        LayoutLibrary();LayoutMods();LayoutMaps();LayoutFooter();
         LoadSettings();UpdateInfo();
         FormClosing+=(s,e)=>Save();
         Shown+=(s,e)=>{TryDarkTitleBar();Scan(null);};
@@ -687,7 +719,7 @@ internal sealed class Launcher : Form {
         if(labels.Length>=2){labels[0].SetBounds(22,20,inner,28);labels[1].SetBounds(22,54,inner,20);}
         mods.SetBounds(22,92,inner,Math.Max(80,h-218));
         emptyMods.SetBounds(mods.Left,mods.Top,mods.Width,mods.Height);
-        modHint.SetBounds(22,Math.Max(185,h-111),inner,40);
+        modHint.SetBounds(22,Math.Max(176,h-111),inner,40);
         int btnY=h-54,gap=7;
         int unit=(inner-gap*3)/4;
         addMods.SetBounds(22,btnY,unit,36);
@@ -701,7 +733,7 @@ internal sealed class Launcher : Form {
         var g=e.Graphics;
         using(var fill=new SolidBrush(selected?Palette.Selection:Palette.Input))g.FillRectangle(fill,e.Bounds);
         using(var line=new Pen(Palette.Separator))g.DrawLine(line,e.Bounds.Left,e.Bounds.Bottom-1,e.Bounds.Right,e.Bounds.Bottom-1);
-        string path=(string)mods.Items[e.Index];
+        string path=(string)((ListBox)sender).Items[e.Index];
         string number=(e.Index+1).ToString("00");
         TextRenderer.DrawText(g,number,listMono,new Rectangle(e.Bounds.Left+10,e.Bounds.Top+2,32,e.Bounds.Height-2),
             selected?Palette.Accent:Palette.Subtle,TextFormatFlags.Left|TextFormatFlags.VerticalCenter);
@@ -709,6 +741,32 @@ internal sealed class Launcher : Form {
             selected?Color.White:Palette.Text,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
         if(selected)using(var accent=new SolidBrush(Palette.Accent))g.FillRectangle(accent,e.Bounds.Left,0+e.Bounds.Top,3,e.Bounds.Height);
         e.DrawFocusRectangle();
+    }
+    void BuildMaps() {
+        mapsCard.Controls.Add(TextLabel("03  /  MAP WADS",sectionFont,Palette.Text));
+        mapsCard.Controls.Add(TextLabel("Select a map set. Keep your add-ons between maps.",Font,Palette.Subtle));
+        maps.DrawMode=DrawMode.OwnerDrawFixed;maps.ItemHeight=32;maps.IntegralHeight=false;
+        maps.BorderStyle=BorderStyle.None;maps.BackColor=Palette.Input;maps.ForeColor=Palette.Text;
+        maps.DrawItem+=DrawMod;maps.SelectedIndexChanged+=(s,e)=>UpdateInfo();
+        maps.AllowDrop=true;maps.DragEnter+=OnDragFiles;maps.DragDrop+=OnDropFiles;
+        mapsCard.AllowDrop=true;mapsCard.DragEnter+=OnDragFiles;mapsCard.DragDrop+=OnDropFiles;mapsCard.Controls.Add(maps);
+        emptyMaps.Text="DROP MAP WADS HERE\n\nSelect one map set to play.";emptyMaps.Font=tagFont;
+        emptyMaps.TextAlign=ContentAlignment.MiddleCenter;emptyMaps.ForeColor=Palette.Subtle;emptyMaps.BackColor=Palette.Input;
+        emptyMaps.AllowDrop=true;emptyMaps.DragEnter+=OnDragFiles;emptyMaps.DragDrop+=OnDropFiles;mapsCard.Controls.Add(emptyMaps);
+        mapHint.Font=new Font("Segoe UI",8.75f);mapHint.ForeColor=Palette.Subtle;mapsCard.Controls.Add(mapHint);
+        addMaps=CreateButton("+ ADD MAPS",()=>{using(var d=new OpenFileDialog {Filter="Map WADs (*.wad)|*.wad",Multiselect=true})if(d.ShowDialog(this)==DialogResult.OK)Add(d.FileNames);});
+        removeMap=CreateButton("REMOVE",()=>{int i=maps.SelectedIndex;if(i>=0){maps.Items.RemoveAt(i);UpdateInfo();}},quiet:true);
+        baseMaps=CreateButton("USE BASE MAPS",()=>{maps.ClearSelected();UpdateInfo();},quiet:true);
+        mapsCard.Controls.Add(addMaps);mapsCard.Controls.Add(removeMap);mapsCard.Controls.Add(baseMaps);
+    }
+    void LayoutMaps() {
+        if(mapsCard==null)return;int w=mapsCard.ClientSize.Width,h=mapsCard.ClientSize.Height,inner=Math.Max(240,w-44);
+        var labels=mapsCard.Controls.OfType<Label>().Where(c=>c!=mapHint&&c!=emptyMaps).ToArray();
+        if(labels.Length>=2){labels[0].SetBounds(22,20,inner,28);labels[1].SetBounds(22,54,inner,20);}
+        maps.SetBounds(22,92,inner,Math.Max(80,h-218));emptyMaps.SetBounds(maps.Left,maps.Top,maps.Width,maps.Height);
+        mapHint.SetBounds(22,Math.Max(176,h-111),inner,40);
+        int unit=(inner-14)/3,y=h-54;addMaps.SetBounds(22,y,unit,36);removeMap.SetBounds(29+unit,y,unit,36);
+        baseMaps.SetBounds(36+unit*2,y,inner-unit*2-14,36);
     }
     void OnDragFiles(object sender,DragEventArgs e) {
         e.Effect=e.Data.GetDataPresent(DataFormats.FileDrop)?DragDropEffects.Copy:DragDropEffects.None;
@@ -751,6 +809,10 @@ internal sealed class Launcher : Form {
         if(libraryInfo==null || IsDisposed)return;
         libraryInfo.Text=games.Items.Count+" base game(s) detected  •  "+mods.Items.Count+" custom add-on(s)";
         emptyMods.Visible=mods.Items.Count==0;
+        emptyMaps.Visible=maps.Items.Count==0;
+        mapHint.Text=(maps.SelectedItem==null?"Using the base game's maps.":"Selected: "+Path.GetFileName((string)maps.SelectedItem))+"\nMap loads first; add-ons follow in their listed order.";
+        if(removeMap!=null){removeMap.Enabled=baseMaps.Enabled=!launching&&maps.SelectedIndex>=0;}
+        tips.SetToolTip(maps,maps.SelectedItem as string??"Choose a map WAD, or use the base game's maps");
         if(modsCard!=null)mods.Invalidate();
     }
     void BrowseGame() {
@@ -789,14 +851,19 @@ internal sealed class Launcher : Form {
         }
     }
     void Add(IEnumerable<string> files) {
+        int tab=-1;
         foreach(string p in files) {
             string ext=Path.GetExtension(p).ToLowerInvariant();
             if((ext!=".wad"&&ext!=".pk3")||!File.Exists(p))continue;
             if(Data.Iwad(p)){AddGame(p);games.SelectedItem=Path.GetFullPath(p);continue;}
             if(Data.FluidPack(p)!=0)continue; // Built-in; configured in game.
             string absolute=Path.GetFullPath(p);
-            if(!mods.Items.Cast<string>().Contains(absolute,StringComparer.OrdinalIgnoreCase))mods.Items.Add(absolute);
+            var list=Data.MapWad(absolute)?maps:mods;
+            tab=list==maps?1:0;
+            if(!list.Items.Cast<string>().Contains(absolute,StringComparer.OrdinalIgnoreCase))list.Items.Add(absolute);
+            if(list==maps)maps.SelectedItem=absolute;
         }
+        if(tab>=0)loadoutTabs.SelectedIndex=tab;
         UpdateInfo();
     }
     void MoveMod(int delta) {
@@ -812,6 +879,9 @@ internal sealed class Launcher : Form {
             var selected=root.Element("selected");
             if(selected!=null&&games.Items.Contains(selected.Value))games.SelectedItem=selected.Value;
             Add(root.Elements("mod").Select(e=>e.Value));
+            Add(root.Elements("map").Select(e=>e.Value));
+            var selectedMap=root.Element("selectedMap");
+            if(selectedMap!=null)maps.SelectedItem=maps.Items.Contains(selectedMap.Value)?selectedMap.Value:null;
             var performance=root.Element("performance");
             if(performance!=null)lowFx.Checked=performance.Value!="0";
         } catch {status.Text="Could not restore saved choices.";}
@@ -821,6 +891,8 @@ internal sealed class Launcher : Form {
             games.Items.Cast<string>().Select(p=>new XElement("iwad",p)),
             new XElement("selected",games.SelectedItem??""),
             mods.Items.Cast<string>().Select(p=>new XElement("mod",p)),
+            maps.Items.Cast<string>().Select(p=>new XElement("map",p)),
+            new XElement("selectedMap",maps.SelectedItem??""),
             new XElement("performance",lowFx.Checked?"1":"0")));
     }
     void Save() {
@@ -851,7 +923,7 @@ internal sealed class Launcher : Form {
         try {
             string backup=BackupSettings();
             LauncherConfig.ResetProfile(Data.Profile);
-            mods.Items.Clear();lowFx.Checked=true;Save();UpdateInfo();
+            mods.Items.Clear();maps.Items.Clear();lowFx.Checked=true;Save();UpdateInfo();
             status.Text="Fresh defaults ready. Saves kept; settings backed up.";
             MessageBox.Show(this,"Settings reset. New defaults apply on next launch.\n\nBackup:\n"+backup,"Fresh start complete");
         }catch(Exception e){MessageBox.Show(this,e.Message,"Reset incomplete; recovery backup retained",MessageBoxButtons.OK,MessageBoxIcon.Error);}
@@ -896,7 +968,7 @@ internal sealed class Launcher : Form {
                 string recovery=Path.Combine(folder,"before-import-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-"+Guid.NewGuid().ToString("N")+".zip");
                 SettingsBackup.Export(recovery,CurrentSettings(),Data.Profile);
                 SettingsBackup.Restore(files,settings,Data.Profile);
-                games.Items.Clear();mods.Items.Clear();lowFx.Checked=true;LoadSettings();UpdateInfo();
+                games.Items.Clear();mods.Items.Clear();maps.Items.Clear();lowFx.Checked=true;LoadSettings();UpdateInfo();
                 status.Text="Settings imported.";
                 MessageBox.Show(this,"Settings imported. Missing IWAD and add-on paths were skipped.\n\nRecovery backup:\n"+recovery,"Settings restored",MessageBoxButtons.OK,MessageBoxIcon.Information);
             }catch(Exception e){MessageBox.Show(this,e.Message,"Cannot import settings",MessageBoxButtons.OK,MessageBoxIcon.Error);}
@@ -904,9 +976,9 @@ internal sealed class Launcher : Form {
     }
     void SetLaunching(bool value) {
         launching=value;
-        foreach(Control control in new Control[]{games,mods,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll,lowFx,lan,play})
+        foreach(Control control in new Control[]{games,mods,maps,addMaps,removeMap,baseMaps,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll,lowFx,lan,play})
             control.Enabled=!value;
-        if(!value){scan.Enabled=!scanning;scanFolder.Enabled=!scanning;removeMod.Enabled=upMod.Enabled=downMod.Enabled=mods.SelectedIndex>=0;}
+        if(!value){scan.Enabled=!scanning;scanFolder.Enabled=!scanning;removeMod.Enabled=upMod.Enabled=downMod.Enabled=mods.SelectedIndex>=0;UpdateInfo();}
     }
     void Play(){PlaySession(false);}
     void PlayLan(){PlaySession(true);}
@@ -920,7 +992,7 @@ internal sealed class Launcher : Form {
             string game=(string)games.SelectedItem;
             if(!Data.Iwad(game))throw new IOException("The selected IWAD is missing or invalid.");
             if(mods.Items.Count>18)throw new IOException("Choose at most 18 add-ons.");
-            string[] files=mods.Items.Cast<string>().ToArray();
+            string[] files=Data.Loadout(maps.SelectedItem as string,mods.Items.Cast<string>());
             bool performance=lowFx.Checked;
             status.Text="Preparing game resources…";
             string args=await Task.Run(()=>Data.BundledArguments(game,files));
@@ -1100,6 +1172,7 @@ internal sealed class LauncherSettingsDialog : Form {
 internal sealed class WadMascot : IDisposable {
     readonly List<Bitmap> actors=new List<Bitmap>(),fire=new List<Bitmap>();
     internal bool Animated {get{return actors.Count>0;}}
+    internal string ActorName {get;private set;}
     internal void Load(string path) {
         Dispose();if(String.IsNullOrEmpty(path)||!File.Exists(path))return;
         try {
@@ -1110,17 +1183,26 @@ internal sealed class WadMascot : IDisposable {
                 for(int i=0;i<count;i++){int start=reader.ReadInt32(),length=reader.ReadInt32();string name=Encoding.ASCII.GetString(reader.ReadBytes(8)).TrimEnd('\0');if(start>=0&&length>=0&&(long)start+length<=stream.Length)entries[name]=Tuple.Create(start,length);}
                 Tuple<int,int> palette;if(!entries.TryGetValue("PLAYPAL",out palette)||palette.Item2<768)return;
                 stream.Position=palette.Item1;byte[] colors=reader.ReadBytes(768);
-                foreach(string name in new[]{"VILEA1","VILEB1","VILEC1","VILED1","FIREA0","FIREB0","FIREC0","FIRED0","FIREE0","FIREF0"}) {
+                // Final Doom uses Baron artwork by launcher preference too;
+                // all artwork is still read from the selected user's IWAD.
+                string gameName=Path.GetFileNameWithoutExtension(path);
+                bool finalDoom=new[]{"TNT","PLUTONIA","FINALDOOM","FINAL DOOM"}.Contains(gameName,StringComparer.OrdinalIgnoreCase);
+                bool archvile=!finalDoom&&entries.ContainsKey("MAP01")&&entries.Keys.Any(n=>n.StartsWith("VILEA1",StringComparison.Ordinal));
+                string prefix=archvile?"VILE":"BOSS";
+                var names=new[]{prefix+"A1",prefix+"B1",prefix+"C1",prefix+"D1"};
+                if(archvile)names=names.Concat(new[]{"FIREA0","FIREB0","FIREC0","FIRED0","FIREE0","FIREF0"}).ToArray();
+                foreach(string name in names) {
                     Tuple<int,int> entry;bool mirrored=false;
                     if(!entries.TryGetValue(name,out entry)) {
                         var combined=entries.FirstOrDefault(p=>p.Key.StartsWith(name,StringComparison.Ordinal));
-                        if(combined.Key==null){combined=entries.FirstOrDefault(p=>p.Key.Length==8&&p.Key.StartsWith("VILE",StringComparison.Ordinal)&&p.Key.Substring(6,2)==name.Substring(4));mirrored=combined.Key!=null;}
+                        if(combined.Key==null){combined=entries.FirstOrDefault(p=>p.Key.Length==8&&p.Key.StartsWith(prefix,StringComparison.Ordinal)&&p.Key.Substring(6,2)==name.Substring(4));mirrored=combined.Key!=null;}
                         if(combined.Key==null)continue;entry=combined.Value;
                     }
                     if(entry.Item2<8||entry.Item2>1048576)continue;
                     stream.Position=entry.Item1;byte[] patch=reader.ReadBytes(entry.Item2);Bitmap frame=Decode(patch,colors);
-                    if(frame!=null){if(mirrored)frame.RotateFlip(RotateFlipType.RotateNoneFlipX);(name.StartsWith("VILE",StringComparison.Ordinal)?actors:fire).Add(frame);}
+                    if(frame!=null){if(mirrored)frame.RotateFlip(RotateFlipType.RotateNoneFlipX);(name.StartsWith(prefix,StringComparison.Ordinal)?actors:fire).Add(frame);}
                 }
+                if(actors.Count>0)ActorName=archvile?"Arch-vile":"Baron of Hell";
             }
         }catch(IOException){Dispose();}catch(ArgumentException){Dispose();}
     }
@@ -1146,7 +1228,7 @@ internal sealed class WadMascot : IDisposable {
     }
     internal void Draw(Graphics g,Rectangle bounds,int tick) {
         if(actors.Count==0) {
-            using(var brush=new SolidBrush(Palette.Subtle))using(var font=new Font("Consolas",8f))g.DrawString("ARCH-VILE FX\nSelect a Doom II IWAD",font,brush,bounds);
+            using(var brush=new SolidBrush(Palette.Subtle))using(var font=new Font("Consolas",8f))g.DrawString("MONSTER PREVIEW\nSelect a Doom IWAD",font,brush,bounds);
             return;
         }
         var mode=g.InterpolationMode;g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
@@ -1157,5 +1239,5 @@ internal sealed class WadMascot : IDisposable {
         if(fire.Count>0){var flame=fire[tick%fire.Count];int fw=Math.Min(bounds.Width,(int)(flame.Width*scale));g.DrawImage(flame,new Rectangle(bounds.Left+(bounds.Width-fw)/2,bounds.Bottom-(int)(flame.Height*scale),fw,(int)(flame.Height*scale)));}
         g.InterpolationMode=mode;
     }
-    public void Dispose(){foreach(var frame in actors)frame.Dispose();foreach(var frame in fire)frame.Dispose();actors.Clear();fire.Clear();}
+    public void Dispose(){foreach(var frame in actors)frame.Dispose();foreach(var frame in fire)frame.Dispose();actors.Clear();fire.Clear();ActorName="";}
 }

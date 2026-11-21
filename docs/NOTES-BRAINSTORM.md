@@ -223,3 +223,4 @@ Add a new compatible monster on the same place of archvile for normal Doom.wad a
 ----------
 
 
+https://doom.fandom.com/wiki/Thing_types
