@@ -790,19 +790,29 @@ std::vector<OptionTab> optionTabs(Settings &s) {
         key("peek_left","Peek left",&s.peekLeft),key("peek_right","Peek right",&s.peekRight)}}}});
     tabs.push_back({"SPEEDRUN",{{"Session overlay",{
         check("speedrun_hud","Enable Speedrun HUD",&s.speedrunHUD,"Optional session statistics. Counters continue while hidden; saves do not roll back session history.",[](const Settings &d){return d.accelerated!=0;}),
+        check("speedrun_only","Speedrun HUD only",&s.speedrunOnly,"Hide the standard HUD, crosshair and gameplay notices. Menus, the automap, and the weapon wheel remain available.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         slider("speedrun_background_opacity","Background opacity",&s.speedrunBackgroundOpacity,0,100,5,
             "Speedrun panel background only. 0% shows the text without a dark box; 100% is fully opaque.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
-        choice("speedrun_layout","Info layout",&s.speedrunLayout,{"Column","Row"},{0,1},"Column is the original stacked view. Row puts compact metrics side by side, wrapping only when needed to stay on screen.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
-        slider("speedrun_x","X adjustment",&s.speedrunX,-100,100,1,"Horizontal offset from the selected anchor, in percent of the full screen width. Negative moves left; positive moves right.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
-        slider("speedrun_y","Y adjustment",&s.speedrunY,-100,100,1,"Vertical offset from the selected anchor, in percent of the screen height. Negative moves up; positive moves down. The panel stays on screen.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
-        choice("speedrun_anchor","Overlay position",&s.speedrunAnchor,{"Upper left","Upper right","Lower left","Lower right"},{0,1,2,3},"Safe side anchors avoid the crosshair and bottom status bar.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        choice("speedrun_layout","Info layout",&s.speedrunLayout,{"Column","Row","Split Columns"},{0,1,2},"Row wraps when needed. Split Columns puts map and run stats on the left and player stats on the right.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        slider("speedrun_x","X adjustment",&s.speedrunX,-100,100,1,"Moves the panel horizontally. In Split Columns this moves the map and run column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        slider("speedrun_y","Y adjustment",&s.speedrunY,-100,100,1,"Moves the panel vertically. In Split Columns this moves the map and run column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        choice("speedrun_anchor","Overlay position",&s.speedrunAnchor,{"Upper left","Upper right","Lower left","Lower right"},{0,1,2,3},"Sets the panel's anchor. In Split Columns, the map column uses only the upper or lower position on the left.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        choice("speedrun_player_anchor","Player column position",&s.speedrunPlayerAnchor,{"Upper right","Lower right"},{1,3},"Sets the independent anchor for the right column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD&&d.speedrunLayout==2;}),
+        slider("speedrun_player_x","Player X adjustment",&s.speedrunPlayerX,-100,100,1,"Moves the player column horizontally on the right half of the screen.",[](const Settings &d){return d.accelerated&&d.speedrunHUD&&d.speedrunLayout==2;}),
+        slider("speedrun_player_y","Player Y adjustment",&s.speedrunPlayerY,-100,100,1,"Moves the player column vertically without moving the map column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD&&d.speedrunLayout==2;}),
+        check("speedrun_map_name","Map name",&s.speedrunMapName,"Shows the current map number.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_attempts","Map Attempts",&s.speedrunAttempts,"Each playable map load/restart/checkpoint begins one attempt.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_deaths","Map Deaths",&s.speedrunDeaths,"Actual player deaths this map visit.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_killstreak","Killstreak",&s.speedrunStreak,"Player-credited monster kills this attempt, including owned damage-over-time kills.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_attempt_time","Current Attempt Time",&s.speedrunAttemptTime,"Simulation gameplay time; freezes at player death until a new attempt.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_runtime","Gameplay Runtime",&s.speedrunRuntime,"Session simulation time, including active world ticks while dead; excludes pause, stopped menus, loading and intermission.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_damage_dealt","Total Damage Dealt",&s.speedrunDealt,"Session monster HP actually removed by player-owned attacks. Excludes overkill and duplicate notifications.",[](const Settings &d){return d.speedrunHUD!=0;}),
-        check("speedrun_damage_taken","Total Damage Taken",&s.speedrunTaken,"Session player HP lost after armor and protection.",[](const Settings &d){return d.speedrunHUD!=0;})
+        check("speedrun_damage_taken","Total Damage Taken",&s.speedrunTaken,"Session player HP lost after armor and protection.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_secrets","Secrets",&s.speedrunSecrets,"Secrets found out of the map total.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_items","Items",&s.speedrunItems,"Items collected out of the map total.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_health","Health",&s.speedrunHealth,"Current player health.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_armor","Armor",&s.speedrunArmor,"Current player armor.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_ammo","Ammo",&s.speedrunAmmo,"Current and maximum ammo for the equipped weapon.",[](const Settings &d){return d.speedrunHUD!=0;})
     }}}});
     return tabs;
 }

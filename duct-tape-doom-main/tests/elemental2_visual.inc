@@ -25,7 +25,7 @@ static void elemental2VisualFrame(){
         std::vector<unsigned> pixels(SCREENWIDTH*SCREENHEIGHT);bool pending=worldPending;worldPending=true;
         std::vector<double> off,on;std::ofstream samples(output+"/hud-widget-cost.csv");samples<<"pair,enabled,microseconds_per_call\n";
         for(int pair=0;pair<9;++pair)for(int phase=0;phase<2;++phase){bool enabled=((pair+phase)&1)!=0;settings.speedrunHUD=settings.combatMessages=enabled;
-            auto begin=std::chrono::steady_clock::now();for(int n=0;n<100;++n){combatWidgets(pixels);combatWidgets(pixels,true);}auto end=std::chrono::steady_clock::now();
+            auto begin=std::chrono::steady_clock::now();for(int n=0;n<100;++n){combatWidgets(pixels.data());combatWidgets(pixels.data(),true);}auto end=std::chrono::steady_clock::now();
             double cost=std::chrono::duration<double,std::micro>(end-begin).count()/100;samples<<pair<<","<<enabled<<","<<cost<<"\n";(enabled?on:off).push_back(cost);
         }
         std::sort(off.begin(),off.end());std::sort(on.begin(),on.end());

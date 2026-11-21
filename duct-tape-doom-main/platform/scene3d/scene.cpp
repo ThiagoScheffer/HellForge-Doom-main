@@ -47,7 +47,7 @@ int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 }
 #include "../settings_panel.h"
 namespace doom3d {
-int speedrunPanelWidth=0,speedrunPanelHeight=0;
+std::array<SpeedrunAtlasPanel,2> speedrunAtlasPanels{};
 int criticalThing(mobj_t*,critical_hit_t*);
 }
 
@@ -183,7 +183,7 @@ void applySettings() {
     if(gameWindow&&bool(SDL_GetWindowFlags(gameWindow)&SDL_WINDOW_FULLSCREEN)!=bool(settings.fullscreen))
         SDL_SetWindowFullscreen(gameWindow,settings.fullscreen!=0);
     R_AcceleratedView=settings.accelerated?acceleratedView:nullptr;
-    r_modernhud=settings.accelerated&&settings.hudStyle!=0;
+    r_modernhud=settings.accelerated&&(settings.hudStyle!=0||speedrunOnlyHud(settings));
     st_helmet_style=settings.helmetFace;
     P_PeekOriginHook=I_Render3DPeekOrigin;
     R_BeforeTic=settings.accelerated?beforeTic:nullptr;
@@ -219,7 +219,7 @@ void applySettings() {
     P_WeakpointConfigureExtras(settings.accelerated&&settings.monsterBleeding,settings.accelerated&&settings.headshotFrenzy);
     P_WeakpointConfigureEyes(settings.accelerated&&settings.eyeInjuries);
     P_CombatConfigureDot(settings.accelerated&&settings.elementalDot);
-    P_HudConfigure(settings.accelerated&&settings.combatMessages);
+    P_HudConfigure(settings.accelerated&&settings.combatMessages&&!speedrunOnlyHud(settings));
     P_SevereBloodTint=settings.accelerated?monsterBloodTint:nullptr;
     P_SevereBloodBurst=settings.accelerated?severeBloodBurst:nullptr;
     P_CombatConfigure(settings.accelerated&&settings.elementalCombatFX,settings.accelerated&&settings.advancedMonsterReactions);
@@ -766,8 +766,13 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
         if(rgba){arcadePodiumTexture=gpuCreateTexture(GpuFormat::RGBA8,rgba->w,rgba->h,rgba->pixels,rgba->pitch);SDL_DestroySurface(rgba);}
         arcade_podium_hires=arcadePodiumTexture?1:0;
     }
-    std::vector<unsigned> overlay(pixels,pixels+SCREENWIDTH*SCREENHEIGHT);
-    if(worldPending) for(int i=0;i<SCREENWIDTH*SCREENHEIGHT;++i)overlay[i]=(overlay[i]&0xffffff)|(unsigned)v_overlaymask[i]<<24;
+    constexpr int layerSize=SCREENWIDTH*SCREENHEIGHT;
+    const bool only=worldPending&&speedrunOnlyHud(settings);
+    std::vector<unsigned> overlay(layerSize*3,0);
+    if(!only||menuactive||paused||automapactive||Arcade_MenuOpen()||Menu_BrandOpen()) {
+        std::copy_n(pixels,layerSize,overlay.begin());
+        if(worldPending)for(int i=0;i<layerSize;++i)overlay[i]=(overlay[i]&0xffffff)|(unsigned)v_overlaymask[i]<<24;
+    }
     if(Arcade_MenuOpen()||Menu_BrandOpen()){
         std::vector<unsigned> ranks(SCREENWIDTH*SCREENHEIGHT,0);
         // Render-time animation avoids the old eight-tic colour jumps.
@@ -795,19 +800,26 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
         if(!arcadeRankTexture)arcadeRankTexture=gpuCreateTexture(GpuFormat::RGBA8,SCREENWIDTH,SCREENHEIGHT,ranks.data(),SCREENWIDTH*4);
         else gpuUpdateTexture(arcadeRankTexture,GpuFormat::RGBA8,{{0,0,SCREENWIDTH,SCREENHEIGHT}},ranks.data(),SCREENWIDTH*4);
     }
-    std::vector<unsigned> modern(SCREENWIDTH*SCREENHEIGHT,0),speedrun(SCREENWIDTH*SCREENHEIGHT,0);
-    speedrunPanelWidth=speedrunPanelHeight=0;
+    speedrunAtlasPanels={};
     if((r_photoactive||director_watch||director_demo&&demoplayback)&&!menuactive){if(!r_photoactive)std::fill(overlay.begin(),overlay.end(),0);}
-    else {modernHud(modern);combatWidgets(speedrun,false,true);combatWidgets(overlay,true);}
+    else {
+        if(!only) {
+            modernHud(overlay.data()+layerSize);
+            combatWidgets(overlay.data(),true);
+        }
+        combatWidgets(overlay.data()+layerSize*2,false,true);
+    }
     directorMarkers(overlay);
     if(!r_photoactive&&!(director_demo&&demoplayback)){
-    keyNotice(overlay);
-    keyHandNotice();
-    toastyNotice();
-    romeroNotice();
-    wheelDraw(overlay);
+        if(!only) {
+            keyNotice(overlay);
+            keyHandNotice();
+            toastyNotice();
+            romeroNotice();
+        }else {keyHandVisible=0;toastyVisible=0;romeroAge=-1;}
+        wheelDraw(overlay);
     }else {keyHandVisible=0;toastyVisible=0;romeroAge=-1;}
-    if(!r_photoactive&&settings.fps&&worldPending&&!menuactive&&fps>0&&!(director_demo&&demoplayback)) {
+    if(!only&&!r_photoactive&&settings.fps&&worldPending&&!menuactive&&fps>0&&!(director_demo&&demoplayback)) {
         // Readable in fullscreen, independent of HUD layout and scale.
         char lines[2][48];snprintf(lines[0],48,"%.0f FPS",fps);
         snprintf(lines[1],48,"%.1f MS / MAX %.1f",frameMs,peakFrameMs);
@@ -834,8 +846,6 @@ std::vector<unsigned> hudPixels(const unsigned *pixels) {
             }
         }
     }
-    overlay.insert(overlay.end(),modern.begin(),modern.end());
-    overlay.insert(overlay.end(),speedrun.begin(),speedrun.end());
     return overlay;
 }
 // Current sector light and heights for seam blending and contact shading;
@@ -1097,7 +1107,7 @@ void I_Render3DWheelKey(int down){
 }
 void I_Render3DWheelMove(float x,float y){if(!wheelActive)return;wheelX+=x*.35f;wheelY+=y*.35f;float radius=std::hypot(wheelX,wheelY*1.2f);if(radius>76){wheelX*=76/radius;wheelY*=76/radius;}if(radius>12){float angle=std::atan2(wheelY*1.2f,wheelX)+1.570796327f+3.141592654f/9;wheelSelected=int(std::floor(angle/(6.283185307f/9)+9))%9;}}
 int I_Render3DIsAccelerated(void) {return settings.accelerated;}
-int I_Render3DModernHUD(void) {return settings.accelerated&&settings.hudStyle!=0;}
+int I_Render3DModernHUD(void) {return settings.accelerated&&(settings.hudStyle!=0||speedrunOnlyHud(settings));}
 void I_Render3DFullscreenChanged(int enabled) {settings.fullscreen=enabled!=0;}
 void I_Render3DLook(float delta) {
     if(!settings.look||!settings.accelerated||demoplayback)return;

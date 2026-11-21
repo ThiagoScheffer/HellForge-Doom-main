@@ -14,6 +14,33 @@ static void settingsPersistenceFrame(){
         }
         check(settings.livingSurfaces&&settings.livingIntensity==3&&!settings.livingMorph&&!settings.livingPulse&&
               !settings.livingWetness,"all immersion choices match the persisted profile");
+    }else if(settingsCase=="--settings-speedrun-split-write"||settingsCase=="--settings-speedrun-split-read"){
+        if(settingsCase=="--settings-speedrun-split-write"){
+            settings.accelerated=settings.speedrunHUD=settings.speedrunOnly=1;settings.speedrunLayout=2;
+            settings.speedrunSecrets=settings.speedrunItems=settings.speedrunHealth=settings.speedrunArmor=settings.speedrunAmmo=1;
+            settings.speedrunPlayerAnchor=3;settings.speedrunPlayerX=-12;settings.speedrunPlayerY=9;
+            settings.speedrunX=25;settings.speedrunY=-6;settings.speedrunMapName=0;
+            check(I_TestSaveSettings(graphicsConfig),"split HUD saves through the normal F4 writer");
+        }
+        check(settings.speedrunOnly&&settings.speedrunLayout==2&&settings.speedrunSecrets&&settings.speedrunItems&&
+              settings.speedrunHealth&&settings.speedrunArmor&&settings.speedrunAmmo&&!settings.speedrunMapName&&
+              settings.speedrunPlayerAnchor==3&&settings.speedrunPlayerX==-12&&settings.speedrunPlayerY==9&&
+              settings.speedrunX==25&&settings.speedrunY==-6,"split HUD restores independent placement and metrics");
+        settings.accelerated=1;
+        bool pending=worldPending;worldPending=true;
+        constexpr int layer=SCREENWIDTH*SCREENHEIGHT;
+        std::vector<unsigned> source(layer,0xffffffffu);
+        auto atlas=hudPixels(source.data());
+        check(std::none_of(atlas.begin(),atlas.begin()+2*layer,[](unsigned pixel){return pixel>>24;}),"HUD-only skips both standard HUD layers");
+        const auto left=speedrunAtlasPanels[0],right=speedrunAtlasPanels[1];
+        check(left.width>0&&right.width>0&&left.x+left.width<=right.x,"split HUD packs two disjoint atlas regions");
+        auto map=hudScreenPosition(1920,1080,1440,left.width,left.height,0,100,0,false,true);
+        auto player=hudScreenPosition(1920,1080,1440,right.width,right.height,3,-100,5,false,true);
+        check(map.x+map.w<=960&&player.x>=960&&player.y>map.y,"extreme offsets keep the columns on separate sides");
+        settings.speedrunHealth=settings.speedrunArmor=settings.speedrunAmmo=0;
+        hudPixels(source.data());
+        check(speedrunAtlasPanels[1].width==0,"an empty player column leaves no panel behind");
+        worldPending=pending;
     }else if(settingsCase=="--settings-layout-write"){
         check(settings.speedrunLayout==0&&settings.speedrunX==0&&settings.speedrunY==0,"existing profiles retain column layout and zero adjustments");
         char sample[8][48]={"MAP04","ATT 1","DTH 0","KS 0","TIME 00:00.00","RUN 00:00:00","DEALT 0","TAKEN 0"};int visible[8]={1,1,1,1,1,1,1,1};
@@ -23,7 +50,7 @@ static void settingsPersistenceFrame(){
         }
         settings.speedrunLayout=1;auto row=speedrunPanel(sample,visible);check(row.cells[0].y==row.cells[7].y,"normal metrics fit side by side in a single info row");
         {bool pending=worldPending;worldPending=true;settings.speedrunHUD=1;settings.speedrunX=settings.speedrunY=0;
-            std::vector<unsigned> pixels(SCREENWIDTH*SCREENHEIGHT,0);combatWidgets(pixels);int top=SCREENHEIGHT,bottom=-1;
+            std::vector<unsigned> pixels(SCREENWIDTH*SCREENHEIGHT,0);combatWidgets(pixels.data());int top=SCREENHEIGHT,bottom=-1;
             for(int y=0;y<SCREENHEIGHT;++y)for(int x=0;x<SCREENWIDTH;++x)if(pixels[y*SCREENWIDTH+x]>>24){top=std::min(top,y);bottom=std::max(bottom,y);}
             check(bottom>=top&&bottom-top<16,"actual row painting forms a single compact info bar");worldPending=pending;}
         for(int i=1;i<8;++i)std::snprintf(sample[i],48,"VERY LARGE SESSION VALUE 12345678901234567890");auto wrap=speedrunPanel(sample,visible);
@@ -38,7 +65,7 @@ static void settingsPersistenceFrame(){
         bool pending=worldPending;worldPending=true;settings.hudStyle=1;settings.hudFace=0;settings.hudLayout=0;settings.hudScale=100;settings.speedrunHUD=1;settings.speedrunAnchor=0;
         for(float percent:{0.f,25.f,100.f}){
             settings.hudBackgroundOpacity=settings.speedrunBackgroundOpacity=percent;
-            std::vector<unsigned> hud(SCREENWIDTH*SCREENHEIGHT,0),speed(SCREENWIDTH*SCREENHEIGHT,0);modernHud(hud);combatWidgets(speed);
+            std::vector<unsigned> hud(SCREENWIDTH*SCREENHEIGHT,0),speed(SCREENWIDTH*SCREENHEIGHT,0);modernHud(hud.data());combatWidgets(speed.data());
             unsigned expected=(unsigned)std::lround(percent*2.55f);
             check((hud[165*SCREENWIDTH+9]>>24)==expected&&(hud[SCREENWIDTH+222]>>24)==expected,"modern panel and stats alpha follow the slider");
             check((speed[53*SCREENWIDTH+5]>>24)==expected,"Speedrun panel alpha follows its independent slider");

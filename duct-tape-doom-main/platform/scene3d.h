@@ -189,6 +189,9 @@ struct Settings {
     int elementalDot=0,combatMessages=0;
     int corrosiveBarrels=0; // Persistent acid leaks and damaging pools from explosive barrels; classic behavior when off.
     int speedrunHUD=0,speedrunAttempts=1,speedrunDeaths=1,speedrunStreak=1,speedrunAttemptTime=1,speedrunRuntime=1,speedrunDealt=1,speedrunTaken=1,speedrunAnchor=0,speedrunLayout=0;
+    int speedrunOnly=0,speedrunMapName=1,speedrunSecrets=0,speedrunItems=0,speedrunHealth=0,speedrunArmor=0,speedrunAmmo=0;
+    int speedrunPlayerAnchor=1;
+    float speedrunPlayerX=0,speedrunPlayerY=0;
     float speedrunX=0,speedrunY=0;
     int elementalCombatFX=0,advancedMonsterReactions=0;
     int eyeInjuries=0;
@@ -360,7 +363,9 @@ FrameView prepareFrame(int width,int height);
 using LoadingShow=void(*)(const char *title,const char *stage,float fraction);
 bool loadPending();
 void runLoading(int width,int height,LoadingShow show);
-extern int speedrunPanelWidth,speedrunPanelHeight;
+struct SpeedrunAtlasPanel { int x=0,width=0,height=0; };
+extern std::array<SpeedrunAtlasPanel,2> speedrunAtlasPanels;
+inline bool speedrunOnlyHud(const Settings &s) {return s.accelerated&&s.speedrunHUD&&s.speedrunOnly;}
 std::vector<unsigned> hudPixels(const unsigned *pixels);
 extern GpuTextureRef keyHandTextures[6];
 extern float keyHandAspect[6],keyHandVisible,keyWeaponDrop;

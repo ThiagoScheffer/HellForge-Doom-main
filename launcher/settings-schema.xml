@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="b6ca4bd0afa40ada1cca15c520b0e04e9b4fb78db883d037c25d25040f415657">
+<settings source="platform/settings_panel.cpp" source_sha256="4288e9d803f6247cc17e223a4e7bf746ba8abd3a4fc5650e22d9fd1b29a83a0f">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -274,11 +274,16 @@
   <option key="peek_left" title="Peek left" category="Controls" kind="key" />
   <option key="peek_right" title="Peek right" category="Controls" kind="key" />
   <option key="speedrun_hud" title="Enable Speedrun HUD" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_only" title="Speedrun HUD only" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_background_opacity" title="Background opacity" category="SPEEDRUN" kind="slider" min="0" max="100" step="5" />
-  <option key="speedrun_layout" title="Info layout" category="SPEEDRUN" kind="choice" choices="0=Column|1=Row" />
+  <option key="speedrun_layout" title="Info layout" category="SPEEDRUN" kind="choice" choices="0=Column|1=Row|2=Split Columns" />
   <option key="speedrun_x" title="X adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
   <option key="speedrun_y" title="Y adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
   <option key="speedrun_anchor" title="Overlay position" category="SPEEDRUN" kind="choice" choices="0=Upper left|1=Upper right|2=Lower left|3=Lower right" />
+  <option key="speedrun_player_anchor" title="Player column position" category="SPEEDRUN" kind="choice" choices="1=Upper right|3=Lower right" />
+  <option key="speedrun_player_x" title="Player X adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
+  <option key="speedrun_player_y" title="Player Y adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
+  <option key="speedrun_map_name" title="Map name" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_attempts" title="Map Attempts" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_deaths" title="Map Deaths" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_killstreak" title="Killstreak" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
@@ -286,6 +291,11 @@
   <option key="speedrun_runtime" title="Gameplay Runtime" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_damage_dealt" title="Total Damage Dealt" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_damage_taken" title="Total Damage Taken" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_secrets" title="Secrets" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_items" title="Items" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_health" title="Health" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_armor" title="Armor" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_ammo" title="Ammo" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="encounter_threat_zombieman" title="Zombieman threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
   <option key="encounter_threat_shotgun_guy" title="Shotgun Guy threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
   <option key="encounter_threat_chaingunner" title="Chaingunner threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />

@@ -1,6 +1,7 @@
 // Full-view HUD drawn into the existing transparent overlay. No world renderer changes.
 #ifndef DOOM_MODERN_HUD_H
 #define DOOM_MODERN_HUD_H
+#include "../hud_screen_position.h"
 extern "C" { int ST_FaceIndex(void); int Arcade_MenuOpen(void); extern int arcade_active; }
 extern "C" { const unsigned char *ST_HelmetFace(int index); }
 namespace doom3d {
@@ -13,8 +14,15 @@ inline const char *hudGlyph(char c){
 inline unsigned hudBackdrop(unsigned color,float percent){
     return (color&0x00ffffffu)|((unsigned)std::lround(std::clamp(percent,0.f,100.f)*2.55f)<<24);
 }
-inline void modernHud(std::vector<unsigned>& out) {
-    if(!worldPending||menuactive||automapactive||Arcade_MenuOpen())return;
+inline std::array<int,3> hudMapCounts() {
+    std::array<int,3> counts{};
+    for(int i=0;i<MAXPLAYERS;++i)if(playeringame[i]) {
+        counts[0]+=players[i].killcount;counts[1]+=players[i].secretcount;counts[2]+=players[i].itemcount;
+    }
+    return counts;
+}
+inline void modernHud(unsigned *out) {
+    if(speedrunOnlyHud(settings)||!worldPending||menuactive||automapactive||Arcade_MenuOpen())return;
     std::vector<unsigned> hud(SCREENWIDTH*SCREENHEIGHT,0);
     const auto& p=players[displayplayer];
     auto rect=[&](int x,int y,int w,int h,unsigned color){
@@ -50,8 +58,8 @@ inline void modernHud(std::vector<unsigned>& out) {
     for(int key=0;key<NUMCARDS;++key)if(p.cards[key]){char name[9];snprintf(name,sizeof(name),"STKEYS%d",key);art(name,256+(key%3)*18,151-(key/3)*9,14,8);}
     // Fixed top-right statistics, independent of the bottom-panel scale/dock.
     const char* statNames[]={"KILLS","SECRETS","ITEMS"};
-    int counts[]={0,0,0},totals[]={totalkills,totalsecret,totalitems};
-    for(int i=0;i<MAXPLAYERS;++i)if(playeringame[i]){counts[0]+=players[i].killcount;counts[1]+=players[i].secretcount;counts[2]+=players[i].itemcount;}
+    const auto counts=hudMapCounts();
+    const int totals[]={totalkills,totalsecret,totalitems};
     for(int row=0;row<3;++row){
         std::string value=std::string(statNames[row])+" "+std::to_string(counts[row])+"/"+std::to_string(totals[row]);
         unsigned color=totals[row]>0&&counts[row]>=totals[row]?0xff83edb0:0xffedf3f3;
@@ -159,20 +167,32 @@ inline void modernHud(std::vector<unsigned>& out) {
 }
 // Geometry in the fixed HUD viewport: a movable row must never span the
 // independently docked modern-HUD atlas sections in widescreen.
+enum { SpeedrunPlayerStart=10,SpeedrunMetricCount=13 };
 struct SpeedrunPanel {
-    struct Cell {int line,x,y;};Cell cells[8]{};int count=0,x=0,y=0,width=115,height=0;
+    struct Cell {int line,x,y;};Cell cells[SpeedrunMetricCount]{};int count=0,x=0,y=0,width=115,height=0;
 };
-inline SpeedrunPanel speedrunPanel(const char lines[8][48],const int visible[8]){
+template<std::size_t N>
+inline SpeedrunPanel speedrunPanel(const char (&lines)[N][48],const int *visible,int first=0,int last=N){
     SpeedrunPanel out;int row=0,cursor=0,extent=0;
     const bool horizontal=settings.speedrunLayout==1;
-    for(int i=0;i<8;++i)if(visible[i]){
+    for(int i=first;i<last;++i)if(visible[i]){
         int width=std::min((int)std::strlen(lines[i]),horizontal?47:27)*4;
         if(!horizontal){extent=std::max(extent,width);out.cells[out.count++]={i,0,row++*8};continue;}
         if(cursor&&cursor+width>SCREENWIDTH-6){cursor=0;++row;}
         out.cells[out.count++]={i,cursor,row*8};extent=std::max(extent,cursor+width);cursor+=width+8;
     }
+    if(!out.count)return out;
     out.width=std::clamp(extent+6,12,SCREENWIDTH);
     out.height=(horizontal?(out.count>1?row+1:1):row)*8+6;
+    if(settings.speedrunLayout==2) {
+        bool player=first==SpeedrunPlayerStart;
+        int anchor=player?(settings.speedrunPlayerAnchor|1):(settings.speedrunAnchor&~1);
+        auto position=hudScreenPosition(SCREENWIDTH,SCREENHEIGHT,SCREENWIDTH,out.width,out.height,anchor,
+            player?settings.speedrunPlayerX:settings.speedrunX,player?settings.speedrunPlayerY:settings.speedrunY,
+            settings.hudLayout==2,true);
+        out.x=3+(int)std::lround(position.x);out.y=3+(int)std::lround(position.y);
+        return out;
+    }
     int x=(settings.speedrunAnchor&1)?SCREENWIDTH-out.width:8;
     int y=settings.speedrunAnchor>=2?158-out.height:settings.hudLayout==2?98:56;
     y=std::min(y,168-out.height);
@@ -181,17 +201,16 @@ inline SpeedrunPanel speedrunPanel(const char lines[8][48],const int visible[8])
     out.x=std::clamp(x,3,SCREENWIDTH-out.width+3);
     out.y=std::clamp(y,3,SCREENHEIGHT-out.height+3);return out;
 }
-inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false,bool localPanel=false){
-    if((!settings.speedrunHUD&&!settings.combatMessages)||!worldPending||menuactive||automapactive||Arcade_MenuOpen()||!P_WeakpointActive())return;
+inline void combatWidgets(unsigned *out,bool fixed=false,bool localPanel=false){
+    if((!settings.speedrunHUD&&!settings.combatMessages)||!worldPending||menuactive||automapactive||Arcade_MenuOpen()||(fixed&&speedrunOnlyHud(settings)))return;
     const unsigned background=fixed?0xd0141010u:hudBackdrop(0x141010,settings.speedrunBackgroundOpacity);
     auto box=[&](int x,int y,int w,int h){if(!(background>>24))return;for(int yy=std::max(0,y);yy<std::min(SCREENHEIGHT,y+h);++yy)for(int xx=std::max(0,x);xx<std::min(SCREENWIDTH,x+w);++xx)out[yy*SCREENWIDTH+xx]=background;};
     auto text=[&](const char *value,int x,int y,unsigned color){for(int n=0;value[n]&&n<76;++n,x+=4)if(const char *bits=hudGlyph(value[n]))for(int row=0;row<5;++row)for(int col=0;col<3;++col)if(bits[row*3+col]=='1'&&x+col>=0&&x+col<SCREENWIDTH&&y+row>=0&&y+row<SCREENHEIGHT)out[(y+row)*SCREENWIDTH+x+col]=color;};
     if(settings.speedrunHUD&&!fixed){
-        static combat_stats_t previous{};static bool valid=false;static char lines[8][48]{},compact[8][48]{};
+        static combat_stats_t previous{};static bool valid=false;static char lines[SpeedrunMetricCount][48]{},compact[SpeedrunMetricCount][48]{};
         const auto &stats=*P_SessionStats();
         if(!valid||std::memcmp(&stats,&previous,sizeof(stats))){
             previous=stats;valid=true;
-            if(gamemode==commercial)std::snprintf(lines[0],48,"SPEEDRUN - MAP%02d",stats.map);else std::snprintf(lines[0],48,"SPEEDRUN - E%dM%d",stats.episode,stats.map);
             std::snprintf(lines[1],48,"ATTEMPTS %llu",(unsigned long long)stats.attempts);
             std::snprintf(lines[2],48,"DEATHS %llu",(unsigned long long)stats.deaths);
             std::snprintf(lines[3],48,"KILLSTREAK %llu",(unsigned long long)stats.streak);
@@ -199,7 +218,6 @@ inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false,bool local
             timer(lines[4],"ATTEMPT",stats.attemptTics);timer(lines[5],"RUNTIME",stats.runtimeTics);
             std::snprintf(lines[6],48,"DMG DEALT %llu",(unsigned long long)stats.dealt);
             std::snprintf(lines[7],48,"DMG TAKEN %llu",(unsigned long long)stats.taken);
-            if(gamemode==commercial)std::snprintf(compact[0],48,"MAP%02d",stats.map);else std::snprintf(compact[0],48,"E%dM%d",stats.episode,stats.map);
             std::snprintf(compact[1],48,"ATT %llu",(unsigned long long)stats.attempts);
             std::snprintf(compact[2],48,"DTH %llu",(unsigned long long)stats.deaths);
             std::snprintf(compact[3],48,"KS %llu",(unsigned long long)stats.streak);
@@ -210,13 +228,59 @@ inline void combatWidgets(std::vector<unsigned> &out,bool fixed=false,bool local
             std::snprintf(compact[6],48,"DEALT %llu",(unsigned long long)stats.dealt);
             std::snprintf(compact[7],48,"TAKEN %llu",(unsigned long long)stats.taken);
         }
-        int visible[]={1,settings.speedrunAttempts,settings.speedrunDeaths,settings.speedrunStreak,settings.speedrunAttemptTime,settings.speedrunRuntime,settings.speedrunDealt,settings.speedrunTaken};
-        const auto &values=settings.speedrunLayout==1?compact:lines;
-        auto panel=speedrunPanel(values,visible);if(localPanel){speedrunPanelWidth=panel.width;speedrunPanelHeight=panel.height;panel.x=panel.y=3;}box(panel.x-3,panel.y-3,panel.width,panel.height);
-        for(int i=0;i<panel.count;++i){const auto &cell=panel.cells[i];char clipped[48];
-            std::snprintf(clipped,settings.speedrunLayout==1?sizeof(clipped):28,"%s",values[cell.line]);
-            text(clipped,panel.x+cell.x,panel.y+cell.y,cell.line?0xfff3e8deu:0xffffb15au);
+        if(gamemode==commercial)std::snprintf(compact[0],48,"MAP%02d",gamemap);
+        else std::snprintf(compact[0],48,"E%dM%d",gameepisode,gamemap);
+        std::snprintf(lines[0],48,"SPEEDRUN - %s",compact[0]);
+        if(settings.speedrunSecrets||settings.speedrunItems) {
+            const auto counts=hudMapCounts();
+            std::snprintf(lines[8],48,"SECRETS %d/%d",counts[1],totalsecret);
+            std::snprintf(lines[9],48,"ITEMS %d/%d",counts[2],totalitems);
+            std::snprintf(compact[8],48,"SEC %d/%d",counts[1],totalsecret);
+            std::snprintf(compact[9],48,"ITM %d/%d",counts[2],totalitems);
         }
+        const auto &p=players[displayplayer];
+        if(settings.speedrunHealth) {
+            std::snprintf(lines[10],48,"HEALTH %d",std::max(0,p.health));
+            std::snprintf(compact[10],48,"HP %d",std::max(0,p.health));
+        }
+        if(settings.speedrunArmor) {
+            std::snprintf(lines[11],48,"ARMOR %d",std::max(0,p.armorpoints));
+            std::snprintf(compact[11],48,"AR %d",std::max(0,p.armorpoints));
+        }
+        if(settings.speedrunAmmo) {
+            int ammo=p.readyweapon>=0&&p.readyweapon<NUMWEAPONS?weaponinfo[p.readyweapon].ammo:am_noammo;
+            if(ammo>=0&&ammo<NUMAMMO)std::snprintf(lines[12],48,"AMMO %d/%d",p.ammo[ammo],p.maxammo[ammo]);
+            else std::snprintf(lines[12],48,"AMMO -");
+            std::snprintf(compact[12],48,"%s",lines[12]);
+        }
+        bool session=P_WeakpointActive();
+        int visible[]={settings.speedrunMapName,session&&settings.speedrunAttempts,session&&settings.speedrunDeaths,
+            session&&settings.speedrunStreak,session&&settings.speedrunAttemptTime,session&&settings.speedrunRuntime,
+            session&&settings.speedrunDealt,session&&settings.speedrunTaken,settings.speedrunSecrets,settings.speedrunItems,
+            settings.speedrunHealth,settings.speedrunArmor,settings.speedrunAmmo};
+        const auto &values=settings.speedrunLayout==1?compact:lines;
+        int atlasX=0;
+        auto draw=[&](int slot,int first,int last) {
+            auto panel=speedrunPanel(values,visible,first,last);
+            if(!panel.count)return;
+            if(localPanel) {
+                speedrunAtlasPanels[slot]={atlasX,panel.width,panel.height};
+                panel.x=atlasX+3;panel.y=3;atlasX+=panel.width;
+            }
+            box(panel.x-3,panel.y-3,panel.width,panel.height);
+            for(int i=0;i<panel.count;++i) {
+                const auto &cell=panel.cells[i];
+                char clipped[48];
+                std::snprintf(clipped,sizeof(clipped),"%.*s",settings.speedrunLayout==1?47:27,values[cell.line]);
+                unsigned color=cell.line==0?0xffffb15au:0xfff3e8deu;
+                if(cell.line==10&&p.health<=25)color=0xffff7766u;
+                text(clipped,panel.x+cell.x,panel.y+cell.y,color);
+            }
+        };
+        if(settings.speedrunLayout==2) {
+            draw(0,0,SpeedrunPlayerStart);
+            draw(1,SpeedrunPlayerStart,SpeedrunMetricCount);
+        } else draw(0,0,SpeedrunMetricCount);
     }
     if(settings.combatMessages&&fixed){combat_notice_t notices[3];int count=P_HudNotices(notices);
         for(int i=0;i<count;++i){char value[61];std::snprintf(value,sizeof(value),"%s",notices[i].text);int width=(int)std::strlen(value)*4,x=(SCREENWIDTH-width)/2,y=28+i*8;box(x-2,y-1,width+3,7);text(value,x,y,notices[i].color);}

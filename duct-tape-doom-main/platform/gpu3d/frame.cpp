@@ -471,19 +471,23 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     // Separate HUD atlas layer: dock side panels to widescreen edges without
     // stretching lettering or shifting menus, notices, or the weapon wheel.
     const float edges[]={0,136,202,320};
-    for(int group=0;group<3;++group) {
+    for(int group=0;group<3&&!speedrunOnlyHud(settings);++group) {
         float shift=settings.hudLayout==1?0.f:(group==0?-view.uiX:group==2?width-view.uiX-view.uiWidth:0.f);
         screenQuad(hud,-1+2*edges[group]/320+2*shift/view.uiWidth,1,
             2*(edges[group+1]-edges[group])/320,2,edges[group]/320,1.f/3,edges[group+1]/320,2.f/3);
     }
     for(auto &v:hud)v.x=(v.x*view.uiWidth+2*view.uiX+view.uiWidth-width)/width;
-    if(speedrunPanelWidth>0&&speedrunPanelHeight>0){
-        auto panel=hudScreenPosition((float)width,view.uiHeight,view.uiWidth,speedrunPanelWidth,speedrunPanelHeight,
-            settings.speedrunAnchor,settings.speedrunX,settings.speedrunY,settings.hudLayout==2);
+    const bool split=settings.speedrunLayout==2;
+    for(size_t i=0;i<speedrunAtlasPanels.size();++i) {
+        const auto &region=speedrunAtlasPanels[i];
+        if(region.width<=0||region.height<=0)continue;
+        const int anchor=i?(settings.speedrunPlayerAnchor|1):split?(settings.speedrunAnchor&~1):settings.speedrunAnchor;
+        auto panel=hudScreenPosition((float)width,view.uiHeight,view.uiWidth,region.width,region.height,anchor,
+            i?settings.speedrunPlayerX:settings.speedrunX,i?settings.speedrunPlayerY:settings.speedrunY,settings.hudLayout==2,split);
         screenQuad(hud,-1+2*panel.x/width,1-2*panel.y/view.uiHeight,2*panel.w/width,2*panel.h/view.uiHeight,
-            0,2.f/3,speedrunPanelWidth/320.f,2.f/3+speedrunPanelHeight/600.f);
+            region.x/320.f,2.f/3,(region.x+region.width)/320.f,2.f/3+region.height/600.f);
     }
-    std::vector<Vertex> cross;if(!director_view_active)cross=crosshairVertices(view.worldW,view.worldH);
+    std::vector<Vertex> cross;if(!director_view_active&&!speedrunOnlyHud(settings))cross=crosshairVertices(view.worldW,view.worldH);
     std::vector<const std::vector<Vertex>*> transient={&hud,&cross};
     arcadeRankQuad.clear();
     if((Arcade_MenuOpen()||Menu_BrandOpen())&&arcadeRankTexture){
