@@ -410,6 +410,7 @@ void collectFlashes(float fraction,const Uniforms &camera) {
         float strength=p.strength*doom_flash_fade(leveltime-p.tic,fraction);
         if(strength>0) appendLight(p.x,p.y,p.z,p.radius,strength,p.color,p.source,0.75f);
     }
+    if(settings.emissive)collectHellfireLights(camera);
     // Live WAD missile objects supply continuous light, including their bright
     // impact frames. Keep the nearest eight so rapid fire has a bounded cost.
     struct Candidate {mobj_t *thing;float distance;};

@@ -16,8 +16,10 @@
 #include "../storm_atmosphere.h"
 #include "../episode_atmosphere.h"
 #include "../lightning_interactions.h"
+#include "../../../volume.h"
 extern "C" {
 #include "../audio/sound_options.h"
+#include "../../linuxdoom-1.10/p_solid.h"
 }
 
 namespace doom3d {
@@ -28,6 +30,9 @@ namespace doom3d {
 void fluidWeatherSmoke(const Uniforms &camera,float x,float y,float z,
     float radiusX,float radiusZ,const std::array<float,3> &color,
     float alpha,float rotation,int mask);
+void drawHellfireGlow(const Uniforms &camera,lab::Vec at,float width,float height,
+                     float roll,const std::array<float,3> &color,float alpha,bool additive,
+                     bool floorAligned=false);
 
 float rainNow=0,wetNow=0,glassWetNow=0;
 float stormFlashNow=0,stormBoltNow=0,stormBoltAzimuthNow=0,stormBoltSeedNow=0;
@@ -38,6 +43,8 @@ float starportDustNow=0,starportGustNow=0; // E1: dry sandstorm intensity and gu
 float citySmokeNow=0,bloodHellMistNow=0; // E2/E3: themed haze, without water rain.
 float rainWind[2]={0,0};
 namespace {
+namespace hellfire=doom_episode::hellfire;
+hellfire::State fallingHellfire;
 unsigned weatherLevelSerial=~0u,soakPaneSerial=~0u;
 uint32_t weatherSeed=0;
 doom_storm::State stormState;
@@ -92,6 +99,57 @@ doom_episode::Profile episodeProfile() {
 }
 uint32_t levelWeatherSeed() {
     return hash32((uint32_t)gameepisode*7919u+(uint32_t)gamemap*104729u+(uint32_t)skytexture*31u+17u);
+}
+bool hellfireColumn(const sector_t &sector) {
+    bool solid=sector.floorpic>=0&&sector.floorpic<numflats&&
+        sector.floorpic!=skyflatnum&&liquidLook(sector.floorpic)==LIQUID_LOOK_NONE;
+#ifdef DOOM_BOOM_SECTORS
+    solid=solid&&sector.heightsec<0;
+#endif
+    return hellfire::openColumn(sector.ceilingpic==skyflatnum,solid,
+        units(sector.ceilingheight)-units(sector.floorheight));
+}
+bool hellfireSiteValid(const hellfire::Site &site) {
+    const sector_t &sector=sectors[site.sector];
+    if(units(sector.floorheight)!=site.floor||units(sector.ceilingheight)!=site.ceiling||
+       !hellfireColumn(sector))return false;
+    if(!SV_MapMode())return true;
+    for(int i=0;i<9;++i) {
+        const float angle=i*float(doomPi/4);
+        const float radius=i?hellfire::clearance:0.f;
+        const float x=site.x+radius*std::cos(angle),y=site.y+radius*std::sin(angle);
+        if(SV_Edited(x,y,site.floor)||SV_Edited(x,y,site.floor-2.f))return false;
+    }
+    return true;
+}
+hellfire::Site findHellfireSite(std::uint32_t seed) {
+    const mobj_t *player=players[consoleplayer].mo;
+    if(!player||!subsectors||!sectors)return {};
+    // An annulus around the simulation player, independent of view angle.
+    for(int i=0;i<48;++i) {
+        const std::uint32_t h=hellfire::hash(seed+std::uint32_t(i)*0x9e3779b9u);
+        const float angle=2.f*float(doomPi)*hashUnit(i,0,h);
+        const float distance=112.f+300.f*hashUnit(i,1,h);
+        const float x=units(player->x)+distance*std::cos(angle);
+        const float y=units(player->y)+distance*std::sin(angle);
+        // Leave room for fixed-point conversion and the full descent corridor.
+        if(std::abs(x)>32738.f||std::abs(y)>32738.f)continue;
+        const sector_t *sector=R_PointInSubsector(fixed_t(x*FRACUNIT),fixed_t(y*FRACUNIT))->sector;
+        if(!sector||!hellfireColumn(*sector))continue;
+        // With every linedef outside this disk, the slanted descent and
+        // impact footprint stay in one unobstructed outdoor sector.
+        hellfire::LandingDisk disk{x,y};
+        for(int n=0;n<sector->linecount&&disk.clear;++n) {
+            const line_t &line=*sector->lines[n];
+            disk.edge(units(line.v1->x),units(line.v1->y),units(line.v2->x),units(line.v2->y),
+                      line.frontsector!=line.backsector);
+        }
+        if(!disk.inside||!disk.clear)continue;
+        const hellfire::Site site{x,y,units(sector->floorheight),units(sector->ceilingheight),
+            12.f*std::cos(angle),12.f*std::sin(angle),int(sector-sectors),h};
+        if(hellfireSiteValid(site))return site;
+    }
+    return {};
 }
 // How hard it rains: a downpour, or less as the mood says (rainAmount), the
 // gusts varying it a little.
@@ -368,6 +426,13 @@ void bakeWetness() {
         }
     }
     for(size_t i=0;i<wetCells.size();++i)flatCell(floorLight,i)[3]=wetCells[i];
+}
+
+void resetHellfire() {fallingHellfire={};}
+void tickHellfire() {
+    hellfire::advance(fallingHellfire,leveltime,TICRATE,r_levelserial,
+        levelWeatherSeed()^0xda1f1e2du,hellfire::enabled(episodeProfile(),settings.accelerated),
+        findHellfireSite,hellfireSiteValid);
 }
 
 // Each tic: the rain, the wind's gusts, whether the ground is wet (it is
@@ -1339,6 +1404,25 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
     }
 }
 
+namespace {
+void drawFireEmbers(const Uniforms &camera,float x,float y,float ground,float height,
+                   float seconds,float fade,std::uint32_t seed) {
+    for(int n=0;n<doom_strike::fireEmberMotes;++n) {
+        const float offset=doom_strike::unit(seed+std::uint32_t(n)*0x7feb352du);
+        const float t=std::fmod(seconds*(.29f+.045f*(n%4))+offset,1.f);
+        const float a=6.2831853f*doom_strike::unit(seed^
+            (std::uint32_t(n)*0x846ca68bu))+.55f*seconds;
+        const float radius=2.5f+13.f*t;
+        const std::array<float,3> ember=n%3==0?
+            std::array<float,3>{1.f,.60f,.20f}:
+            std::array<float,3>{.88f,.28f,.065f};
+        pixelBlock(particleVertices,camera,x+radius*std::cos(a),y+radius*std::sin(a),
+                   ground+5.f+height*(.15f+.95f*t),.38f,.60f,ember,
+                   false,nullptr,false,nullptr,.73f*fade*(1.f-t));
+    }
+}
+}
+
 // D3.2: both vanilla dead-tree sprites, prioritized close thunder, and
 // bounded embers. The 20% ignition decision remains deterministic, and
 // a finished fire leaves a cached charcoal-colored tree sprite.
@@ -1452,27 +1536,117 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
             pixelBlock(particleVertices,camera,x,y,z,.57f,.90f,gold,
                        false,nullptr,false,nullptr,.65f*fade*(1.f-t));
         }
-        // D3.2: low, slow orange-red coals orbit and drift away from the
-        // burning branches, at different heights and phases. Pure geometry.
-        for(int n=0;n<doom_strike::fireEmberMotes;++n) {
-            const float offset=doom_strike::unit(fire.seed+
-                std::uint32_t(n)*0x7feb352du);
-            const float t=std::fmod(seconds*(.29f+.045f*(n%4))+offset,1.f);
-            const float a=6.2831853f*doom_strike::unit(fire.seed^
-                (std::uint32_t(n)*0x846ca68bu))+.55f*seconds;
-            const float radius=2.5f+13.f*t;
-            const float x=fire.x+radius*std::cos(a);
-            const float y=fire.y+radius*std::sin(a);
-            const float z=fire.ground+5.f+fire.height*(.15f+.95f*t);
-            const std::array<float,3> ember=n%3==0?
-                std::array<float,3>{1.f,.60f,.20f}:
-                std::array<float,3>{.88f,.28f,.065f};
-            pixelBlock(particleVertices,camera,x,y,z,.38f,.60f,ember,
-                       false,nullptr,false,nullptr,.73f*fade*(1.f-t));
+        drawFireEmbers(camera,fire.x,fire.y,fire.ground,fire.height,seconds,fade,fire.seed);
+    }
+}
+namespace {
+constexpr std::array<float,3> hellfireRed{.91f,.12f,.025f};
+constexpr std::array<float,3> hellfireOrange{1.f,.39f,.056f};
+constexpr std::array<float,3> hellfireGold{1.f,.86f,.36f};
+bool hellfireVisible(const Uniforms &camera) {
+    return gamestate==GS_LEVEL&&camera.effects[2]==0&&r_levelserial==fallingHellfire.level&&
+        (fallingHellfire.fall.start>=0||fallingHellfire.fires[0].start>=0||
+         fallingHellfire.fires[1].start>=0)&&hellfire::enabled(episodeProfile(),settings.accelerated);
+}
+float hellfireTic() {return fallingHellfire.last+renderFraction;}
+lab::Vec hellfirePosition(const hellfire::Site &site,float progress) {
+    const float u=1.f-progress;
+    const float height=std::min(260.f,site.ceiling-site.floor-32.f);
+    return {site.x+site.driftX*u,site.y+site.driftY*u,site.floor+9.f+(height-9.f)*u};
+}
+float impactFlare(float age) {return std::max(0.f,1.f-age*6.f);}
+}
+
+void collectHellfireLights(const Uniforms &camera) {
+    if(!hellfireVisible(camera))return;
+    const auto &fall=fallingHellfire.fall;
+    const float tic=hellfireTic();
+    if(fall.start>=0) {
+        const auto at=hellfirePosition(fall.site,std::clamp((tic-fall.start)/TICRATE,0.f,1.f));
+        appendLight(at.x,at.y,at.z,82.f,.26f,hellfireOrange,nullptr,.75f);
+    }
+    for(const auto &fire:fallingHellfire.fires)if(fire.start>=0) {
+        const float age=(tic-fire.start)/TICRATE;
+        const float flare=impactFlare(age)*(settings.stormStrongFlashes?.62f:.24f);
+        const float flicker=.16f+.04f*std::sin(age*13.f);
+        const auto &site=fire.site;
+        appendLight(site.x,site.y,site.floor+12.f,64.f+24.f*flare,
+            flare+flicker*hellfire::fireFade(fire,tic,TICRATE),hellfireOrange,nullptr,.75f);
+    }
+}
+
+void buildHellfire(const Uniforms &camera) {
+    if(!hellfireVisible(camera))return;
+    const float tic=hellfireTic();
+    const auto &fall=fallingHellfire.fall;
+    auto spark=[&](lab::Vec at,float width,float stretch,const std::array<float,3> &color,float alpha) {
+        pixelBlock(particleVertices,camera,at.x,at.y,at.z,width,stretch,
+                   color,false,nullptr,false,nullptr,alpha);
+    };
+    if(fall.start>=0) {
+        const auto &site=fall.site;
+        const float age=std::clamp((tic-fall.start)/TICRATE,0.f,1.f);
+        const auto at=hellfirePosition(site,age);
+        for(int i=0;i<16;++i) {
+            const float lag=(i+1)*.024f;
+            if(lag>age)break;
+            auto ember=hellfirePosition(site,age-lag);
+            const float phase=2.f*float(doomPi)*hashUnit(i,0,site.seed);
+            ember.x+=std::cos(phase)*(2.f+28.f*lag);
+            ember.y+=std::sin(phase)*(2.f+28.f*lag);
+            spark(ember,1.7f,2.5f,i%3?hellfireGold:hellfireOrange,.94f*(1.f-2.f*lag));
+        }
+        drawHellfireGlow(camera,at,11.f,16.f,.24f,hellfireRed,.28f,true);
+        for(int i=0;i<5;++i) {
+            const float phase=2.f*float(doomPi)*hashUnit(i,2,site.seed)+age*(9.f+i);
+            const lab::Vec tongue{at.x+5.f*std::cos(phase),at.y+5.f*std::sin(phase),
+                at.z+3.f*i};
+            drawHellfireGlow(camera,tongue,3.2f+i*.5f,8.f+i,-.48f*std::sin(phase),
+                i%2?hellfireOrange:hellfireRed,.74f,false);
+        }
+        drawHellfireGlow(camera,at,4.5f,8.f,.38f,hellfireGold,.95f,true);
+    }
+    for(const auto &fire:fallingHellfire.fires) {
+        if(fire.start<0)continue;
+        const auto &site=fire.site;
+        const float age=(tic-fire.start)/TICRATE;
+        const float fade=hellfire::fireFade(fire,tic,TICRATE);
+        drawFireEmbers(camera,site.x,site.y,site.floor,13.f,age,fade,site.seed);
+        const float flare=impactFlare(age)*(settings.stormStrongFlashes?1.f:.5f);
+        if(flare>0.f)drawHellfireGlow(camera,{site.x,site.y,site.floor+8.f},
+            22.f,13.f,0.f,hellfireGold,.84f*flare,true);
+        for(int i=0;i<6;++i) {
+            const float phase=2.f*float(doomPi)*hashUnit(i,0,site.seed);
+            const float x=site.x+12.f*std::cos(phase),y=site.y+12.f*std::sin(phase);
+            const float flicker=.65f+.35f*std::sin(age*(9.f+i)+phase);
+            const float height=(5.f+4.f*hashUnit(i,1,site.seed))*(.6f+.4f*fade);
+            // Low hot patches sit beneath the flickering tongues.
+            drawHellfireGlow(camera,{x,y,site.floor+.5f},8.f,5.f,phase,
+                hellfireRed,.73f*fade,true,true);
+            drawHellfireGlow(camera,{x,y,site.floor+height},4.f,height,
+                .3f*std::sin(age*7.f+phase),hellfireOrange,fade*flicker,false);
+            drawHellfireGlow(camera,{x,y,site.floor+height*.55f},2.f,height*.55f,
+                0.f,hellfireGold,.75f*fade*flicker,true);
+            if(age<1.05f) {
+                const float spread=4.f+age*7.f;
+                fluidWeatherSmoke(camera,site.x+spread*std::cos(phase),
+                    site.y+spread*std::sin(phase),site.floor+6.f+age*(16.f+i),
+                    3.f+age*5.f,4.f+age*5.f,{.23f,.16f,.13f},
+                    .34f*(1.f-age/1.05f),phase,13);
+            }
+        }
+        if(age<.65f)for(int i=0;i<18;++i) {
+            const float angle=2.f*float(doomPi)*hashUnit(i,3,site.seed);
+            const float radius=age*(15.f+22.f*hashUnit(i,4,site.seed));
+            const float z=site.floor+2.f+age*(28.f+25.f*hashUnit(i,5,site.seed)-40.f*age);
+            spark({site.x+radius*std::cos(angle),site.y+radius*std::sin(angle),z},
+                  1.25f,1.7f,i%2?hellfireOrange:hellfireGold,1.f-age/.65f);
         }
     }
 }
+
 void weatherShutdown() {
+    resetHellfire();
     rainNow=wetNow=glassWetNow=stormFlashNow=stormBoltNow=stormBoltAzimuthNow=stormBoltSeedNow=0;
     stormCurtainNow=stormHazeNow=0;
     deimosBlizzardNow=deimosGustNow=0;

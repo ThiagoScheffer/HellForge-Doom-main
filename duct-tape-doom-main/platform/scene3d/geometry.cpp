@@ -1223,6 +1223,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         buildRain(camera);
         buildEpisodeAtmosphere(camera);
         buildInfernoTreeStrikes(camera);
+        buildHellfire(camera);
         buildBubbles(camera);
         timing(9);
         if (spike)

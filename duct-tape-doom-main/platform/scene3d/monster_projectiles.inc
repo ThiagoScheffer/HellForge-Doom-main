@@ -123,20 +123,26 @@ static int monsterSquareFireImage(){
     return lump;
 }
 static void projectileQuad(const Uniforms &camera,lab::Vec at,float width,float height,
-                           float roll,const std::array<float,3> &color,float alpha,bool additive,bool squareFire=false){
+                           float roll,const std::array<float,3> &color,float alpha,bool additive,
+                           bool squareFire=false,bool floorAligned=false){
     if(width<=0||height<=0||alpha<=0)return;
     float depth=(at.x-camera.eye[0])*camera.forward[0]+(at.y-camera.eye[1])*camera.forward[1]+(at.z-camera.eye[2])*camera.forward[2];
     if(depth<.5f)return;
     float c=std::cos(roll),s=std::sin(roll);
     auto v=[&](float x,float y,float u,float t){
         float rx=c*x-s*y,ry=s*x+c*y;
-        Vertex out={at.x+camera.right[0]*rx+camera.up[0]*ry,at.y+camera.right[1]*rx+camera.up[1]*ry,
-                    at.z+camera.right[2]*rx+camera.up[2]*ry,u,t,alpha,0};
+        Vertex out=floorAligned?Vertex{at.x+rx,at.y+ry,at.z,u,t,alpha,0}:
+            Vertex{at.x+camera.right[0]*rx+camera.up[0]*ry,at.y+camera.right[1]*rx+camera.up[1]*ry,
+                   at.z+camera.right[2]*rx+camera.up[2]*ry,u,t,alpha,0};
         out.red=color[0];out.green=color[1];out.blue=color[2];return out;
     };
     int image=squareFire?monsterSquareFireImage():monsterGlowImage();
     auto &out=additive?effectAddBatches[image]:effectBatches[image];
     quad(out,v(-width,height,0,0),v(width,height,64,0),v(width,-height,64,64),v(-width,-height,0,64));
+}
+void drawHellfireGlow(const Uniforms &camera,lab::Vec at,float width,float height,
+                      float roll,const std::array<float,3> &color,float alpha,bool additive,bool floorAligned) {
+    projectileQuad(camera,at,width,height,roll,color,alpha,additive,false,floorAligned);
 }
 bool monsterProjectileVisual(const mobj_t &mo,const Uniforms &camera,float fraction){
     const auto *p=monsterProjectileProfile(mo.type);

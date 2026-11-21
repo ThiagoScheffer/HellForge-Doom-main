@@ -117,6 +117,7 @@ static double worldInterpolation(uint64_t now){
     last=now;return std::clamp(progress,0.0,1.0);
 }
 static void beforeTic() {
+    if(gamestate==GS_LEVEL&&!paused)tickHellfire();
     if(gamestate!=GS_LEVEL||!players[displayplayer].mo||paused) {tickTime=0;return;}
     renderViewPlace(players[displayplayer]);
     mobj_t *mo=players[displayplayer].mo;
@@ -151,7 +152,8 @@ static void acceleratedView(player_t *player) {
     }
 }
 void applySettings() {
-    R_BeforeLevelReset=stopRelight;
+    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();};
+    if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);

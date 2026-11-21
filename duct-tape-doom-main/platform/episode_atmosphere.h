@@ -3,6 +3,7 @@
 #ifndef HELLFORGE_EPISODE_ATMOSPHERE_H
 #define HELLFORGE_EPISODE_ATMOSPHERE_H
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 namespace doom_episode {
@@ -112,6 +113,88 @@ inline float bloodHellHaze(float intensity) {
 }
 inline int ashBudget(int density) {return density<=0?48:density==1?96:128;}
 inline int emberBudget(int density) {return density<=0?12:density==1?24:32;}
+
+namespace hellfire {
+inline bool enabled(Profile profile,bool accelerated) {
+    return accelerated&&profile==Profile::Inferno;
+}
+inline std::uint32_t hash(std::uint32_t h) {
+    h=(h^(h>>16))*0x7feb352du;
+    h=(h^(h>>15))*0x846ca68bu;
+    return h^(h>>16);
+}
+struct Site {
+    float x=0,y=0,floor=0,ceiling=0,driftX=0,driftY=0;
+    int sector=-1;
+    std::uint32_t seed=0;
+};
+constexpr float clearance=28.f;
+// BSP lookup alone can return a sector for a point outside the map.
+// Count real boundary crossings and keep the entire effect inside them.
+struct LandingDisk {
+    float x,y;
+    bool inside=false,clear=true;
+    void edge(float ax,float ay,float bx,float by,bool boundary) {
+        const float dx=bx-ax,dy=by-ay;
+        const float lengthSq=dx*dx+dy*dy;
+        if(lengthSq==0)return;
+        const float t=std::clamp(((x-ax)*dx+(y-ay)*dy)/lengthSq,0.f,1.f);
+        const float rx=x-(ax+t*dx),ry=y-(ay+t*dy);
+        if(rx*rx+ry*ry<clearance*clearance)clear=false;
+        if(boundary&&((ay>y)!=(by>y))&&x<ax+(y-ay)*dx/dy)inside=!inside;
+    }
+};
+inline bool openColumn(bool sky,bool solidFloor,float height) {
+    return sky&&solidFloor&&height>=88.f;
+}
+struct Effect {
+    Site site;
+    int start=-1,end=-1;
+};
+struct State {
+    Effect fall;
+    std::array<Effect,2> fires{};
+    int next=-1,last=-1;
+    unsigned event=0,level=0;
+};
+inline int interval(std::uint32_t seed,int rate) {
+    return 30*rate+int(hash(seed)%(40*rate+1));
+}
+inline float fireFade(const Effect &fire,float tic,int rate) {
+    return std::clamp((fire.end-tic)/(2.f*rate),0.f,1.f);
+}
+template<class FindSite,class StillValid>
+void advance(State &state,int tic,int rate,unsigned level,std::uint32_t seed,
+             bool active,FindSite findSite,StillValid stillValid) {
+    if(!active||state.level!=level||tic<state.last) {
+        state={};
+        state.level=level;
+    }
+    if(!active||tic==state.last)return;
+    state.last=tic;
+    if(state.next<0)state.next=tic+interval(seed,rate);
+    for(auto &fire:state.fires)
+        if(fire.start>=0&&(tic>=fire.end||!stillValid(fire.site)))fire={};
+    if(state.fall.start>=0) {
+        if(!stillValid(state.fall.site))state.fall={};
+        else if(tic>=state.fall.end) {
+            for(auto &fire:state.fires)if(fire.start<0) {
+                const Site &site=state.fall.site;
+                const int life=6*rate+int(hash(site.seed^0x55d6cb39u)%(4*rate+1));
+                if(tic-state.fall.end<life)fire={site,state.fall.end,state.fall.end+life};
+                break;
+            }
+            state.fall={};
+        }
+    }
+    if(tic<state.next)return;
+    const std::uint32_t eventSeed=hash(seed+(++state.event)*0x9e3779b9u);
+    state.next=tic+interval(eventSeed,rate);
+    if(state.fall.start>=0)return;
+    const Site site=findSite(eventSeed);
+    if(site.sector>=0)state.fall={site,tic,tic+rate};
+}
+} // namespace hellfire
 // Deimos: icy crystalline drift plus finer grey-white debris. All rendering
 // ceilings are per frame, not persistent allocations or gameplay actors.
 // D2.1 — Blizzard caps count individual crystals and powder flecks.
