@@ -1,5 +1,5 @@
-/* The F4 graphics options, grouped into tabs and sections, as the in-game
- * panel (settings_menu.cpp) shows them. This table is the one list of
+/* The canonical F4 options. settings_layout.h groups them for the in-game
+ * panel (settings_menu.cpp). This table is the one list of
  * options: each also names its graphics.cfg key, so adding an option here
  * (with its Settings member) is all it takes to show, load and save it. */
 #ifndef DOOM_SETTINGS_PANEL_H
@@ -34,7 +34,11 @@ struct Option {
     float snap(double value) const {return (float)std::clamp(low+std::round((value-low)/step)*step,low,high);}
 };
 struct OptionSection { const char *title; std::vector<Option> options; };
-struct OptionTab { const char *title; std::vector<OptionSection> sections; };
+struct OptionTab {
+    const char *title;
+    std::vector<OptionSection> sections;
+    std::vector<OptionTab> pages; // Presentation only; the persisted option registry stays flat.
+};
 
 // The options, bound to the members of s.
 std::vector<OptionTab> optionTabs(Settings &s);

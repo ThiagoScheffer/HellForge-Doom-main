@@ -33,6 +33,11 @@ const char *solidMapText(const char* mapped,const char* legacy){
 const char *effectCost(const char *key) {
     struct Cost {const char *key,*note;};
     static const Cost costs[]={
+        {"baked_lights","CPU / LOAD COST: builds static lighting and traces light for items and monsters. Moving sectors can start local re-bakes."},
+        {"window_light","CPU / LOAD COST: maps with many openings can create many window emitters, increasing sprite lookup and re-lighting work."},
+        {"moving_relight","CPU COST: local updates run in the background; large affected regions can still cause frame-time spikes."},
+        {"grid_sprite_light","LOAD / MEMORY COST: precomputes interpolated samples to reduce per-frame sprite-light tracing."},
+        {"map_light_cache","DISK CACHE: speeds matching map loads. Per-frame light lookups and moving-sector updates still run."},
         {"chain_collapses","BOUNDED GAMEPLAY COST: one local support check every four tics; at most two secondary generations."},
         {"environment_budget","BOUNDED COST: 64 / 128 / 256 extra dust particles."},
         {"electrical_damage","BOUNDED COST: 16 faults, at most two flashes per tic."},
@@ -582,8 +587,6 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("caustics_shots","Caustics from shots",&s.causticsShots,
                     "Muzzle flashes and projectiles over liquids throw brief ripples on the walls around them, like the flashlight. Subtle next to their direct light.",
                     [](const Settings &d){return d.caustics!=0;}),
-                check("shore_ripples","Shore ripples [High cost]",&s.shoreRipples,"Subtle ripples along liquid banks, distance limited and capped."),
-                check("glow_edges","Glowing liquid edges",&s.glowEdges,"Original slime and lava edge artwork along walls touching the liquid."),
                 check("damp_shores","Damp shores",&s.dampShores,
                     "Walls and banks just above water, nukage, slime and blood turn darker and damp up to a ragged line, "
                     "a little stained by the liquid. Lava stays dry."),

@@ -1,4 +1,4 @@
-/* The in-game F4 graphics panel. It draws into its own 640x400 image on a
+/* The in-game F4 settings panel. It draws into its own 640x400 image on a
  * grid of 8x16 cells, like a text-mode setup program, in the WAD's own small
  * font (STCFN), uppercase as in DOOM's messages; the renderer scales it by
  * whole pixels over the dimmed view. Changes apply when the panel closes. */
@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <utility>
 extern "C" {
@@ -25,22 +26,25 @@ extern void M_OpenLanMenu(void);
 #include "i_render3d.h"
 #include "scene3d.h"
 #include "settings_panel.h"
+#include "settings_layout.h"
 #include "game_profile.h"
 
 using namespace doom3d;
 
 namespace {
 // One row of the current tab: a section heading (option null) or an option.
-struct Line { const OptionSection *section; Option *option; };
+struct Line { const OptionSection *section; Option *option; std::string location; };
 
 struct Panel {
     bool open=false,wasPaused=false;
     int aiWarning=0;
     bool binding=false;
     Settings draft,defaults; // defaults: as R sets them, for the per-option reset and marks
-    std::vector<OptionTab> tabs,directorPages;
-    OptionSection directorNavigation;
-    int directorPage=-1,tabScroll=0;
+    std::vector<OptionTab> tabs;
+    OptionSection navigation;
+    int page=0,tabScroll=0;
+    bool finding=false;
+    std::string query;
     std::vector<Line> lines;
     int tab=0,selected=0,scroll=0;
     
@@ -78,23 +82,10 @@ void addMapTab(){
     panel.tabs.insert(panel.tabs.begin(),{"Game",{{"Change map",{map,start}}}});
 }
 
-// Group presentation only: optionTabs remains the flat configuration registry,
-// so setting keys, defaults and save/import behavior do not change.
-void groupDirectorPages(){
-    panel.directorPages.clear();
-    for(auto it=panel.tabs.begin();it!=panel.tabs.end();){
-        bool child=!strcmp(it->title,"ED Monsters")||!strcmp(it->title,"ED Reinforcements")||
-            !strcmp(it->title,"ED Items")||!strcmp(it->title,"ED Advanced")||!strcmp(it->title,"ED Population");
-        if(child){panel.directorPages.push_back(std::move(*it));it=panel.tabs.erase(it);}else ++it;
-    }
-    Option page{};page.kind=OptionKind::Choice;page.key="";page.title="Page";
-    page.tip="Left/Right or Q/E changes the director page; the tabs above are clickable. Select Overview or click Encounter Director in the sidebar for master controls. Tab and Page Up/Down change the main category.";
-    page.flag=&panel.directorPage;page.items.push_back("Overview");page.values.push_back(-1);
-    for(size_t i=0;i<panel.directorPages.size();++i){page.items.push_back(panel.directorPages[i].title);page.values.push_back((int)i);}
-    panel.directorNavigation={"Director tabs",{std::move(page)}};
-}
-bool inDirector(){return !panel.directorPages.empty()&&!strcmp(panel.tabs[(size_t)panel.tab].title,"ENCOUNTER DIRECTOR");}
-OptionTab& currentPage(){return inDirector()&&panel.directorPage>=0?panel.directorPages[(size_t)panel.directorPage]:panel.tabs[(size_t)panel.tab];}
+bool searching(){return panel.finding||!panel.query.empty();}
+std::vector<OptionTab>& currentPages(){return panel.tabs[(size_t)panel.tab].pages;}
+OptionTab& currentPage(){return currentPages()[(size_t)panel.page];}
+bool hasSelection(){return panel.selected>=0&&panel.selected<(int)panel.lines.size()&&panel.lines[(size_t)panel.selected].option;}
 
 // The image is a grid of 8x16 character cells, 80 columns by 25 rows.
 const int width=DOOM_SETTINGS_WIDTH,height=DOOM_SETTINGS_HEIGHT,cellWidth=8,cellHeight=16;
@@ -183,10 +174,9 @@ int textWidth(const std::string &string) {
 }
 
 // Give long child names their natural width before sharing the spare space.
-const char* directorTabTitle(size_t index){const char* title=panel.directorPages[index].title;return !strncmp(title,"ED ",3)?title+3:title;}
-int directorTabEdge(int index){
-    int total=0,before=0,count=(int)panel.directorPages.size();
-    for(int i=0;i<count;++i){int w=textWidth(directorTabTitle((size_t)i))+12;total+=w;if(i<index)before+=w;}
+int pageTabEdge(int index){
+    int total=0,before=0,count=(int)currentPages().size();
+    for(int i=0;i<count;++i){int w=textWidth(currentPages()[(size_t)i].title)+12;total+=w;if(i<index)before+=w;}
     int available=(rightColumn-leftColumn)*cellWidth;
     return leftColumn*cellWidth+(total<=available?before+(available-total)*index/count:available*index/count);
 }
@@ -201,19 +191,19 @@ std::string clipped(std::string value,int pixels) {
 std::string dependencyHint(const Option &option) {
     if(option.arcadeLocked())return "Forced OFF for Arcade. Your normal setting is preserved.";
     std::string key=option.key?option.key:"";
-    if(key.find("fluid_")==0&&!panel.draft.fluidWeapons)return "Enable FluidWeapons in Bundled mods first.";
-    for(const auto &tab:panel.tabs)for(const auto &section:tab.sections)for(const auto &parent:section.options) {
+    if(key.find("fluid_")==0&&!panel.draft.fluidWeapons)return "Enable FluidWeapons in Mods / Enable first.";
+    for(const auto &tab:panel.tabs)for(const auto &page:tab.pages)for(const auto &section:page.sections)for(const auto &parent:section.options) {
         if(!parent.key||!*parent.key||!parent.flag||&parent==&option)continue;
         Settings probe=panel.draft;
         auto offset=(const char*)parent.flag-(const char*)&panel.draft;
         int *flag=(int*)((char*)&probe+offset);
         if(parent.kind==OptionKind::Check) {
             *flag=!*parent.flag;
-            if(option.isEnabled(probe))return std::string(*flag?"Enable ":"Disable ")+parent.title+" in "+tab.title+".";
+            if(option.isEnabled(probe))return std::string(*flag?"Enable ":"Disable ")+parent.title+" in "+tab.title+" / "+page.title+".";
         } else if(parent.kind==OptionKind::Choice) {
             for(size_t i=0;i<parent.values.size();++i) {
                 *flag=parent.values[i];
-                if(option.isEnabled(probe))return std::string("Set ")+parent.title+" to "+parent.items[i]+" in "+tab.title+".";
+                if(option.isEnabled(probe))return std::string("Set ")+parent.title+" to "+parent.items[i]+" in "+tab.title+" / "+page.title+".";
             }
         }
     }
@@ -293,29 +283,47 @@ std::string valueText(const Option &option) {
     return value;
 }
 
+std::string lower(std::string value){for(char &c:value)c=(char)std::tolower((unsigned char)c);return value;}
+bool matches(const Option &option,const std::string &location) {
+    std::string text=lower(std::string(option.title)+" "+option.key+" "+(option.tip?option.tip:"")+" "+(option.cost?option.cost:"")+" "+location);
+    std::istringstream words(lower(panel.query));std::string word;
+    while(words>>word)if(text.find(word)==std::string::npos)return false;
+    return true;
+}
 void rebuildPageLines(){
     panel.lines.clear();
     auto append=[&](OptionSection& section){
         panel.lines.push_back({&section,nullptr});
         for(Option& option:section.options)panel.lines.push_back({&section,&option});
     };
-    if(inDirector())append(panel.directorNavigation);
-    for(auto& section:currentPage().sections)append(section);
+    if(searching()) {
+        if(!panel.query.empty())for(auto &tab:panel.tabs)for(auto &page:tab.pages)for(auto &section:page.sections)for(auto &option:section.options) {
+            if(!option.key||!*option.key)continue;
+            std::string location=std::string(tab.title)+" / "+page.title;
+            if(matches(option,location))panel.lines.push_back({&section,&option,std::move(location)});
+        }
+    } else {
+        Option page{};page.kind=OptionKind::Choice;page.key="";page.title="Section";page.flag=&panel.page;
+        page.tip="Choose a section with Left/Right, Q/E or the clickable tabs. Tab changes category. F finds a setting across every category.";
+        for(size_t i=0;i<currentPages().size();++i){page.items.push_back(currentPages()[i].title);page.values.push_back((int)i);}
+        panel.navigation={"Browse sections",{std::move(page)}};
+        if(currentPages().size()>1)append(panel.navigation);
+        for(auto& section:currentPage().sections)append(section);
+    }
     panel.selected=0;while(panel.selected<(int)panel.lines.size()&&!panel.lines[(size_t)panel.selected].option)++panel.selected;
     panel.scroll=0;
 }
 void selectTab(int tab) {
     int count=(int)panel.tabs.size();
-    panel.tab=(tab%count+count)%count;panel.directorPage=-1;
+    panel.tab=(tab%count+count)%count;panel.page=0;panel.finding=false;panel.query.clear();
     if(panel.tab<panel.tabScroll)panel.tabScroll=panel.tab;
     if(panel.tab>=panel.tabScroll+visibleLines)panel.tabScroll=panel.tab-visibleLines+1;
     panel.tabScroll=std::clamp(panel.tabScroll,0,std::max(0,count-visibleLines));
     rebuildPageLines();
 }
-void selectDirectorPage(int page){
-    if(!inDirector())return;
-    int count=(int)panel.directorPages.size()+1;
-    panel.directorPage=((page+1)%count+count)%count-1;
+void selectPage(int page){
+    int count=(int)currentPages().size();
+    panel.page=(page%count+count)%count;
     rebuildPageLines();
 }
 
@@ -328,6 +336,7 @@ void keepSelectionVisible() {
 
 void moveSelection(int direction) {
     int count=(int)panel.lines.size();
+    if(!hasSelection())return;
     do panel.selected=((panel.selected+direction)%count+count)%count;
     while(!panel.lines[(size_t)panel.selected].option);
     keepSelectionVisible();
@@ -335,6 +344,15 @@ void moveSelection(int direction) {
 }
 
 Option &selectedOption() { return *panel.lines[(size_t)panel.selected].option; }
+bool selectSetting(const char *key) {
+    for(size_t t=0;t<panel.tabs.size();++t)for(size_t p=0;p<panel.tabs[t].pages.size();++p)
+        for(auto &section:panel.tabs[t].pages[p].sections)for(auto &option:section.options)
+            if(option.key&&!strcmp(option.key,key)) {
+                selectTab((int)t);selectPage((int)p);
+                for(size_t row=0;row<panel.lines.size();++row)if(panel.lines[row].option==&option){panel.selected=(int)row;keepSelectionVisible();return true;}
+            }
+    return false;
+}
 
 void setSlider(Option &option,double value) { *option.number=option.snap(value); }
 
@@ -351,6 +369,7 @@ bool isDefault(const Option &option) {
 }
 
 void resetOption() {
+    if(!hasSelection())return;
     Option &option=selectedOption();
     if(!option.isEnabled(panel.draft)||isDefault(option)) {S_StartSound(NULL,Game_MenuSound(GAME_MENU_DENY));return;}
     if(option.kind==OptionKind::Slider)*option.number=*defaultOf(option.number);
@@ -359,6 +378,7 @@ void resetOption() {
 }
 
 void changeOption(int direction) {
+    if(!hasSelection())return;
     Option &option=selectedOption();
     if(!option.isEnabled(panel.draft)) {S_StartSound(NULL,Game_MenuSound(GAME_MENU_DENY));return;}
     if(option.kind==OptionKind::Action){if(direction>0&&option.action)option.action();return;}
@@ -374,7 +394,7 @@ void changeOption(int direction) {
         int count=(int)option.values.size(),index=0;
         for(int i=0;i<count;++i)if(option.values[(size_t)i]==*option.flag)index=i;
         *option.flag=option.values[(size_t)(((index+direction)%count+count)%count)];
-        if(option.flag==&panel.directorPage)selectDirectorPage(panel.directorPage);
+        if(option.flag==&panel.page)selectPage(panel.page);
     } else setSlider(option,*option.number+direction*option.step);
     S_StartSound(NULL,Game_MenuSound(GAME_MENU_CHANGE));
 }
@@ -427,10 +447,12 @@ void I_Render3DSettingsMenu(void) {
         tab.sections.front().options.push_back(reset);
     }
 
-    groupDirectorPages();
     addMapTab();
     addMultiplayerTab();
+    panel.tabs=settingsLayout(std::move(panel.tabs));
+    int rememberedPage=panel.page;
     selectTab(panel.tab);
+    selectPage(rememberedPage);
     panel.wasPaused=paused;if(!netgame)paused=true;
     panel.open=true;
     S_StartSound(NULL,Game_MenuSound(GAME_MENU_OPEN));
@@ -464,9 +486,27 @@ void I_Render3DSettingsKey(int scancode,int shift) {
         *chosen=code;panel.binding=false;S_StartSound(NULL,Game_MenuSound(GAME_MENU_CHANGE));return;
     }
     if(panel.aiWarning){panel.aiWarning=0;return;}
+    if(panel.finding) {
+        if(scancode==SDL_SCANCODE_ESCAPE){panel.finding=false;panel.query.clear();rebuildPageLines();return;}
+        if(scancode==SDL_SCANCODE_RETURN||scancode==SDL_SCANCODE_KP_ENTER){panel.finding=false;if(panel.query.empty())rebuildPageLines();return;}
+        bool changed=false;
+        if(scancode==SDL_SCANCODE_BACKSPACE||scancode==SDL_SCANCODE_DELETE){if(!panel.query.empty())panel.query.pop_back();changed=true;}
+        else if(panel.query.size()<48) {
+            if(scancode>=SDL_SCANCODE_A&&scancode<=SDL_SCANCODE_Z){panel.query+=(char)('a'+scancode-SDL_SCANCODE_A);changed=true;}
+            else if(scancode>=SDL_SCANCODE_1&&scancode<=SDL_SCANCODE_9){panel.query+=(char)('1'+scancode-SDL_SCANCODE_1);changed=true;}
+            else if(scancode==SDL_SCANCODE_0){panel.query+='0';changed=true;}
+            else if(scancode==SDL_SCANCODE_SPACE){panel.query+=' ';changed=true;}
+            else if(scancode==SDL_SCANCODE_MINUS){panel.query+=shift?'_':'-';changed=true;}
+            else if(scancode==SDL_SCANCODE_SLASH){panel.query+='/';changed=true;}
+        }
+        if(changed){rebuildPageLines();return;}
+        if(scancode!=SDL_SCANCODE_F4&&scancode!=SDL_SCANCODE_F10&&scancode!=SDL_SCANCODE_DOWN&&scancode!=SDL_SCANCODE_UP)return;
+        panel.finding=false;
+    }
     switch(scancode) {
-    case SDL_SCANCODE_Q: if(inDirector())selectDirectorPage(panel.directorPage-1);break;
-    case SDL_SCANCODE_E: if(inDirector())selectDirectorPage(panel.directorPage+1);break;
+    case SDL_SCANCODE_F: panel.finding=true;rebuildPageLines();break;
+    case SDL_SCANCODE_Q: if(!searching())selectPage(panel.page-1);break;
+    case SDL_SCANCODE_E: if(!searching())selectPage(panel.page+1);break;
     case SDL_SCANCODE_UP: moveSelection(-1); break;
     case SDL_SCANCODE_DOWN: moveSelection(1); break;
     case SDL_SCANCODE_LEFT: changeOption(-1); break;
@@ -477,10 +517,11 @@ void I_Render3DSettingsKey(int scancode,int shift) {
     case SDL_SCANCODE_PAGEDOWN: selectTab(panel.tab+1); S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE)); break;
     case SDL_SCANCODE_BACKSPACE: case SDL_SCANCODE_DELETE: resetOption(); break;
     case SDL_SCANCODE_R: resetOption(); break;
-    case SDL_SCANCODE_HOME: panel.selected=1;panel.scroll=0;break;
-    case SDL_SCANCODE_END: panel.selected=(int)panel.lines.size()-1;while(panel.selected>0&&!panel.lines[(size_t)panel.selected].option)--panel.selected;keepSelectionVisible();break;
+    case SDL_SCANCODE_HOME: panel.selected=0;while(panel.selected<(int)panel.lines.size()&&!panel.lines[(size_t)panel.selected].option)++panel.selected;panel.scroll=0;break;
+    case SDL_SCANCODE_END: if(!panel.lines.empty()){panel.selected=(int)panel.lines.size()-1;while(panel.selected>0&&!panel.lines[(size_t)panel.selected].option)--panel.selected;keepSelectionVisible();}break;
     case SDL_SCANCODE_F10: paused=panel.wasPaused;panel.open=false;S_StartSound(NULL,Game_MenuSound(GAME_MENU_CLOSE));break;
-    case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_F4: closePanel(); break;
+    case SDL_SCANCODE_ESCAPE: if(searching()){panel.query.clear();rebuildPageLines();break;}closePanel();break;
+    case SDL_SCANCODE_F4: closePanel(); break;
     default:
         if(scancode>=SDL_SCANCODE_1&&scancode<SDL_SCANCODE_1+std::min(9,(int)panel.tabs.size())) {
             selectTab(scancode-SDL_SCANCODE_1);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));
@@ -503,6 +544,7 @@ void I_Render3DSettingsClick(int x,int y,int button) {
     if(!panel.open||x<0||y<0||x>=width||y>=height)return;
     if(panel.aiWarning){if(button)panel.aiWarning=0;return;}
     int row=y/cellHeight;
+    if(row==0&&button==1&&x>=width-104){panel.finding=true;rebuildPageLines();return;}
     if(row==helpRow&&button==1) {
         if(x>=width-128){closePanel();return;}
         if(x>=width-232){I_Render3DSettingsKey(SDL_SCANCODE_F10,0);return;}
@@ -513,10 +555,10 @@ void I_Render3DSettingsClick(int x,int y,int button) {
         }
         return;
     }
-    if(inDirector()&&row==1&&button==1&&x>=leftColumn*cellWidth&&x<rightColumn*cellWidth){
+    if(!searching()&&row==1&&button==1&&x>=leftColumn*cellWidth&&x<rightColumn*cellWidth){
         loadFont();
-        for(size_t i=0;i<panel.directorPages.size();++i)if(x>=directorTabEdge((int)i)&&x<directorTabEdge((int)i+1)){
-            selectDirectorPage((int)i);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));break;
+        for(size_t i=0;i<currentPages().size();++i)if(x>=pageTabEdge((int)i)&&x<pageTabEdge((int)i+1)){
+            selectPage((int)i);S_StartSound(NULL,Game_MenuSound(GAME_MENU_MOVE));break;
         }
         return;
     }
@@ -524,6 +566,7 @@ void I_Render3DSettingsClick(int x,int y,int button) {
     if(row<listRow||row>=listRow+visibleLines||index>=(int)panel.lines.size()||!panel.lines[(size_t)index].option)return;
     panel.selected=index;
     if(button==0)return; // Hovering highlights the option.
+    panel.finding=false;
     Option &option=selectedOption();
     if(option.kind==OptionKind::Slider&&button==1&&x>=sliderLeft()-cellWidth) {
         if(!option.isEnabled(panel.draft)) {S_StartSound(NULL,Game_MenuSound(GAME_MENU_DENY));return;}
@@ -581,18 +624,19 @@ void I_Render3DSettingsDraw(unsigned *pixels) {
     int item=0,total=0;
     for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option){++total;if((int)i<=panel.selected)++item;}
     std::string counter=std::to_string(item)+" / "+std::to_string(total);
-    std::string title=panel.tabs[(size_t)panel.tab].title;
-    if(inDirector()&&panel.directorPage>=0)title+=" / "+std::string(currentPage().title);
-    drawText(clipped(title,(rightColumn-leftColumn)*cellWidth-textWidth(counter)-16),leftColumn,0,heading);
-    drawTextRight(counter,rightColumn,0,description);
-    if(inDirector()){
-        for(size_t i=0;i<panel.directorPages.size();++i){
-            int x0=directorTabEdge((int)i),x1=directorTabEdge((int)i+1);
-            bool active=(int)i==panel.directorPage;
+    std::string title=searching()?"Find: "+panel.query+(panel.finding?"_":""):std::string(panel.tabs[(size_t)panel.tab].title)+" / "+currentPage().title;
+    drawText(clipped(title,width-112-leftColumn*cellWidth-textWidth(counter)-16),leftColumn,0,heading);
+    drawTextRight(counter,(width-112)/cellWidth,0,description);
+    fill(width-104,1,96,cellHeight-1,searching()?tabBar:0xff303030);drawTextAt("Find [F]",width-98,0,bright);
+    if(!searching()){
+        for(size_t i=0;i<currentPages().size();++i){
+            int x0=pageTabEdge((int)i),x1=pageTabEdge((int)i+1);
+            bool active=(int)i==panel.page;
             fill(x0,rowY(1),x1-x0-2,cellHeight,active?tabBar:0xff202020);
-            drawTextAt(clipped(directorTabTitle(i),x1-x0-8),x0+4,1,active?bright:description);
+            drawTextAt(clipped(currentPages()[i].title,x1-x0-8),x0+4,1,active?bright:description);
         }
-    }else drawSeparator(1);
+    }else drawText("Type a name. Enter: results. Esc: back.",leftColumn,1,description);
+    if(searching()&&panel.lines.empty())drawText(panel.query.empty()?"Start typing to find a setting.":"No matching settings. Try another word.",leftColumn,listRow+1,heading);
     for(int i=0;i<visibleLines&&panel.scroll+i<(int)panel.lines.size();++i) {
         const Line &line=panel.lines[(size_t)(panel.scroll+i)];
         int row=listRow+i;
@@ -612,19 +656,22 @@ void I_Render3DSettingsDraw(unsigned *pixels) {
     if(panel.scroll+visibleLines<(int)panel.lines.size())drawArrow(listRow+visibleLines-1,false);
     drawSeparator(descriptionRow-1);
 
-    const Option &option=selectedOption();
     int tipRow=descriptionRow;
-    std::string status=option.isEnabled(panel.draft)?std::string(option.title):dependencyHint(option);
-    drawText(clipped(status,608),2,tipRow++,option.isEnabled(panel.draft)?heading:0xffffbc72);
-    std::string detail=option.tip?option.tip:"";
-    if(option.cost)detail+=" "+std::string(option.cost);
-    auto lines=wrap(detail,608,3);
-    for(size_t i=0;i<lines.size();++i)drawText(lines[i],2,tipRow+(int)i,description);
-    drawText(clipped(inDirector()?"Q/E: page  Tab: category  R: reset":"Tab: category  Arrows: adjust  R: reset item",width-248),2,helpRow,description);
+    if(hasSelection()) {
+        const Option &option=selectedOption();
+        std::string location=panel.lines[(size_t)panel.selected].location;
+        std::string status=option.isEnabled(panel.draft)?(location.empty()?"":location+": ")+option.title:dependencyHint(option);
+        drawText(clipped(status,608),2,tipRow++,option.isEnabled(panel.draft)?heading:0xffffbc72);
+        std::string detail=option.tip?option.tip:"";
+        if(option.cost)detail+=" "+std::string(option.cost);
+        auto lines=wrap(detail,608,3);
+        for(size_t i=0;i<lines.size();++i)drawText(lines[i],2,tipRow+(int)i,description);
+    }else drawText("Find looks through all settings. Your draft edits are kept.",2,tipRow,description);
+    drawText(clipped(panel.finding?"Type: search  Enter: results  Esc: back":"Q/E: section  Tab: category  F: find  R: reset",width-248),2,helpRow,description);
     fill(width-232,rowY(helpRow),100,cellHeight,0xff303030);
     drawTextAt("F10 Discard",width-228,helpRow,text);
     fill(width-128,rowY(helpRow),120,cellHeight,selectionBar);
-    drawTextAt("Esc Apply / close",width-124,helpRow,bright);
+    drawTextAt(searching()?"F4 Apply / close":"Esc Apply / close",width-124,helpRow,bright);
     if(panel.aiWarning){
         fill(24,128,width-48,144,0xff180c08);
         drawText(panel.aiWarning==2?"AGGRESSIVE AI ENABLED":"ADVANCED TACTICS ENABLED",6,9,heading);
@@ -656,16 +703,7 @@ void I_Render3DSettings(void) { I_Render3DSettingsMenu(); }
 extern "C" int I_TestSettingsControls(void) {
     I_Render3DSettingsMenu();
     Settings saved=panel.draft;
-    auto choose=[](const char *key){
-        for(size_t t=0;t<panel.tabs.size();++t) {
-            selectTab((int)t);
-            for(size_t i=0;i<panel.lines.size();++i) {
-                auto *o=panel.lines[i].option;
-                if(o&&std::string(o->key)==key){panel.selected=(int)i;return true;}
-            }
-        }
-        return false;
-    };
+    auto choose=[](const char *key){return selectSetting(key);};
     if(!choose("peek_left"))return 0;
     panel.draft.cornerPeek=panel.draft.accelerated=1;
     panel.draft.peekLeft=SDL_SCANCODE_Z;panel.draft.peekRight=SDL_SCANCODE_C;
@@ -716,17 +754,9 @@ extern "C" int I_TestSettingsControls(void) {
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
     if(mode==11) {
-        for(size_t tab=0;tab<panel.tabs.size();++tab)
-            if(!strcmp(panel.tabs[tab].title,"Textures")) {selectTab((int)tab);break;}
         auto press=[&](const char *key,SDL_Scancode scancode) {
-            for(size_t row=0;row<panel.lines.size();++row) {
-                const Option *option=panel.lines[row].option;
-                if(!option||!option->key||strcmp(option->key,key))continue;
-                panel.selected=(int)row;
-                I_Render3DSettingsKey(scancode,0);
-                return true;
-            }
-            return false;
+            if(!selectSetting(key))return false;
+            I_Render3DSettingsKey(scancode,0);return true;
         };
         if(!press("living_surfaces",SDL_SCANCODE_RETURN)||!press("living_intensity",SDL_SCANCODE_RIGHT))return 0;
         for(const char *key:{"living_morph","living_pulse","living_wetness"})
@@ -736,11 +766,11 @@ extern "C" int I_TestSettingsPersistence(int mode) {
     }
     if(mode==9||mode==10){
         panel.draft.accelerated=1;bool discard=mode==10;int beforeDot=settings.elementalDot,beforeHud=settings.speedrunHUD,beforeMessage=settings.combatMessages;
-        auto chooseKey=[&](const char *key,const char *tab){for(size_t t=0;t<panel.tabs.size();++t){selectTab((int)t);for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;if(o&&o->key&&!strcmp(o->key,key)){if(strcmp(panel.tabs[t].title,tab))return false;panel.selected=(int)i;return true;}}}return false;};
+        auto chooseKey=[&](const char *key,const char *tab){return selectSetting(key)&&!strcmp(panel.tabs[(size_t)panel.tab].title,tab);};
         for(const char *key:{"elemental_damage_over_time","combat_event_messages","speedrun_hud"}){
-            if(!chooseKey(key,!strcmp(key,"speedrun_hud")?"SPEEDRUN":"Combat"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+            if(!chooseKey(key,!strcmp(key,"elemental_damage_over_time")?"Combat":"HUD"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
         }
-        if(!discard){if(!chooseKey("speedrun_deaths","SPEEDRUN"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);if(!chooseKey("speedrun_anchor","SPEEDRUN"))return 0;for(int i=0;i<3;++i)I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);}
+        if(!discard){if(!chooseKey("speedrun_deaths","HUD"))return 0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);if(!chooseKey("speedrun_anchor","HUD"))return 0;for(int i=0;i<3;++i)I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);}
         if(settings.elementalDot!=beforeDot||settings.speedrunHUD!=beforeHud||settings.combatMessages!=beforeMessage)return 0;
         I_Render3DSettingsKey(discard?SDL_SCANCODE_F10:SDL_SCANCODE_F4,0);
         return !panel.open&&settings.elementalDot==(discard?beforeDot:!beforeDot)&&settings.speedrunHUD==(discard?beforeHud:!beforeHud)&&settings.combatMessages==(discard?beforeMessage:!beforeMessage);
@@ -748,13 +778,9 @@ extern "C" int I_TestSettingsPersistence(int mode) {
     if(mode>=5&&mode<=8){
         bool eye=mode>=7,discard=mode==6||mode==8;
         if(eye){panel.draft.accelerated=panel.draft.enhancedWeakPoints=1;}
-        bool found=false;int before=eye?settings.eyeInjuries:settings.ambushSightReuse;
-        for(size_t t=0;t<panel.tabs.size()&&!found;++t){selectTab((int)t);
-            for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;
-                if(o&&o->key&&std::string(o->key)==(eye?"eye_injuries":"ambush_sight_reuse")){
-                    if(std::string(panel.tabs[t].title)!=(eye?"Combat":"Performance"))return 0;
-                    panel.selected=(int)i;found=true;break;
-                }}}
+        int before=eye?settings.eyeInjuries:settings.ambushSightReuse;
+        bool found=selectSetting(eye?"eye_injuries":"ambush_sight_reuse");
+        if(found&&std::string(panel.tabs[(size_t)panel.tab].title)!=(eye?"Combat":"Performance"))return 0;
         if(!found)return 0;
         I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
         if((eye?panel.draft.eyeInjuries:panel.draft.ambushSightReuse)==before||(eye?settings.eyeInjuries:settings.ambushSightReuse)!=before)return 0;
@@ -767,12 +793,7 @@ extern "C" int I_TestSettingsPersistence(int mode) {
         return mode==3?!panel.open:panel.open;
     }
     panel.draft.accelerated=1;
-    auto choose=[](const char *key){
-        for(size_t t=0;t<panel.tabs.size();++t){selectTab((int)t);
-            for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;
-                if(o&&o->key&&std::string(o->key)==key){panel.selected=(int)i;return true;}}}
-        return false;
-    };
+    auto choose=[](const char *key){return selectSetting(key);};
     for(const char *key:{"critical_parts","enhanced_weak_points","monster_weapon_vulnerabilities","localized_injury_effects",
         "monster_bleeding","headshot_frenzy","monster_feeding","monster_metal_sparks","fog","emissive","corner_peek"}) {
         if(!choose(key))return 0;*selectedOption().flag=0;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);

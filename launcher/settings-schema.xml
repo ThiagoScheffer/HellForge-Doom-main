@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="4288e9d803f6247cc17e223a4e7bf746ba8abd3a4fc5650e22d9fd1b29a83a0f">
+<settings source="platform/settings_panel.cpp" source_sha256="f4f267dd19a3db6eb3229aa024026b1a9804978ca439c5c4ad86a5b929f60a4d">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -196,9 +196,9 @@
   <option key="caustics_sway" title="Caustic sway" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="caustics_sprites" title="Caustics on monsters and things" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="caustics_shots" title="Caustics from shots" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="shore_ripples" title="Shore ripples [High cost]" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="glow_edges" title="Glowing liquid edges" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="damp_shores" title="Damp shores" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="glow_edges" title="Glowing liquid edges" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="shore_ripples" title="Shore ripples" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="liquid_projectile_impacts" title="Liquid projectile bursts" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="splashes" title="Splashes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="music_device" title="Music" category="Sound" kind="choice" choices="0=SoundFont|1=OPL (FM)|2=Mac synthesizer" />
