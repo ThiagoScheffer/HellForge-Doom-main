@@ -142,8 +142,15 @@ unsigned headshotLevel=~0u;
 uint64_t headshotDischarge=0;
 static unsigned combatLevel=~0u;
 CombatFeedbackStats combatFeedbackStats;
-struct CombatParticleHit {const mobj_t *target;uint64_t shot;float x,y,z;int tic,count=0;};
+struct CombatParticleHit {const mobj_t *target;uint64_t shot;float x,y,z;int tic,count=0;bool headBlood=false;};
 static std::vector<CombatParticleHit> combatParticleHits;
+bool combatHeadSprayHandled(const mobj_t *target,const mobj_t *source) {
+    uint64_t shot=P_WeakpointDischarge(source);
+    return shot&&combatLevel==r_levelserial&&
+        std::any_of(combatParticleHits.begin(),combatParticleHits.end(),[&](const auto &hit) {
+            return hit.headBlood&&hit.target==target&&hit.shot==shot&&hit.tic==leveltime;
+        });
+}
 static uint64_t headshotSoundDischarge=0;
 static int sparkBudgetTic=-1,sparkBudget=0;
 static bool combatBurst(const wp_damage_event_t &event,bool metal) {
@@ -154,7 +161,7 @@ static bool combatBurst(const wp_damage_event_t &event,bool metal) {
     if(!metal){
         if(found!=combatParticleHits.end())return false;
         if(combatParticleHits.size()>=32)return false;
-        combatParticleHits.push_back({event.target,shot,hit.x,hit.y,hit.z,leveltime,0});return true;
+        combatParticleHits.push_back({event.target,shot,hit.x,hit.y,hit.z,leveltime,0,true});return true;
     }
     if(found==combatParticleHits.end()){
         if(combatParticleHits.size()>=32)return false;
@@ -183,7 +190,7 @@ void combatImpact(const wp_damage_event_t *event) {
             (!e.dischargeId||headshotDischarge!=e.dischargeId)) {
             headshotUntil=gameSeconds()+.35f;headshotLevel=r_levelserial;headshotDischarge=e.dischargeId;
         }
-        if((settings.headshotFeedback&2)&&combatBurst(e,false))combatHeadBlood(e);
+        if((settings.headshotFeedback&2)&&bloodOn()&&combatBurst(e,false))combatHeadBlood(e);
         uint64_t soundShot=e.dischargeId?e.dischargeId:e.eventId;
         if(settings.headshotSound&&e.source==players[displayplayer].mo&&soundShot!=headshotSoundDischarge){
             headshotSoundDischarge=soundShot;I_HeadshotSound();++combatFeedbackStats.headSounds;

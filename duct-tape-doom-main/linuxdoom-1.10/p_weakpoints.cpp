@@ -27,7 +27,7 @@ void (*P_WeakpointFoodWake)(mobj_t*)=nullptr;
 void (*P_WeakpointFoodConsume)(mobj_t*)=nullptr;
 void (*P_WeakpointPainVoice)(mobj_t*)=nullptr;
 void (*P_WeakpointImpact)(const wp_damage_event_t*)=nullptr;
-void (*P_WeakpointBleedVisual)(mobj_t*)=nullptr;
+void (*P_WeakpointBleedVisual)(mobj_t*,int)=nullptr;
 int (*P_WeakpointBulletLocate)(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*)=nullptr;
 int (*P_WeakpointTargetAllowed)(const mobj_t*)=nullptr;
 int (*P_WeakpointLocate)(mobj_t*,mobj_t*,wp_impact_t*)=nullptr;
@@ -217,6 +217,7 @@ void P_WeakpointConfigure(int enhanced,int vulnerabilities,int injuries) {
     if(!enhanced)P_WeakpointConfigureEyes(p_wp_eyes);
 }
 wp_damage_kind_t P_WeakpointBulletKind(void){return shotSource&&(shotWeapon==wp_shotgun||shotWeapon==wp_supershotgun)?WP_SHOTGUN_PELLET:WP_BULLET;}
+uint64_t P_WeakpointDischarge(const mobj_t *source){return source==shotSource?shotId:0;}
 void P_WeakpointResolve(wp_damage_event_t *e) {
     if(e->resolved)return;e->resolved=1;e->eventId=++serial;if(!e->dischargeId)e->dischargeId=shotId;e->finalDamage=e->baseDamage;
     e->weapon=wp_nochange;e->projectileType=-1;
@@ -285,6 +286,7 @@ void P_WeakpointAfterDamage(const wp_damage_event_t *e) {
             int duration=r.bleedTier==3?p_wp_balance.bleedDuration3:r.bleedTier==2?p_wp_balance.bleedDuration2:p_wp_balance.bleedDuration;
             r.bleedUntil=leveltime+duration;r.bleedSource=e->source;r.bleedPlayer=-1;
             for(int i=0;i<MAXPLAYERS;++i)if(e->source->player==&players[i]){r.bleedPlayer=i;break;}
+            if(!oldTier&&P_WeakpointBleedVisual)P_WeakpointBleedVisual(e->target,1);
         }
     }
     P_CombatConfirmed(e->target,e->source,0,e->finalDamage,0);
@@ -531,7 +533,8 @@ void P_WeakpointTick(mobj_t *actor) {
             it->second.bleedVoiceNext=leveltime+(it->second.bleedTier==3?p_wp_balance.bleedVoice3:p_wp_balance.bleedVoice2);
             if(P_WeakpointPainVoice)P_WeakpointPainVoice(actor);
         }
-        if(P_WeakpointBleedVisual)P_WeakpointBleedVisual(actor);
+        if(P_WeakpointBleedVisual&&it!=runtime.end()&&it->second.bleedNext!=leveltime+TICRATE)
+            P_WeakpointBleedVisual(actor,0);
     }
     it=runtime.find(actor);
     if(it!=runtime.end()) {

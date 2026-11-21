@@ -351,7 +351,8 @@ struct CombatFeedbackStats {int metalParticles=0,headBursts=0,headSounds=0,wallS
 extern CombatFeedbackStats combatFeedbackStats;
 void combatHeadBlood(const wp_damage_event_t&);
 void combatImpact(const wp_damage_event_t*);
-void combatBleed(mobj_t*);
+void combatBleed(mobj_t*,int justApplied);
+bool combatHeadSprayHandled(const mobj_t *target,const mobj_t *source);
 void combatElemental(mobj_t*,int);
 Image &charredImage(Image&,int,int&);
 int cosmeticBulletLocate(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*);

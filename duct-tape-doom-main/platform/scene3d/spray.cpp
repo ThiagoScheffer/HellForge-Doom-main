@@ -36,7 +36,7 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 
 // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
 // a second; splat: the size of what it leaves (0 none).
-static void throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr) {
+static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr) {
     float now=gameSeconds();
     const sector_t *start=sectorAt(x,y);
     z=std::clamp(z,floorZ(start)+0.5f,ceilZ(start)-0.5f);
@@ -74,6 +74,7 @@ static void throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
     }
     if(t>2.5f)splat=0; // Down a pit.
     float lx=x+vx*t,ly=y+vy*t,lz=z+vz*t-0.5f*sprayGravity*t*t,fall=vz-sprayGravity*t;
+    bool floorSplat=false;
     if(splat>0) {
         if(where==WALL) {
             // Glancing drops streak along the wall.
@@ -92,11 +93,13 @@ static void throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
                 // Drops coming in low stretch along their way.
                 float stretch=where==CEILING?1:1+std::clamp(h/std::max(60.0f,std::abs(fall))*0.6f,0.0f,1.2f);
                 bloodFloorSplat(lx,ly,(int)index,splat,std::atan2(vy,vx),stretch,where==CEILING,now+t,kind);
+                floorSplat=where==FLOOR&&s->floorpic!=skyflatnum;
             }
         }
     }
     if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
     drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(randomRange(0.35f,0.7f))});
+    return floorSplat;
 }
 // A spray of count drops from (x,y,z) around the heading (dx,dy), spread
 // that far across it, speeds and rises in those ranges; the first big ones
@@ -120,10 +123,16 @@ void combatHeadBlood(const wp_damage_event_t &event) {
     if(len<.001f)return;dx/=len;dy/=len;
     int wallBudget=p_wp_balance.headWallMarks;
     float scale=p_wp_balance.headBloodScale/100.f;
-    if(settings.bloodSpray)for(int i=0;i<(int)std::ceil(5*scale);++i) {
-        float a=std::atan2(dy,dx)+randomRange(-.7f,.7f)+(i%3==0?doomPi:0),speed=randomRange(75,170);
-        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,randomRange(10,110),randomRange(.8f,1.25f)*scale,
-            randomRange(9,15)*scale,BLOOD_SPLAT,&wallBudget);
+    if(settings.bloodSpray) {
+        for(int i=0;i<(int)std::ceil(6*scale);++i) {
+            bool fast=i%6==5;
+            float spread=fast?0.42f:1.45f;
+            float a=std::atan2(dy,dx)+randomRange(-spread,spread)+(i%3==0?doomPi:0);
+            float speed=fast?randomRange(100,124):randomRange(36,88);
+            throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,randomRange(fast?-5:-65,48),
+                randomRange(0.75f,1.6f)*scale,randomRange(8,16)*scale,BLOOD_SPLAT,&wallBudget);
+        }
+        return;
     }
     // First solid face only; no decals on absent/sky textures or through nearer geometry.
     for(float angle:{0.f,-.35f,.35f,-.8f,.8f}) {
@@ -136,37 +145,78 @@ void combatHeadBlood(const wp_damage_event_t &event) {
         --wallBudget;++combatFeedbackStats.wallSplats;
     }
 }
-void combatBleed(mobj_t *actor) {
-    if(!bloodOn()||!actor||actor->health<=0)return;
-    struct Position {float x,y;int tic;};
-    static std::unordered_map<const mobj_t*,Position> positions;
-    static unsigned serial=~0u;static int budgetTic=-1,budget=0;
-    if(serial!=r_levelserial){positions.clear();serial=r_levelserial;}
-    if(budgetTic!=leveltime){budgetTic=leveltime;budget=0;}
-    int tier=P_WeakpointBleedTier(actor);if(!tier){positions.erase(actor);return;}
-    float x=units(actor->x),y=units(actor->y);auto found=positions.find(actor);
-    if(found==positions.end()||leveltime-found->second.tic>2){positions[actor]={x,y,leveltime};return;}
-    float dx=x-found->second.x,dy=y-found->second.y;found->second={x,y,leveltime};
-    bool moving=std::hypot(dx,dy)>=.05f;
-    int cadence=tier==3?3:tier==2?4:5;
-    checkSprayLevel();BloodSourceScope bloodSource(actor);
-    if(leveltime%cadence==0&&(moving||tier>=2)&&budget<96) {
-        int count=(moving?tier:tier==3?2:1)+(actor->type==MT_FATSO?2:0);
-        for(int i=0;i<count&&budget<96;++i){
-            if(settings.bloodSpray)throwDrop(x+randomRange(-3,3),y+randomRange(-3,3),units(actor->z)+std::min(24.f,units(actor->height)*.45f),
-                -dx*8+randomRange(-10,10),-dy*8+randomRange(-10,10),-15,1.1f+(tier-1)*.3f,randomRange(3,6)*tier,BLOOD_SPECK);
-            else if(moving)bloodFloorSplat(x,y,int(sectorAt(x,y)-sectors),randomRange(3,6)*tier,0,1,false,gameSeconds(),BLOOD_SPECK);
+// Wound coordinates follow the current actor pose and the recorded shot side.
+static void woundOrigin(const mobj_t &thing,const WoundSpot &w,float &x,float &y,float &z,float &yaw) {
+    yaw=(float)(thing.angle*(2*doomPi/4294967296.0))+w.yaw;
+    float vx=std::cos(yaw),vy=std::sin(yaw),r=units(thing.radius)*0.7f;
+    x=units(thing.x)-vx*r+vy*w.across;
+    y=units(thing.y)-vy*r-vx*w.across;
+    z=units(thing.z)+w.height;
+}
+
+void combatBleed(mobj_t *actor,int justApplied) {
+    if(!actor||actor->health<=0||!bloodOn()||!bleeds(*actor))return;
+    int tier=P_WeakpointBleedTier(actor);
+    if(!tier)return;
+    checkSprayLevel();
+    static unsigned serial=~0u;
+    static int budgetTic=-1,budget=0;
+    if(serial!=r_levelserial||budgetTic!=leveltime){serial=r_levelserial;budgetTic=leveltime;budget=0;}
+    if(budget>=96)return;
+
+    // One emission in each window, staggered by actor and varied by window.
+    // This keeps the pressure irregular without retaining actor pointers.
+    const int window=tier==3?5:tier==2?8:12;
+    unsigned seed=hash32((uint32_t)(reinterpret_cast<uintptr_t>(actor)>>4));
+    unsigned phase=(unsigned)leveltime+seed%window;
+    unsigned pattern=hash32(seed^(phase/window));
+    if(!justApplied&&phase%window!=pattern%(window-1))return;
+
+    BloodSourceScope bloodSource(actor);
+    float ox=units(actor->x),oy=units(actor->y),feet=units(actor->z);
+    if(!settings.bloodSpray) {
+        bool pool=tier==3&&(justApplied||pattern%4==0);
+        const sector_t *sector=sectorAt(ox,oy);
+        size_t index=sector-sectors;
+        if((pool||actor->momx||actor->momy)&&sector->floorpic!=skyflatnum&&
+           (index>=sectorMist.size()||!sectorMist[index].liquid)&&std::abs(feet-floorZ(sector))<32){
+            bloodFloorSplat(ox,oy,(int)index,pool?randomRange(15,24):randomRange(3,6)*tier,
+                            0,1,false,gameSeconds(),pool?BLOOD_SPLAT:BLOOD_SPECK);
             ++budget;++combatFeedbackStats.bleedDrops;
+            if(pool)++combatFeedbackStats.bleedPools;
         }
+        return;
     }
-    if(tier==3&&leveltime%TICRATE==0&&budget<96) {
-        const auto *sector=sectorAt(x,y);
-        if(sector->floorpic!=skyflatnum&&std::abs(units(actor->z)-floorZ(sector))<32){
-            bloodFloorSplat(x+randomRange(-3,3),y+randomRange(-3,3),int(sector-sectors),randomRange(15,24),randomRange(0,2*doomPi),1,false,gameSeconds(),BLOOD_SPLAT);
-            ++combatFeedbackStats.bleedPools;++budget;
-        }
+
+    WoundSpot spots[10];
+    int count=woundSpots(actor,spots,10);
+    float height=units(actor->height);
+    WoundSpot fallback={height*0.54f,0,doomPi*0.75f,1,leveltime};
+    const WoundSpot *w=&fallback;
+    for(int i=0;i<count;++i)if(w==&fallback||spots[i].tic>=w->tic)w=&spots[i];
+    float x,y,z,yaw;
+    woundOrigin(*actor,*w,x,y,z,yaw);
+    z=std::clamp(z,feet+0.5f,feet+std::max(0.5f,height-0.5f));
+    float reach=std::hypot(x-ox,y-oy);
+    WallHit wall;
+    if(reach>0.01f&&((firstSolidWall(ox,oy,z,(x-ox)/reach,(y-oy)/reach,0,reach,wall))||
+                    (SV_Active()&&SV_Trace(ox,oy,z,x-ox,y-oy,0,nullptr,nullptr)<0.98f))) {x=ox;y=oy;}
+
+    bool gush=justApplied||randomRange(0,1)<tier*0.19f;
+    float carryX=std::clamp(units(actor->momx)*TICRATE*0.28f,-22.0f,22.0f);
+    float carryY=std::clamp(units(actor->momy)*TICRATE*0.28f,-22.0f,22.0f);
+    int wallBudget=1;
+    int emitted=gush?tier+1:1+(tier==3);
+    for(int n=0;n<emitted&&budget<96;++n) {
+        bool heavy=gush&&n==0&&tier>=2;
+        float a=yaw+doomPi+randomRange(-1.25f,1.25f),speed=gush?randomRange(12,49):randomRange(4,24);
+        float size=randomRange(0.7f,1.2f)+0.24f*(tier-1)+(heavy?0.35f:0);
+        float splat=heavy?randomRange(12,18)+tier*2:randomRange(3,6)*tier;
+        bool floor=throwDrop(x,y,z,carryX+std::cos(a)*speed,carryY+std::sin(a)*speed,
+                            randomRange(-115,gush?10:-35),size,splat,heavy?BLOOD_SPLAT:BLOOD_SPECK,&wallBudget);
+        ++budget;++combatFeedbackStats.bleedDrops;
+        if(heavy&&tier==3&&floor)++combatFeedbackStats.bleedPools;
     }
-    if(positions.size()>512)positions.clear();
 }
 void sprayHit(const mobj_t *target,float x,float y,float z,float dx,float dy,float slope,int damage) {
     BloodSourceScope bloodSource(target);
@@ -257,16 +307,13 @@ static void drip(const mobj_t &thing) {
     WoundSpot spots[10];
     int count=woundSpots(&thing,spots,10);
     if(!count)return;
-    float x=units(thing.x),y=units(thing.y),feet=units(thing.z),r=units(thing.radius);
-    float facing=(float)(thing.angle*(2*doomPi/4294967296.0));
     for(int n=0;n<count;++n) {
         const WoundSpot &w=spots[n];
         float age=(leveltime-w.tic)/(float)TICRATE,fresh=std::clamp(1-age/20,0.0f,1.0f);
         if(randomRange(0,1)>=0.02f*w.radius*fresh)continue;
-        // The wound faces the view it was shot from; across is to that view's right.
-        float view=facing+w.yaw,vx=std::cos(view),vy=std::sin(view);
-        float wx=x-vx*r*0.7f+vy*w.across,wy=y-vy*r*0.7f-vx*w.across;
-        throwDrop(wx,wy,feet+w.height,units(thing.momx)*TICRATE+randomRange(-6,6),units(thing.momy)*TICRATE+randomRange(-6,6),0,
+        float x,y,z,yaw;
+        woundOrigin(thing,w,x,y,z,yaw);
+        throwDrop(x,y,z,units(thing.momx)*TICRATE+randomRange(-6,6),units(thing.momy)*TICRATE+randomRange(-6,6),0,
                   randomRange(0.7f,1.0f),randomRange(0,1)<0.5f?randomRange(4,6):0,BLOOD_SPECK);
     }
 }
@@ -278,7 +325,7 @@ void watchSpray() {
     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
         if(!bleeds(*thing))continue;
         BloodSourceScope bloodSource(thing);
-        if(thing->health>0) {drip(*thing);slides.erase(thing);continue;}
+        if(thing->health>0) {if(!P_WeakpointBleeding(thing))drip(*thing);slides.erase(thing);continue;}
         float x=units(thing->x),y=units(thing->y),mx=units(thing->momx),my=units(thing->momy),speed=std::hypot(mx,my);
         auto found=slides.find(thing);
         if(found==slides.end()) {slides[thing]={x,y,speed,speed>0?mx/speed:0,speed>0?my/speed:0,0,false,true};continue;}

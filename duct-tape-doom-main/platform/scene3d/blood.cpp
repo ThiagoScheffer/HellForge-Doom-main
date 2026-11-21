@@ -477,7 +477,7 @@ void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fi
     shotThrough(target,fx,fy,fz,fdx,fdy,damage);
     bodyHit(target,fx,fy,fz,fdx,fdy,damage);
     woundHit(target,fx,fy,fz,fdx,fdy,slope,damage,shooter);
-    if(!bloodOn())return;
+    if(!bloodOn()||(settings.bloodSpray&&combatHeadSprayHandled(target,shooter)))return;
     checkBloodLevel();
     float x=units(fx),y=units(fy),z=units(fz),dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
     if(length<0.001f)return;

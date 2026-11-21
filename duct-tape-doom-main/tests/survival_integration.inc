@@ -43,7 +43,10 @@ static void survivalIntegration() {
     wp_damage_event_t h{};h.target=head;h.source=h.inflictor=shooter;h.kind=WP_SHOTGUN_PELLET;h.baseDamage=5;
     h.impact.region=WP_HEAD;h.impact.confidence=100;h.impact.x=0;h.impact.y=144;h.impact.z=48;
     int calls=combatFeedbackStats.headSounds,bursts=combatFeedbackStats.headBursts;P_WeakpointBeginShot(shooter,wp_supershotgun);
-    for(int i=0;i<20;++i){auto pellet=h;P_WeakpointResolve(&pellet);P_WeakpointNotify(&pellet);}P_WeakpointEndShot();
+    for(int i=0;i<20;++i){auto pellet=h;P_WeakpointResolve(&pellet);P_WeakpointNotify(&pellet);}
+    check(combatHeadSprayHandled(head,shooter),"a confirmed burst replaces ordinary spray for the same target and discharge");
+    P_WeakpointEndShot();
+    check(!combatHeadSprayHandled(head,shooter),"spray suppression ends with the discharge");
     check(combatFeedbackStats.headSounds-calls==1,"one headshot confirmation sound per complete shotgun discharge");
     check(combatFeedbackStats.headBursts-bursts==1,"shotgun world blood burst aggregated by target/discharge");
     int wallIds[3]={};int count=I_TestCombatBloodWalls(wallIds,3);check(count>0,"head impact near a real wall deposits blood");

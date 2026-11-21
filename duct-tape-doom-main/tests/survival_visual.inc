@@ -42,7 +42,12 @@ static void survivalVisualFrame() {
                 actor->state=&states[actor->info->spawnstate];actor->sprite=actor->state->sprite;actor->frame=actor->state->frame;actor->tics=-1;
                 forgetWounds(actor);
             }
+            int dropsBefore=combatFeedbackStats.bleedDrops;
             P_WeakpointBeginShot(shooter,wp_pistol);shoot(shooter,x,units(actor->y),z);P_WeakpointEndShot();
+            if(stage>=2) {
+                check(P_WeakpointBleedTier(actor)==shot+1,"actual GPU bullets progress through all three bleeding tiers");
+                if(shot==0)check(combatFeedbackStats.bleedDrops>dropsBefore,"confirmed bleeding emits on application");
+            }
         }
         if(stage>=2){if(P_WeakpointBleedTier(actor)!=3)std::fprintf(stderr,"GPU hemorrhage tier=%d health=%d position=%.2f,%.2f\n",P_WeakpointBleedTier(actor),actor->health,units(actor->x),units(actor->y));check(P_WeakpointBleedTier(actor)==3,"actual GPU bullets build bounded hemorrhage");}
         actor->momx=actor->momy=actor->momz=0;actor->tics=-1;wait=leveltime;step=2;return;
