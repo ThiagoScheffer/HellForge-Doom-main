@@ -122,3 +122,92 @@ We can explore ambitious engine changes, rendering improvements, monster behavio
 No need to rush into implementation. We'll challenge ideas, examine alternatives and refine the technical design before writing a Codex prompt.
 
 **HELLFORGE is the project. The upstream repositories are references, not restrictions.**
+
+
+
+
+
+w98_1  to  w101_2 + w103_1  w103_2 -- a skin leather wall with a moldure of iron - we can create a breathing effect on this one, to make the skins feels it is alive - same effect of a bed sheet with handes pressing it creating a depth and fear of inside alive.
+
+w102_1 and w102_2 - these same skin leather walls but have some skin rupture and blood going out from it on the red parts of it.
+ 
+ 
+ 
+wall25_1 - wall with many melted faces and torture souls morph effect and faces eyes moving and mouth open and closing.
+ 
+ 
+ 
+ mwall4_1 mwall4_2 mwall5_1 - marble rock walls with demons simbols and engraved faces - we can give a soft moving effect on it, to make like it is looking at the player.
+ 
+ 
+ hell5_1 hell5_2 - wall of alive flesh with skins and bone skelletons like, give  similiar spinewall effect to make it feels its moving and alive.
+ 
+ bodies - many skulls glued together we can add a bleeding effect like its alive and driping blood from the red skulls.
+ 
+ 
+ 
+ nex:
+ body_1  body_2 - wall with a dead body half smashed, only upper part torax,arms and head are nailed to the wall 
+ give a immersion effect as it still alived an with torax moving, and wall blood part still bleeding.
+
+wall50_1 wall50_2 wall51_2 wall51_3 - wall marble with a bodies hanged or chained on it - give immersion as the bodies are convulsing and half alive moving trying to scape.
+
+
+
+teleports - from gate1 to  gate4 textures - give a moving and pulsating effect as a energy and evil place  to improve the teleports immersion.
+
+
+ from rp2_1 to  rp2_4 - wall textures looks like pipes flowing blood down, give its blood textures (the red parts) a realism immersion as it is bleeding and flowing down.
+ 
+ wall58_1 wall58_2 wall58_3 - marble wall with a bleeding like monster face and its mouth flowing blood similar to the pile walls effect of blood.
+ 
+ Skies rework: improve immersion and depth of the skies
+ 
+ rsky1 - dark brown dawn sky - make the sky feeliz alive with moving clouds,windy effect and depth like a long and far horizon.
+ 
+ rsky2 - burning city sky - give death to the layers as a real city background burning on fire, fire and smoke to give a detph and immersion of caos.
+ 
+ rsky3 - montains ice cold and a red sky with fire and blood faces skelletons  similiar to the hell5_1 textures.
+ give depth to the montains and the red sky to make it looks like parallax distant and alive.
+ 
+ 
+ sw2_5 sw2_6 - Eye switch: make it looks alive and blinking and looking around the eye to creppy immersion
+ 
+ 
+ 
+ w65b_1 w65b_2 - a fire and blue like plasma - create depth and immersion as it the wall is pulsing and hot the blue plasma is melting.
+ 
+ from (w73a_1 to w74b_1 + also this  from wall22_1 to wall23_2) textures of a fire like wall - create a indepth feeling of a wall that is alive and burning, as a dense fire is consuming it infite fire effect.
+ 
+ 
+ 
+ 
+ 
+ 
+ next improvements:
+ Barrels - we had implemented the acid barrels new fx and damage
+ now need to check how to improve and make the other type of barrels on fire - to be also explode and spread oil and fire around it.
+ 
+ 
+ need fix : arch vile when bleeding or severe damaged it will run away or hunt to steal life from other monster - bug is the moviment direction is wrong - sometimes its even walking backwards. fix moviment direction to match where it want to go.
+ 
+ 
+ new options for balance game: avoid monster with common weapons to drop tis weapon, but make it drop ammo when it dies. idea is to make the level weapons worth discovery.
+ 
+ 
+ full rework on Menu F4 - to better organize and recreate correct new function inside Tabs and well organized - idea to make easy to player find and change settings,similar to Encounter director we have sub tabs well organized categories.
+ 
+
+
+need to fix the critical blood FX - still looks horrible like a blood jet. it should be some detail that make it easy to see its critical but not looks like a 3 jet spread.
+
+
+----------
+new reoworked Launcher 
+now with a separated Tab for the Add-on loadout and Maps wads, so user can easy add its only addons, but can easily change differents maps.
+
+Add a new compatible monster on the same place of archvile for normal Doom.wad add a Baron of hell. so its archville when the wad is doom2.wad and baron of hell when its original dooms wads. like doom or final doom.
+
+----------
+
+

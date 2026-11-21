@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <vector>
 #include "lightning_interactions.h"
+#include "tree_fire_visual.h"
 namespace doom3d {
 constexpr float doomPi=3.14159265358979323846f;
 constexpr int MT_MISC40=40, MT_MISC76=76, SPR_TRE1=51, SPR_TRE2=52, GS_LEVEL=1, TICRATE=35;
@@ -454,5 +455,34 @@ int main() {
     sectors[1].ceilingpic=0;
     require(!doom_strike::eligibleTree(MT_MISC40,SPR_TRE1,MT_MISC40,SPR_TRE1,false,60,30,true),"indoor small tree excluded");
     require(doom_strike::maxFlameBlocks==4*(7*2+9+12),"fire geometry budget unchanged");
+    namespace visual=doom_strike::tree_fire;
+    require(doom_strike::maxBurningTrees*(visual::texturedQuads+doom_strike::flameSparks+
+        doom_strike::fireEmberMotes)==doom_strike::maxFlameBlocks,"layered FX keep the four-fire cap");
+    for(int tile=0;tile<visual::masks;++tile) {
+        int clear=0,soft=0,opaque=0,asymmetric=0;
+        for(int y=0;y<visual::maskHeight;++y)for(int x=0;x<visual::maskWidth;++x) {
+            const float alpha=visual::maskAlpha(tile,x,y);
+            require(alpha>=0&&alpha<=1,"flame mask alpha in range");
+            if(x==0||x==visual::maskWidth-1||y==0||y==visual::maskHeight-1)
+                require(alpha==0,"transparent atlas tile border");
+            clear+=alpha==0;
+            soft+=alpha>.02f&&alpha<.98f;
+            opaque+=alpha>=.98f;
+            asymmetric+=std::abs(alpha-visual::maskAlpha(tile,visual::maskWidth-1-x,y))>.10f;
+        }
+        require(clear>400&&soft>100&&opaque>100&&asymmetric>70,"irregular flame silhouette with soft edges");
+    }
+    for(int n=0;n<visual::outerLayers;++n)for(int sample=0;sample<24*70;++sample) {
+        const float time=sample/70.f;
+        const auto tre1=visual::tongue(n,time,28.f,true,9181);
+        const auto next=visual::tongue(n,time+1.f/70.f,28.f,true,9181);
+        const auto tre2=visual::tongue(n,time,64.f,false,9181);
+        require(tre1.z==next.z&&std::hypot(tre1.x-next.x,tre1.y-next.y)<.1f,
+                "tongue roots stay attached across frames");
+        require(std::abs(tre1.height-next.height)<.8f&&std::abs(tre1.alpha-next.alpha)<.04f,
+                "flicker and upward flow are continuous");
+        require(tre1.mask==next.mask&&tre1.mask>=0&&tre1.mask<visual::masks,"stable atlas cell");
+        require(tre2.width>tre1.width&&tre2.height>tre1.height,"TRE2 flames scale up");
+    }
     std::printf("D3.3 compiled source regression passed (ignition=%d/20000, rotation=TRE1/TRE2, burned-out re-strikes=0)\n",fires);
 }

@@ -16,6 +16,7 @@
 #include "../storm_atmosphere.h"
 #include "../episode_atmosphere.h"
 #include "../lightning_interactions.h"
+#include "../tree_fire_visual.h"
 #include "../../../volume.h"
 extern "C" {
 #include "../audio/sound_options.h"
@@ -23,10 +24,9 @@ extern "C" {
 }
 
 namespace doom3d {
-// E2.2: soft Fluid smoke masks are appended to the existing textured-effect
+// Soft Fluid smoke masks are appended to the existing textured-effect
 // batches after buildImpacts() has cleared them. No weapon particles,
-// gameplay RNG, or new image keys are involved. Implemented in
-// fluid_effects.inc; only called for SKY2 / Burning City.
+// gameplay RNG, or new image keys are involved.
 void fluidWeatherSmoke(const Uniforms &camera,float x,float y,float z,
     float radiusX,float radiusZ,const std::array<float,3> &color,
     float alpha,float rotation,int mask);
@@ -1472,6 +1472,93 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
 }
 
 namespace {
+namespace tree_flame=doom_strike::tree_fire;
+
+int treeFireImage() {
+    // Private textured-effect key, beyond the numbered Fluid mask slots.
+    constexpr int lump=100000032,key=-1-lump;
+    if(images.count(key))return lump;
+    constexpr int w=tree_flame::masks*tree_flame::maskWidth,h=tree_flame::maskHeight;
+    std::array<byte,w*h*2> pixels{};
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+        const float alpha=tree_flame::maskAlpha(x/tree_flame::maskWidth,x%tree_flame::maskWidth,y);
+        pixels[2*(y*w+x)+1]=byte(std::lround(255.f*alpha));
+    }
+    images.emplace(key,upload(w,h,pixels.data()));
+    return lump;
+}
+
+void drawTreeFire(const Uniforms &camera,const BurningTree &fire,float seconds,float fade) {
+    if(fire.sector<0||fire.sector>=numsectors)return;
+    const bool small=fire.type==MT_MISC40;
+    const float headroom=ceilZ(&sectors[fire.sector])-fire.ground;
+    if(headroom<=4.f)return;
+    const float height=std::min(fire.height*1.36f+(small?14.f:24.f),headroom*.91f);
+    const int lump=treeFireImage();
+    constexpr std::array<float,3> red{.83f,.115f,.024f},orange{1.f,.47f,.075f},hot{1.f,.91f,.66f};
+    const float growth=.68f+.32f*tree_flame::smooth(seconds*2.2f);
+    const float opacity=fade*growth;
+    auto draw=[&](const tree_flame::Tongue &t,const std::array<float,3> &color,bool additive) {
+        const float left=float(t.mask*tree_flame::maskWidth);
+        auto vertex=[&](float edge,bool top,float u) {
+            const float s=edge*t.width*(top?.84f:1.f);
+            Vertex v={fire.x+t.x+camera.right[0]*s+(top?t.bendX:0.f),
+                      fire.y+t.y+camera.right[1]*s+(top?t.bendY:0.f),
+                      fire.ground+t.z+(top?t.height:0.f),
+                      left+u,top?.5f:tree_flame::maskHeight-.5f,t.alpha*opacity,0u};
+            v.red=color[0];v.green=color[1];v.blue=color[2];return v;
+        };
+        auto &batch=additive?effectAddBatches[lump]:effectBatches[lump];
+        const float right=tree_flame::maskWidth-.5f;
+        quad(batch,vertex(-1.f,true,.5f),vertex(1.f,true,right),
+                   vertex(1.f,false,right),vertex(-1.f,false,.5f));
+    };
+    struct Layer {tree_flame::Tongue shape;float depth;bool inner;};
+    std::array<Layer,tree_flame::outerLayers+tree_flame::innerLayers> layers;
+    std::array<tree_flame::Tongue,tree_flame::coreLayers> cores;
+    auto depth=[&](const tree_flame::Tongue &t) {
+        return (t.x+.5f*t.bendX)*camera.forward[0]+(t.y+.5f*t.bendY)*camera.forward[1]+
+               (t.z+.5f*t.height)*camera.forward[2];
+    };
+    for(int i=0;i<tree_flame::outerLayers;++i) {
+        auto tongue=tree_flame::tongue(i,seconds,height*growth,small,fire.seed);
+        layers[i]={tongue,depth(tongue),false};
+        if(i==0)cores[0]=tongue;
+        if(i==tree_flame::outerLayers/2)cores[1]=tongue;
+        if(i<tree_flame::innerLayers) {
+            tongue.width*=.67f;
+            tongue.height*=.74f;
+            tongue.alpha*=.98f;
+            layers[tree_flame::outerLayers+i]={tongue,depth(tongue),true};
+        }
+    }
+    // The alpha layers share an atlas so back-to-front order is retained by
+    // the batch. Layers at the same depth draw from the shell inward.
+    std::sort(layers.begin(),layers.end(),[](const Layer &a,const Layer &b) {
+        return a.depth==b.depth?a.inner<b.inner:a.depth>b.depth;
+    });
+    for(const auto &layer:layers)draw(layer.shape,layer.inner?orange:red,false);
+    for(auto core:cores) {
+        core.width*=.58f;
+        core.height*=.62f;
+        core.alpha*=.97f;
+        draw(core,hot,true);
+    }
+    const float wind=std::max(1.f,std::hypot(rainWind[0],rainWind[1]));
+    for(int i=0;i<tree_flame::smokeLayers;++i) {
+        const float phase=doom_strike::unit(fire.seed^0x61f2a0u)+.5f*i;
+        const float u=std::fmod(phase+seconds*(.37f+.033f*i),1.f);
+        const float life=tree_flame::smooth(u*4.f)*tree_flame::smooth((1.f-u)*3.f);
+        const float z=fire.ground+height*(.48f+.71f*u);
+        const float drift=u*(small?9.f:16.f);
+        const float radius=(small?4.5f:6.7f)*(1.f+1.3f*u);
+        const float hz=std::min(radius*1.26f,fire.ground+headroom-z-1.f);
+        fluidWeatherSmoke(camera,fire.x+drift*rainWind[0]/wind,
+            fire.y+drift*rainWind[1]/wind,z,radius,hz,{.092f,.079f,.076f},
+            .27f*opacity*life,u*(i==0?.75f:-.66f),i==0?13:16);
+    }
+}
+
 void drawFireEmbers(const Uniforms &camera,float x,float y,float ground,float height,
                    float seconds,float fade,std::uint32_t seed) {
     for(int n=0;n<doom_strike::fireEmberMotes;++n) {
@@ -1497,7 +1584,8 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
     if((episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)&&
         episodeAtmosphereNow!=int(doom_episode::Profile::BloodHell))||
        !settings.infernoTreeStrikes||!settings.episodeLightning||!settings.stormBolts||
-       !settings.stormMode||camera.effects[2]!=0||levelSerial!=r_levelserial)return;
+       !settings.stormMode||camera.effects[2]!=0||levelSerial!=r_levelserial||
+       weatherLevelSerial!=r_levelserial)return;
     const bool strikeVisible=treeStrike.born>=0&&
         std::hypot(camera.eye[0]-treeStrike.x,camera.eye[1]-treeStrike.y)<=
         doom_strike::maxTargetDistance+100.f;
@@ -1570,26 +1658,30 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
            doom_strike::maxTargetDistance+100.f)continue;
         const float seconds=float(leveltime-fire.born)/float(TICRATE);
         const float fade=doom_strike::fireFade(fire.born,leveltime);
-        const float flicker=.75f+.25f*std::sin(seconds*9.0f+
-            6.2831853f*doom_strike::unit(fire.seed));
-        for(int n=0;n<doom_strike::flameStrands;++n) {
-            const float seedPhase=6.2831853f*doom_strike::unit(fire.seed+
-                std::uint32_t(n)*0x32c91u);
-            const float phase=seedPhase+seconds*(2.2f+.15f*n);
-            const float radius=3.5f+2.f*doom_strike::unit(fire.seed^
-                std::uint32_t(n)*0x3a1c15u);
-            const float x=fire.x+radius*std::cos(phase);
-            const float y=fire.y+radius*std::sin(phase);
-            const float height=fire.height*(.30f+.55f*doom_strike::unit(
-                fire.seed+std::uint32_t(n)*0x76d45u));
-            const float z=fire.ground+12.f+height*.52f+
-                3.4f*std::sin(seconds*6.8f+seedPhase);
-            const std::array<float,3> red={.96f,.19f,.035f};
-            const std::array<float,3> orange={1.f,.49f,.095f};
-            pixelBlock(particleVertices,camera,x,y,z,3.f,height*.80f,
-                       red,false,nullptr,false,nullptr,.46f*fade*flicker);
-            pixelBlock(particleVertices,camera,x,y,z,1.45f,height*.57f,
-                       orange,false,nullptr,false,nullptr,.72f*fade*flicker);
+        if(episodeAtmosphereNow==int(doom_episode::Profile::Inferno)) {
+            drawTreeFire(camera,fire,seconds+renderFraction/TICRATE,fade);
+        } else {
+            const float flicker=.75f+.25f*std::sin(seconds*9.0f+
+                6.2831853f*doom_strike::unit(fire.seed));
+            for(int n=0;n<doom_strike::flameStrands;++n) {
+                const float seedPhase=6.2831853f*doom_strike::unit(fire.seed+
+                    std::uint32_t(n)*0x32c91u);
+                const float phase=seedPhase+seconds*(2.2f+.15f*n);
+                const float radius=3.5f+2.f*doom_strike::unit(fire.seed^
+                    std::uint32_t(n)*0x3a1c15u);
+                const float x=fire.x+radius*std::cos(phase);
+                const float y=fire.y+radius*std::sin(phase);
+                const float height=fire.height*(.30f+.55f*doom_strike::unit(
+                    fire.seed+std::uint32_t(n)*0x76d45u));
+                const float z=fire.ground+12.f+height*.52f+
+                    3.4f*std::sin(seconds*6.8f+seedPhase);
+                const std::array<float,3> red={.96f,.19f,.035f};
+                const std::array<float,3> orange={1.f,.49f,.095f};
+                pixelBlock(particleVertices,camera,x,y,z,3.f,height*.80f,
+                           red,false,nullptr,false,nullptr,.46f*fade*flicker);
+                pixelBlock(particleVertices,camera,x,y,z,1.45f,height*.57f,
+                           orange,false,nullptr,false,nullptr,.72f*fade*flicker);
+            }
         }
         for(int n=0;n<doom_strike::flameSparks;++n) {
             const float phase=6.2831853f*doom_strike::unit(fire.seed+
