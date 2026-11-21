@@ -1308,10 +1308,151 @@ static void buildBloodHellAtmosphere(const Uniforms &camera) {
     }
 }
 
-// D1: Inferno particles are ephemeral analytic billboards, not persistent actors.
-// The original rain, dripping-window effects and wetness remain unchanged.
-// One candidate per 48-unit world cell; hard caps bound all generated geometry.
-// Each current position and its swept path must be under an actual sky ceiling.
+namespace {
+void drawInfernoParticle(const Uniforms &camera,const doom_episode::inferno::Point &p,
+                         float width,float height,float roll,float skew,
+                         const std::array<float,3> &color,float alpha) {
+    const float c=std::cos(roll),s=std::sin(roll);
+    auto vertex=[&](float u,float v) {
+        const float x=c*u-s*v,y=s*u+c*v;
+        Vertex out={p.x+camera.right[0]*x+camera.up[0]*y,
+                    p.y+camera.right[1]*x+camera.up[1]*y,
+                    p.z+camera.right[2]*x+camera.up[2]*y,0,0,alpha,0};
+        out.red=color[0];out.green=color[1];out.blue=color[2];
+        return out;
+    };
+    quad(particleVertices,vertex(-width,-.34f*height),
+         vertex(skew*width,height),vertex(width,.22f*height),
+         vertex(-.36f*width,-height));
+}
+
+void buildInfernoAtmosphere(const Uniforms &camera) {
+    namespace inferno=doom_episode::inferno;
+    constexpr float cell=32.f,nearLimit=18.f;
+    const int density=std::clamp(settings.episodeParticles,0,2);
+    std::array<std::array<int,3>,2> remaining={
+        inferno::layerBudgets(doom_episode::ashBudget(density)),
+        inferno::layerBudgets(doom_episode::emberBudget(density))};
+    const float now=gameSeconds();
+    float wx,wy;
+    rainHeading(wx,wy);
+    const uint32_t salt=weatherSeed^0x4a71f2e9u;
+    const auto wind=inferno::wind(salt);
+    const float windNow=wind.travel(now);
+    const float windRoll=std::atan2(wx*camera.up[0]+wy*camera.up[1]-.18f*camera.up[2],
+        wx*camera.right[0]+wy*camera.right[1]-.18f*camera.right[2]);
+    // Search a fixed world grid centered upwind, so advected flakes can
+    // enter the view from behind the unshifted camera range.
+    const int cx=int(std::floor((camera.eye[0]-wx*66.f)/cell));
+    const int cy=int(std::floor((camera.eye[1]-wy*66.f)/cell));
+    auto skyCell=[](int x,int y,float entry,float exit) {
+        if(x<0||y<0||x>=mapWidth||y>=mapHeight)return false;
+        const int own=seamCells[size_t(y)*mapWidth+x].own;
+        if(own==noSector||sectors[own].ceilingpic!=skyflatnum)return false;
+        const sector_t *sector=&sectors[own];
+        return std::min(entry,exit)>floorZ(sector)+2.f&&std::max(entry,exit)<ceilZ(sector)-2.f;
+    };
+    auto visit=[&](int gx,int gy) {
+        const uint32_t seed=hash32(uint32_t(gx)*0x632be59bu^
+                                   uint32_t(gy)*0x85157af5u^salt);
+        constexpr float ashChance[]={.48f,.72f,.96f};
+        constexpr float emberChance[]={.13f,.23f,.36f};
+        for(int kind=0;kind<2;++kind) {
+            const bool ember=kind==1;
+            auto &budget=remaining[kind];
+            if(budget[0]+budget[1]+budget[2]==0)continue;
+            auto sample=[&](uint32_t s) {return hashUnit(gx,gy,seed^s);};
+            if(sample(ember?0x874c13u:0x96e72bu)>(ember?emberChance[density]:ashChance[density]))continue;
+            const bool fragment=!ember&&sample(0x54713u)<.26f;
+            const float life=(ember?1.8f:fragment?1.55f:1.12f)+.75f*sample(0x95117u+kind);
+            const float clock=now+sample(0x1c74d35bu+kind)*life;
+            const int cycle=int(std::floor(clock/life));
+            const float age=clock-cycle*life;
+            const float envelope=std::clamp(std::min(age,life-age)*3.6f,0.f,1.f);
+            if(envelope<.04f)continue;
+            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u^uint32_t(kind)*0x2ba715u);
+            auto vary=[&](uint32_t s) {return hashUnit(gx,gy,own^s);};
+            const float x0=(gx+.08f+.84f*vary(0x18u))*cell;
+            const float y0=(gy+.08f+.84f*vary(0x29u))*cell;
+            const sector_t *origin=sectorAt(x0,y0);
+            if(!origin||origin->ceilingpic!=skyflatnum)continue;
+            const float floor=floorZ(origin),height=ceilZ(origin)-floor;
+            if(height<16.f)continue;
+            const float z0=floor+4.f+(height-8.f)*(.14f+.72f*vary(0x4bu));
+            const float speed=(ember?14.f:fragment?21.f:34.f)+19.f*vary(0x6du);
+            const float kick=(ember?68.f:fragment?45.f:88.f)*(.62f+.38f*vary(0x75u));
+            const float vertical=(ember?4.f:fragment?-12.f:-7.f)+9.f*vary(0x5cu);
+            const float phase=2.f*float(doomPi)*vary(0x2f1u);
+            const float spin=(ember?4.1f:fragment?2.6f:5.3f)*(0.72f+.56f*vary(0xa21u));
+            const float curl=ember?4.f:fragment?3.4f:2.2f;
+            const float windAtBirth=wind.travel(now-age);
+            const float sinStart=std::sin(phase),cosStart=std::cos(phase);
+            auto position=[&](float t,float gustTravel) {
+                const float along=speed*t+kick*(gustTravel-windAtBirth);
+                const float across=curl*(std::sin(phase+spin*t)-sinStart);
+                const float lift=(curl*.64f)*(std::cos(phase+spin*t)-cosStart);
+                return inferno::Point{x0+wx*along-wy*across,y0+wy*along+wx*across,z0+vertical*t+lift};
+            };
+            const auto p=position(age,windNow);
+            const float dx=p.x-camera.eye[0],dy=p.y-camera.eye[1],dz=p.z-camera.eye[2];
+            const float distanceSq=dx*dx+dy*dy;
+            if(distanceSq<nearLimit*nearLimit||distanceSq>inferno::reach*inferno::reach)continue;
+            const float distance=std::sqrt(distanceSq);
+            const int layer=inferno::layer(distance);
+            if(budget[layer]<=0)continue;
+            const float depth=dx*camera.forward[0]+dy*camera.forward[1]+dz*camera.forward[2];
+            const float side=dx*camera.right[0]+dy*camera.right[1]+dz*camera.right[2];
+            const float up=dx*camera.up[0]+dy*camera.up[1]+dz*camera.up[2];
+            if(depth<8.f||std::abs(side)*camera.projection[0]>depth+5.f||
+               std::abs(up)*camera.projection[1]>depth+5.f)continue;
+            const sector_t *at=sectorAt(p.x,p.y);
+            if(!at||at->ceilingpic!=skyflatnum||p.z<=floorZ(at)+2.f||p.z>=ceilZ(at)-2.f)continue;
+            // Several short chords follow the curved path closely. Every grid
+            // cell along each chord must be outdoors at the crossing height.
+            inferno::Point previous{x0,y0,z0};
+            const int segments=std::clamp(int(std::ceil(age*spin/1.65f)),1,9);
+            bool exposed=true;
+            for(int n=1;n<=segments&&exposed;++n) {
+                const float t=age*n/segments;
+                const auto next=n==segments?p:position(t,wind.travel(now-age+t));
+                exposed=inferno::skyChord(previous,next,mapOrigin[0],mapOrigin[1],mapCell,skyCell);
+                previous=next;
+            }
+            if(!exposed)continue;
+            const float fade=envelope*std::clamp(std::min((distance-nearLimit)/37.f,
+                (inferno::reach-distance)/86.f),0.f,1.f);
+            const float hue=vary(0x7eu);
+            const float flicker=.5f+.5f*std::sin(phase+age*(12.f+8.f*hue));
+            const float heat=ember?std::clamp((flicker-.53f)*2.13f,0.f,1.f)*(.42f+.58f*hue):0.f;
+            const float light=std::clamp(lighting(at),.24f,1.05f);
+            const float ashShade=(.14f+.33f*hue)*(.66f+.34f*light);
+            const std::array<float,3> color=ember?
+                std::array<float,3>{.77f+.23f*heat,.14f+.66f*heat,.028f+.27f*heat}:
+                std::array<float,3>{ashShade,ashShade*.98f,ashShade*.96f};
+            // Modest distance compensation keeps the middle and far layers
+            // visible at the engine's lowest internal render scales.
+            const float sizeBias=1.f+.63f*std::clamp((depth-75.f)/300.f,0.f,1.f);
+            const float size=((ember?.79f:fragment?1.36f:.78f)+
+                vary(0xe15u)*(fragment?1.05f:.64f))*sizeBias;
+            const float tumble=phase+age*spin;
+            const float roll=fragment?tumble:windRoll+.65f*std::sin(tumble);
+            const float width=size*(fragment?.40f+.6f*std::abs(std::cos(tumble)):ember?1.f:1.75f);
+            const float alpha=fade*(ember?.46f+.46f*flicker:fragment?.54f+.23f*hue:.44f+.25f*hue);
+            drawInfernoParticle(camera,p,std::min(width,.048f*depth),
+                std::min(size*(fragment?.84f:.54f),.035f*depth),roll,.44f-hue,color,alpha);
+            --budget[layer];
+        }
+    };
+    visit(cx,cy);
+    for(int ring=1;ring<=16;++ring)for(int i=-ring;i<ring;++i) {
+        visit(cx+i,cy-ring);
+        visit(cx+ring,cy+i);
+        visit(cx-i,cy+ring);
+        visit(cx-ring,cy-i);
+    }
+}
+}
+
 void buildEpisodeAtmosphere(const Uniforms &camera) {
     if(episodeAtmosphereNow==int(doom_episode::Profile::Starport)) {
         buildStarportAtmosphere(camera);return;
@@ -1327,81 +1468,7 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
     }
     if(episodeAtmosphereNow!=int(doom_episode::Profile::Inferno)||
        camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
-    constexpr float cell=48.f,reach=390.f;
-    const int density=std::clamp(settings.episodeParticles,0,2);
-    const int ashLimit=doom_episode::ashBudget(density);
-    const int emberLimit=doom_episode::emberBudget(density);
-    const float now=gameSeconds();
-    const float windLength=std::hypot(rainWind[0],rainWind[1]);
-    const float wx=windLength>1.f?rainWind[0]/windLength:1.f;
-    const float wy=windLength>1.f?rainWind[1]/windLength:0.f;
-    const uint32_t salt=weatherSeed^0x4a71f2e9u;
-    const int cx=(int)std::floor(camera.eye[0]/cell);
-    const int cy=(int)std::floor(camera.eye[1]/cell);
-    int ash=0,embers=0;
-    for(int gy=cy-9;gy<=cy+9&&(ash<ashLimit||embers<emberLimit);++gy)
-    for(int gx=cx-9;gx<=cx+9&&(ash<ashLimit||embers<emberLimit);++gx) {
-        const uint32_t seed=hash32(uint32_t(gx)*0x632be59bu^
-                                   uint32_t(gy)*0x85157af5u^salt);
-        for(int kind=0;kind<2;++kind) {
-            const bool ember=kind!=0;
-            if(ember?embers>=emberLimit:ash>=ashLimit)continue;
-            const float selection=hashUnit(gx,gy,seed^(ember?0x874c13u:0x96e72bu));
-            if(selection>(ember?0.20f:0.65f))continue;
-            const float life=ember?5.5f:7.0f;
-            const float phase=hashUnit(gx,gy,seed^0x1c74d35bu);
-            const float clock=now+phase*life;
-            const int cycle=(int)std::floor(clock/life);
-            const float age=clock-float(cycle)*life;
-            const uint32_t own=hash32(seed^uint32_t(cycle)*0x9e3779b9u);
-            const float x0=(gx+0.10f+0.80f*hashUnit(gx,gy,own^0x18u))*cell;
-            const float y0=(gy+0.10f+0.80f*hashUnit(gx,gy,own^0x29u))*cell;
-            const sector_t *origin=sectorAt(x0,y0);
-            if(!origin||origin->ceilingpic!=skyflatnum)continue;
-            const float floor=floorZ(origin),ceiling=ceilZ(origin);
-            const float height=ceiling-floor;
-            if(height<16.f)continue;
-            const float start=floor+std::min(height-5.f,8.f+height*
-                (0.10f+0.65f*hashUnit(gx,gy,own^0x4bu)));
-            const float velocity=ember?(6.f+6.f*hashUnit(gx,gy,own^0x5cu)):
-                -(5.f+6.f*hashUnit(gx,gy,own^0x6du));
-            const float speed=ember?7.f:12.f;
-            const float turbulence=4.f*std::sin(age*1.4f+phase*6.2831853f);
-            const float deltaX=wx*(speed*age)-wy*turbulence;
-            const float deltaY=wy*(speed*age)+wx*turbulence;
-            const float x=x0+deltaX,y=y0+deltaY,z=start+velocity*age;
-            const sector_t *at=sectorAt(x,y);
-            if(!at||at->ceilingpic!=skyflatnum||z<=floorZ(at)+2.f||
-               z>=ceilZ(at)-2.f)continue;
-            // Short conservative sweep: no particles traveling through rooms.
-            bool blocked=false;
-            for(int step=1;step<4;++step) {
-                const float u=float(step)/4.f;
-                const sector_t *through=sectorAt(x0+deltaX*u,y0+deltaY*u);
-                const float hz=start+velocity*age*u;
-                if(!through||through->ceilingpic!=skyflatnum||
-                   hz<=floorZ(through)+2.f||hz>=ceilZ(through)-2.f) {
-                    blocked=true;break;
-                }
-            }
-            if(blocked)continue;
-            const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
-            if(dist<14.f||dist>reach)continue;
-            const float fade=std::clamp(std::min({age*1.6f,(life-age)*1.6f,
-                         (reach-dist)/70.f,(dist-14.f)/25.f}),0.f,1.f);
-            if(fade<0.025f)continue;
-            const float light=std::clamp(lighting(at),0.22f,1.1f);
-            const float hue=hashUnit(gx,gy,own^0x7eu);
-            std::array<float,3> color=ember?
-                std::array<float,3>{.76f+.19f*hue,.19f+.21f*hue,.035f+.07f*hue}:
-                std::array<float,3>{.19f+.11f*hue,.13f+.08f*hue,.12f+.06f*hue};
-            for(float &c:color)c*=ember?(.74f+.26f*light):(.50f+.50f*light);
-            pixelBlock(particleVertices,camera,x,y,z,
-                       ember?.48f:.85f,ember?.75f:.93f,color,
-                       false,nullptr,false,nullptr,fade*(ember?.83f:.57f));
-            if(ember)++embers;else ++ash;
-        }
-    }
+    buildInfernoAtmosphere(camera);
 }
 
 namespace {

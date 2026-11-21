@@ -111,8 +111,60 @@ inline BloodWeather bloodHellWeather(int tic,int rate,std::uint32_t seed) {
 inline float bloodHellHaze(float intensity) {
     return std::clamp(.64f+.23f*intensity,.64f,.87f);
 }
-inline int ashBudget(int density) {return density<=0?48:density==1?96:128;}
-inline int emberBudget(int density) {return density<=0?12:density==1?24:32;}
+inline int ashBudget(int density) {return density<=0?64:density==1?128:184;}
+inline int emberBudget(int density) {return density<=0?16:density==1?32:44;}
+
+namespace inferno {
+inline constexpr float reach=390.f;
+inline int layer(float distance) {return distance<105.f?0:distance<235.f?1:2;}
+inline std::array<int,3> layerBudgets(int total) {
+    const int near=total*27/100,mid=total*40/100;
+    return {near,mid,total-near-mid};
+}
+struct Wind {
+    float period,offset;
+    // Integral of a smooth 2.8-second gust. Taking the difference between
+    // two times applies acceleration without moving older particles in jumps.
+    float travel(float seconds) const {
+        constexpr float half=1.4f;
+        const float clock=seconds+offset;
+        const float cycle=std::floor(clock/period);
+        const float phase=clock-cycle*period;
+        const auto ramp=[](float u) {return u*u*u*(1.f-.5f*u);};
+        const float area=phase<half?half*ramp(phase/half):
+            half*(1.f-ramp(std::max(0.f,2.f-phase/half)));
+        return cycle*half+area;
+    }
+};
+inline Wind wind(std::uint32_t seed) {
+    const std::uint32_t h=(seed^(seed>>16))*0x7feb352du;
+    const float period=8.5f+4.f*float(h&255u)/255.f;
+    return {period,period*float((h>>8)&65535u)/65536.f};
+}
+struct Point {float x,y,z;};
+// Visit every grid cell crossed by a chord, including the entry and exit
+// heights in each cell. Fixed iteration bound also rejects unsupported paths.
+template<class Open>
+bool skyChord(Point a,Point b,float originX,float originY,float cell,Open open) {
+    const float x=(a.x-originX)/cell,y=(a.y-originY)/cell;
+    const float dx=(b.x-a.x)/cell,dy=(b.y-a.y)/cell,dz=b.z-a.z;
+    int cx=int(std::floor(x)),cy=int(std::floor(y));
+    const int sx=dx<0.f?-1:1,sy=dy<0.f?-1:1;
+    const float stepX=dx==0.f?2.f:1.f/std::abs(dx),stepY=dy==0.f?2.f:1.f/std::abs(dy);
+    float nextX=dx==0.f?2.f:(sx>0?cx+1-x:x-cx)*stepX;
+    float nextY=dy==0.f?2.f:(sy>0?cy+1-y:y-cy)*stepY;
+    float entry=0.f;
+    for(int n=0;n<64;++n) {
+        const float exit=std::min({nextX,nextY,1.f});
+        if(!open(cx,cy,a.z+dz*entry,a.z+dz*exit))return false;
+        if(exit>=1.f)return true;
+        if(nextX==exit){cx+=sx;nextX+=stepX;}
+        if(nextY==exit){cy+=sy;nextY+=stepY;}
+        entry=exit;
+    }
+    return false;
+}
+} // namespace inferno
 
 namespace hellfire {
 inline bool enabled(Profile profile,bool accelerated) {
