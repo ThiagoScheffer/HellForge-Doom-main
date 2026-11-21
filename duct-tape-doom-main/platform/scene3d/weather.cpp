@@ -16,7 +16,6 @@
 #include "../storm_atmosphere.h"
 #include "../episode_atmosphere.h"
 #include "../lightning_interactions.h"
-#include "../tree_fire_visual.h"
 #include "../../../volume.h"
 extern "C" {
 #include "../audio/sound_options.h"
@@ -1472,90 +1471,24 @@ void buildEpisodeAtmosphere(const Uniforms &camera) {
 }
 
 namespace {
-namespace tree_flame=doom_strike::tree_fire;
+constexpr std::array<float,3> hellfireRed{.91f,.12f,.025f};
+constexpr std::array<float,3> hellfireOrange{1.f,.39f,.056f};
+constexpr std::array<float,3> hellfireGold{1.f,.86f,.36f};
 
-int treeFireImage() {
-    // Private textured-effect key, beyond the numbered Fluid mask slots.
-    constexpr int lump=100000032,key=-1-lump;
-    if(images.count(key))return lump;
-    constexpr int w=tree_flame::masks*tree_flame::maskWidth,h=tree_flame::maskHeight;
-    std::array<byte,w*h*2> pixels{};
-    for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
-        const float alpha=tree_flame::maskAlpha(x/tree_flame::maskWidth,x%tree_flame::maskWidth,y);
-        pixels[2*(y*w+x)+1]=byte(std::lround(255.f*alpha));
-    }
-    images.emplace(key,upload(w,h,pixels.data()));
-    return lump;
-}
-
-void drawTreeFire(const Uniforms &camera,const BurningTree &fire,float seconds,float fade) {
-    if(fire.sector<0||fire.sector>=numsectors)return;
-    const bool small=fire.type==MT_MISC40;
-    const float headroom=ceilZ(&sectors[fire.sector])-fire.ground;
-    if(headroom<=4.f)return;
-    const float height=std::min(fire.height*1.36f+(small?14.f:24.f),headroom*.91f);
-    const int lump=treeFireImage();
-    constexpr std::array<float,3> red{.83f,.115f,.024f},orange{1.f,.47f,.075f},hot{1.f,.91f,.66f};
-    const float growth=.68f+.32f*tree_flame::smooth(seconds*2.2f);
-    const float opacity=fade*growth;
-    auto draw=[&](const tree_flame::Tongue &t,const std::array<float,3> &color,bool additive) {
-        const float left=float(t.mask*tree_flame::maskWidth);
-        auto vertex=[&](float edge,bool top,float u) {
-            const float s=edge*t.width*(top?.84f:1.f);
-            Vertex v={fire.x+t.x+camera.right[0]*s+(top?t.bendX:0.f),
-                      fire.y+t.y+camera.right[1]*s+(top?t.bendY:0.f),
-                      fire.ground+t.z+(top?t.height:0.f),
-                      left+u,top?.5f:tree_flame::maskHeight-.5f,t.alpha*opacity,0u};
-            v.red=color[0];v.green=color[1];v.blue=color[2];return v;
-        };
-        auto &batch=additive?effectAddBatches[lump]:effectBatches[lump];
-        const float right=tree_flame::maskWidth-.5f;
-        quad(batch,vertex(-1.f,true,.5f),vertex(1.f,true,right),
-                   vertex(1.f,false,right),vertex(-1.f,false,.5f));
-    };
-    struct Layer {tree_flame::Tongue shape;float depth;bool inner;};
-    std::array<Layer,tree_flame::outerLayers+tree_flame::innerLayers> layers;
-    std::array<tree_flame::Tongue,tree_flame::coreLayers> cores;
-    auto depth=[&](const tree_flame::Tongue &t) {
-        return (t.x+.5f*t.bendX)*camera.forward[0]+(t.y+.5f*t.bendY)*camera.forward[1]+
-               (t.z+.5f*t.height)*camera.forward[2];
-    };
-    for(int i=0;i<tree_flame::outerLayers;++i) {
-        auto tongue=tree_flame::tongue(i,seconds,height*growth,small,fire.seed);
-        layers[i]={tongue,depth(tongue),false};
-        if(i==0)cores[0]=tongue;
-        if(i==tree_flame::outerLayers/2)cores[1]=tongue;
-        if(i<tree_flame::innerLayers) {
-            tongue.width*=.67f;
-            tongue.height*=.74f;
-            tongue.alpha*=.98f;
-            layers[tree_flame::outerLayers+i]={tongue,depth(tongue),true};
-        }
-    }
-    // The alpha layers share an atlas so back-to-front order is retained by
-    // the batch. Layers at the same depth draw from the shell inward.
-    std::sort(layers.begin(),layers.end(),[](const Layer &a,const Layer &b) {
-        return a.depth==b.depth?a.inner<b.inner:a.depth>b.depth;
-    });
-    for(const auto &layer:layers)draw(layer.shape,layer.inner?orange:red,false);
-    for(auto core:cores) {
-        core.width*=.58f;
-        core.height*=.62f;
-        core.alpha*=.97f;
-        draw(core,hot,true);
-    }
-    const float wind=std::max(1.f,std::hypot(rainWind[0],rainWind[1]));
-    for(int i=0;i<tree_flame::smokeLayers;++i) {
-        const float phase=doom_strike::unit(fire.seed^0x61f2a0u)+.5f*i;
-        const float u=std::fmod(phase+seconds*(.37f+.033f*i),1.f);
-        const float life=tree_flame::smooth(u*4.f)*tree_flame::smooth((1.f-u)*3.f);
-        const float z=fire.ground+height*(.48f+.71f*u);
-        const float drift=u*(small?9.f:16.f);
-        const float radius=(small?4.5f:6.7f)*(1.f+1.3f*u);
-        const float hz=std::min(radius*1.26f,fire.ground+headroom-z-1.f);
-        fluidWeatherSmoke(camera,fire.x+drift*rainWind[0]/wind,
-            fire.y+drift*rainWind[1]/wind,z,radius,hz,{.092f,.079f,.076f},
-            .27f*opacity*life,u*(i==0?.75f:-.66f),i==0?13:16);
+void drawGroundFire(const Uniforms &camera,float x,float y,float ground,float age,
+                    float fade,std::uint32_t seed,float widthScale,float heightScale) {
+    for(int i=0;i<6;++i) {
+        const float phase=2.f*float(doomPi)*hashUnit(i,0,seed);
+        const float px=x+12.f*widthScale*std::cos(phase);
+        const float py=y+12.f*widthScale*std::sin(phase);
+        const float flicker=.65f+.35f*std::sin(age*(9.f+i)+phase);
+        const float height=(5.f+4.f*hashUnit(i,1,seed))*(.6f+.4f*fade)*heightScale;
+        drawHellfireGlow(camera,{px,py,ground+.5f},8.f*widthScale,5.f*widthScale,
+            phase,hellfireRed,.73f*fade,true,true);
+        drawHellfireGlow(camera,{px,py,ground+height},4.f*widthScale,height,
+            .3f*std::sin(age*7.f+phase),hellfireOrange,fade*flicker,false);
+        drawHellfireGlow(camera,{px,py,ground+height*.55f},2.f*widthScale,height*.55f,
+            0.f,hellfireGold,.75f*fade*flicker,true);
     }
 }
 
@@ -1659,7 +1592,16 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
         const float seconds=float(leveltime-fire.born)/float(TICRATE);
         const float fade=doom_strike::fireFade(fire.born,leveltime);
         if(episodeAtmosphereNow==int(doom_episode::Profile::Inferno)) {
-            drawTreeFire(camera,fire,seconds+renderFraction/TICRATE,fade);
+            if(fire.sector>=0&&fire.sector<numsectors) {
+                const float headroom=ceilZ(&sectors[fire.sector])-fire.ground;
+                if(headroom>4.f) {
+                    const bool small=fire.type==MT_MISC40;
+                    const float heightScale=std::min(fire.height*(small?1.6f:1.8f),
+                        headroom*.90f)/18.f;
+                    drawGroundFire(camera,fire.x,fire.y,fire.ground,seconds+renderFraction/TICRATE,
+                        fade,fire.seed,small?1.30f:1.80f,heightScale);
+                }
+            }
         } else {
             const float flicker=.75f+.25f*std::sin(seconds*9.0f+
                 6.2831853f*doom_strike::unit(fire.seed));
@@ -1699,9 +1641,6 @@ void buildInfernoTreeStrikes(const Uniforms &camera) {
     }
 }
 namespace {
-constexpr std::array<float,3> hellfireRed{.91f,.12f,.025f};
-constexpr std::array<float,3> hellfireOrange{1.f,.39f,.056f};
-constexpr std::array<float,3> hellfireGold{1.f,.86f,.36f};
 bool hellfireVisible(const Uniforms &camera) {
     return gamestate==GS_LEVEL&&camera.effects[2]==0&&r_levelserial==fallingHellfire.level&&
         (fallingHellfire.fall.start>=0||fallingHellfire.fires[0].start>=0||
@@ -1774,25 +1713,14 @@ void buildHellfire(const Uniforms &camera) {
         const float flare=impactFlare(age)*(settings.stormStrongFlashes?1.f:.5f);
         if(flare>0.f)drawHellfireGlow(camera,{site.x,site.y,site.floor+8.f},
             22.f,13.f,0.f,hellfireGold,.84f*flare,true);
-        for(int i=0;i<6;++i) {
+        drawGroundFire(camera,site.x,site.y,site.floor,age,fade,site.seed,1.f,1.f);
+        if(age<1.05f)for(int i=0;i<6;++i) {
             const float phase=2.f*float(doomPi)*hashUnit(i,0,site.seed);
-            const float x=site.x+12.f*std::cos(phase),y=site.y+12.f*std::sin(phase);
-            const float flicker=.65f+.35f*std::sin(age*(9.f+i)+phase);
-            const float height=(5.f+4.f*hashUnit(i,1,site.seed))*(.6f+.4f*fade);
-            // Low hot patches sit beneath the flickering tongues.
-            drawHellfireGlow(camera,{x,y,site.floor+.5f},8.f,5.f,phase,
-                hellfireRed,.73f*fade,true,true);
-            drawHellfireGlow(camera,{x,y,site.floor+height},4.f,height,
-                .3f*std::sin(age*7.f+phase),hellfireOrange,fade*flicker,false);
-            drawHellfireGlow(camera,{x,y,site.floor+height*.55f},2.f,height*.55f,
-                0.f,hellfireGold,.75f*fade*flicker,true);
-            if(age<1.05f) {
-                const float spread=4.f+age*7.f;
-                fluidWeatherSmoke(camera,site.x+spread*std::cos(phase),
-                    site.y+spread*std::sin(phase),site.floor+6.f+age*(16.f+i),
-                    3.f+age*5.f,4.f+age*5.f,{.23f,.16f,.13f},
-                    .34f*(1.f-age/1.05f),phase,13);
-            }
+            const float spread=4.f+age*7.f;
+            fluidWeatherSmoke(camera,site.x+spread*std::cos(phase),
+                site.y+spread*std::sin(phase),site.floor+6.f+age*(16.f+i),
+                3.f+age*5.f,4.f+age*5.f,{.23f,.16f,.13f},
+                .34f*(1.f-age/1.05f),phase,13);
         }
         if(age<.65f)for(int i=0;i<18;++i) {
             const float angle=2.f*float(doomPi)*hashUnit(i,3,site.seed);

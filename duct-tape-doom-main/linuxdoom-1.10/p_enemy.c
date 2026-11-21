@@ -2239,7 +2239,8 @@ static int P_FoodPath(mobj_t *actor,mobj_t *food) {
 static void P_FoodFaceStep(mobj_t *actor, fixed_t oldx, fixed_t oldy) {
     // Feeding bypasses A_Chase's turn. Use the step that actually happened,
     // including a detour, and keep facing steady if a door blocked movement.
-    if(actor->type==MT_SERGEANT&&(oldx!=actor->x||oldy!=actor->y))
+    if((actor->type==MT_SERGEANT||actor->type==MT_VILE||actor->type==MT_HEAD)&&
+       (oldx!=actor->x||oldy!=actor->y))
         actor->angle=R_PointToAngle2(oldx,oldy,actor->x,actor->y);
 }
 static int P_FoodMove(mobj_t *actor) {

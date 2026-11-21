@@ -9,6 +9,7 @@ extern "C" {
 #include "d_main.h"
 #include "m_argv.h"
 #include "p_weakpoints.h"
+#include "r_main.h"
 extern void G_DoSaveGame(void),G_DoLoadGame(void);
 }
 static void check(bool ok,const char* text){if(!ok){std::fprintf(stderr,"FAIL survival update: %s\n",text);std::exit(1);}std::printf("PASS survival update: %s\n",text);}
@@ -37,14 +38,34 @@ static void tests(){
  P_WeakpointConfigureExtras(0,0);P_WeakpointConfigure(0,0,0);before=a->health;P_TryMove(missile,a->x,a->y);check(a->health<before,"turning frenzy off does not make an existing duel invulnerable");P_RemoveMobj(missile);
  P_RemoveMobj(a);check(b->target!=a,"removal clears the hostile actor reference");
  clearActors();P_WeakpointConfigureFeeding(1);check(P_TeleportMove(playerBody,-200*FRACUNIT,-300*FRACUNIT)!=0,"player outside feeding threat radius");
- for(auto type:{MT_HEAD,MT_SERGEANT}){
+ bool retreatFacesStep=true;
+ for(auto type:{MT_HEAD,MT_SERGEANT,MT_VILE}){
   clearActors();auto* actor=P_SpawnMobj(0,0,ONFLOORZ,type);actor->health=actor->info->spawnhealth*30/100;actor->target=playerBody;
-  int start=leveltime;P_WeakpointTick(actor);check(P_WeakpointFeeding(actor)&&P_WeakpointWalkSpeed(actor,100*FRACUNIT)==120*FRACUNIT,"low-health predator searches with modest walking boost");
-  check(P_TeleportMove(playerBody,0,-64*FRACUNIT)!=0,"player approaches hungry predator");fixed_t distance=actor->y-playerBody->y;P_WeakpointFeedingChase(actor);check(actor->y-playerBody->y>distance,"native movement retreats from nearby player threat");
+  int start=leveltime;P_WeakpointTick(actor);
+  const int expectedSpeed=type==MT_VILE?100:120;
+  check(P_WeakpointFeeding(actor)&&P_WeakpointWalkSpeed(actor,100*FRACUNIT)==expectedSpeed*FRACUNIT,"low-health predator searches at its configured speed");
+  check(P_TeleportMove(playerBody,0,-64*FRACUNIT)!=0,"player approaches hungry predator");
+  const fixed_t x=actor->x,y=actor->y;
+  actor->angle=ANG270;
+  P_WeakpointFeedingChase(actor);
+  check(actor->y>y,"native movement retreats from nearby player threat");
+  retreatFacesStep &= actor->angle==R_PointToAngle2(x,y,actor->x,actor->y);
   check(P_TeleportMove(playerBody,-200*FRACUNIT,-300*FRACUNIT)!=0,"player leaves survival search");
   leveltime=start+p_wp_balance.feedWindow-1;P_WeakpointTick(actor);check(P_WeakpointFeeding(actor),"search remains active before ten-second deadline");
   ++leveltime;P_WeakpointTick(actor);check(!P_WeakpointFeeding(actor)&&actor->target==playerBody&&(actor->flags&MF_JUSTHIT),"ten-second failed search resumes aggressive native attack");
  }
+ bool pursuitFacesStep=true;
+ for(auto type:{MT_HEAD,MT_VILE}){
+  clearActors();
+  auto* actor=P_SpawnMobj(0,0,ONFLOORZ,type);
+  auto* prey=P_SpawnMobj(0,160*FRACUNIT,ONFLOORZ,MT_TROOP);
+  actor->health=actor->info->spawnhealth*30/100;
+  const fixed_t x=actor->x,y=actor->y;
+  actor->angle=ANG270;
+  check(P_WeakpointFeedingChase(actor)&&actor->target==prey&&actor->y>y,"native feeding chase approaches live prey");
+  pursuitFacesStep &= actor->angle==R_PointToAngle2(x,y,actor->x,actor->y);
+ }
+ check(retreatFacesStep&&pursuitFacesStep,"retreat and feeding pursuit face their actual movement");
  // Existing corpse recovery still completes through native animation and movement.
  for(auto type:{MT_HEAD,MT_SERGEANT}){
   clearActors();auto* actor=P_SpawnMobj(0,0,ONFLOORZ,type);actor->health=actor->info->spawnhealth*30/100;int hp=actor->health;
