@@ -34,7 +34,6 @@ static byte bloodTintIndex(byte index,int tint) {
 }
 constexpr int bloodKeyBase=-0x40000000; // Image keys clear of walls and lumps.
 constexpr int bloodPool=0,bloodSplats=4,bloodSpeckFirst=1+bloodSplats,bloodSpecks=3,bloodDrip=bloodSpeckFirst+bloodSpecks,bloodSmear=bloodDrip+1;
-constexpr int bloodJet=bloodSmear+1;
 static std::vector<byte> bloodShades;static bool bloodShadesLoaded=false;
 const std::vector<byte> &bloodPalette() {
     if(bloodShadesLoaded)return bloodShades;
@@ -88,25 +87,15 @@ static Image &bloodImage(int variant) {
     auto found=images.find(key);if(found!=images.end())return found->second;
     int tint=variant/32;variant%=32;
     uint32_t seed=hash32(variant*7919u+17u);
-    int width=variant==bloodJet?48:variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
-    int height=variant==bloodJet?12:variant==bloodDrip?40:variant==bloodSmear?16:width;
+    int width=variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
+    int height=variant==bloodDrip?40:variant==bloodSmear?16:width;
     std::vector<byte> pixels((size_t)width*height*2,0);
     auto put=[&](int x,int y,float shade) {
         if(x<0||y<0||x>=width||y>=height)return;
         size_t i=((size_t)y*width+x)*2;
         pixels[i]=bloodTintIndex(bloodIndex(shade),tint);pixels[i+1]=255;
     };
-    if(variant==bloodJet) {
-        for(int x=0;x<width;++x) {
-            float u=(x+0.5f)/width;
-            float center=height*.5f+std::sin(u*12.f)*u;
-            float reach=(4.8f-3.1f*u)*(0.8f+0.25f*hashUnit(x,0,seed));
-            for(int y=0;y<height;++y) {
-                float coverage=std::clamp(reach-std::abs(y+0.5f-center),0.f,1.f);
-                pixels[((size_t)y*width+x)*2+1]=(byte)(255*coverage);
-            }
-        }
-    } else if(variant==bloodDrip) {
+    if(variant==bloodDrip) {
         // A run one texel wide down to a bead three wide: drawn from the
         // bottom up as it grows, so the bead leads.
         for(int y=0;y<height-4;++y)put(1,y,0.22f+0.12f*valueNoise(0,(float)y,3,seed));
@@ -174,19 +163,16 @@ static std::vector<BloodPool> severePools;
 static std::unordered_map<const mobj_t*,bool> pooledCorpses;
 static unsigned bloodLevelSerial;
 namespace {
-constexpr size_t severeBurstLimit=5,severeElementLimit=25,severeGlobalLimit=250;
-constexpr float severeLifetime=.86f,jetTravel=.36f,jetLifetime=.58f,fallGravity=650.f;
-constexpr int jetSegments=3;
-constexpr int severeFragments=9;
-struct SevereJet {
-    float dx=0,dy=0,lift=0,travel=jetTravel;
-    WallHit wall{};
-    bool marked=false;
-};
+// A critical injury is a compact impact, not a pressurized fountain.
+// Five bounded effects can coexist, each with just six tiny ballistic drops.
+constexpr size_t severeBurstLimit=5;
+constexpr float severeLifetime=.55f,fallGravity=650.f,criticalImpactTime=.22f;
+constexpr int severeFragments=6;
 struct SevereFragment {
     float x=0,y=0,z=0,vx=0,vy=0,vz=0;
     float release=0,end=0,size=0;
     int sector=-1;
+    WallHit wall{}; // A true wall impact can leave one small decal.
     bool deposited=false;
     std::array<float,3> position(float t) const {
         return {x+vx*t,y+vy*t,z+vz*t-fallGravity*t*t};
@@ -196,10 +182,9 @@ struct SevereBurst {
     wp_severe_burst_t event{};
     float born=-1,heading=0;
     uint32_t seed=0;
-    int jets=0,fragments=0;
-    std::array<SevereJet,4> streams{};
+    int fragments=0;
+    bool wallMarked=false;
     std::array<SevereFragment,severeFragments> fallout{};
-    size_t elements() const {return size_t(jets*(jetSegments+1)+fragments);}
 };
 std::array<SevereBurst,severeBurstLimit> severeBursts{};
 unsigned severeLevel=~0u;
@@ -219,10 +204,11 @@ void planSevereFall(SevereFragment &drop) {
         const float dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2];
         const float reach=std::hypot(dx,dy);
         WallHit hit;
-        float stop=1.f;
+        float wallStop=1.f;
         if(reach>.01f&&firstSolidWall(a[0],a[1],a[2],dx/reach,dy/reach,dz/reach,reach,hit))
-            stop=hit.t/reach;
-        if(SV_Active())stop=std::min(stop,SV_Trace(a[0],a[1],a[2],dx,dy,dz,nullptr,nullptr));
+            wallStop=std::clamp(hit.t/reach,0.f,1.f);
+        const float solidStop=SV_Active()?SV_Trace(a[0],a[1],a[2],dx,dy,dz,nullptr,nullptr):1.f;
+        const float stop=std::min(wallStop,solidStop);
         const auto *sector=severeSectorAt(b[0],b[1]);
         const float floor=floorZ(sector);
         if(b[2]<=floor&&a[2]>floor) {
@@ -237,6 +223,8 @@ void planSevereFall(SevereFragment &drop) {
         }
         if(stop<1.f||b[2]<=floor|| (sector->ceilingpic!=skyflatnum&&b[2]>=ceilZ(sector))) {
             drop.end=previous+(next-previous)*stop;
+            if(stop<1.f&&hit.line>=0&&wallStop<=solidStop+.001f)
+                drop.wall=hit;
             return;
         }
     }
@@ -258,22 +246,31 @@ void collectSevereFall(const SevereBurst &burst,const SevereFragment &drop) {
     severePools.push_back({p[0],p[1],burst.born+drop.release+drop.end,
                            7.f+drop.size*2.f,burst.heading,drop.sector,burst.event.tint});
 }
-void markSevereWall(const SevereBurst &burst,int index) {
-    const auto &jet=burst.streams[index];
-    const auto &hit=jet.wall;
+void markSevereWall(const SevereBurst &burst,const SevereFragment &drop,int index) {
+    const auto &hit=drop.wall;
+    if(hit.line<0||hit.line>=numlines)return;
     WallSpan span;
     if(!wallSpan(lines[hit.line],hit.side,hit.section,span)||span.texture<=0||span.texture==skytexture)return;
-    const auto &origin=burst.event.impact;
-    const float x=origin.x+jet.dx*jet.travel,y=origin.y+jet.dy*jet.travel,z=origin.z+jet.lift*jet.travel;
+    const auto p=drop.position(drop.end);
     const float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
-    if(len<1||z<span.bottom||z>span.top)return;
-    const float along=std::clamp(((x-span.a.x)*ex+(y-span.a.y)*ey)/len,0.f,len);
+    if(len<1||p[2]<span.bottom||p[2]>span.top)return;
+    const float along=std::clamp(((p[0]-span.a.x)*ex+(p[1]-span.a.y)*ey)/len,0.f,len);
     constexpr size_t markLimit=32;
     if(severeWallMarks.size()>=markLimit)severeWallMarks.erase(severeWallMarks.begin());
     const uint32_t hash=hash32(burst.seed+uint32_t(index));
-    severeWallMarks.push_back({hit.line,hit.side,hit.section,along,z-span.anchor,
-        burst.born+jet.travel,18.f+10.f*hashUnit(index,26,burst.seed),1.3f,
+    severeWallMarks.push_back({hit.line,hit.side,hit.section,along,p[2]-span.anchor,
+        burst.born+drop.release+drop.end,9.f+5.f*hashUnit(index,26,burst.seed),1.f,
         1+int(hash%bloodSplats)+32*burst.event.tint,(hash&4u)!=0,0,{},{}});
+}
+void finishSevereDrop(SevereBurst &burst,SevereFragment &drop,int index) {
+    if(drop.deposited)return;
+    if(drop.wall.line>=0) {
+        if(!burst.wallMarked) {
+            markSevereWall(burst,drop,index);
+            burst.wallMarked=true; // At most one localized wall mark per injury.
+        }
+    } else collectSevereFall(burst,drop);
+    drop.deposited=true;
 }
 bool severeBloodOn() {
     return settings.accelerated&&settings.severeBloodspill&&settings.bloodSpray&&
@@ -291,8 +288,8 @@ void expireSevereBlood(float now) {
         if(burst.born<0)continue;
         if(now<burst.born)burst={};
         else if(now-burst.born>=severeLifetime) {
-            for(auto &drop:burst.fallout)
-                if(!drop.deposited)collectSevereFall(burst,drop);
+            for(int i=0;i<burst.fragments;++i)
+                finishSevereDrop(burst,burst.fallout[i],i);
             burst={};
         }
     }
@@ -306,44 +303,22 @@ void severeBloodBurst(const wp_severe_burst_t *event) {
                            [](const SevereBurst &burst){return burst.born<0;});
     if(slot==severeBursts.end())return;
     const uint32_t seed=hash32(uint32_t(event->seed)^uint32_t(event->seed>>32));
-    const int jets=2+int(seed%3);
-    const int fragments=std::min(severeFragments,int(severeElementLimit)-jets*(jetSegments+1));
-    size_t active=0;
-    for(const auto &burst:severeBursts)active+=burst.elements();
-    if(active+size_t(jets*(jetSegments+1)+fragments)>severeGlobalLimit)return;
-    // Aim outward from the struck surface, toward the side the shot came from.
+    // One impact spot plus a few low-energy drops, no ribbons or spray fans.
+    // The simulation is cosmetic and uses a stable event seed, not gameplay RNG.
+    const int fragments=severeFragments;
     const float heading=std::atan2(-event->directionY,-event->directionX);
-    *slot={*event,now,heading,seed,jets,fragments};
+    *slot={*event,now,heading,seed,fragments};
     const auto &origin=event->impact;
-    for(int j=0;j<jets;++j) {
-        const float spread=(j-(jets-1)*.5f)*.45f;
-        const float angle=heading+spread+(hashUnit(j,1,seed)-.5f)*.16f;
-        const float speed=325.f+135.f*hashUnit(j,2,seed);
-        auto &jet=slot->streams[j];
-        const float ux=std::cos(angle),uy=std::sin(angle);
-        jet.dx=ux*speed;jet.dy=uy*speed;
-        jet.lift=12.f+55.f*hashUnit(j,3,seed);
-        if(firstSolidWall(origin.x,origin.y,origin.z,ux,uy,jet.lift/speed,speed*jet.travel,jet.wall))
-            jet.travel=jet.wall.t/speed;
-        if(SV_Active()) {
-            const float travel=jet.travel;
-            const float solid=SV_Trace(origin.x,origin.y,origin.z,jet.dx*travel,jet.dy*travel,jet.lift*travel,nullptr,nullptr);
-            if(solid<.98f) {jet.travel*=solid;jet.wall={};}
-        }
-    }
     for(int i=0;i<fragments;++i) {
-        const auto &jet=slot->streams[i%jets];
         auto &drop=slot->fallout[i];
-        // Later fragments separate farther along the flow, inheriting some
-        // of the stream's speed before tumbling along their own arc.
-        drop.release=.085f+.29f*hashUnit(i,9,seed);
-        const float along=std::min(drop.release,jet.travel)*(.24f+.65f*hashUnit(i,10,seed));
-        drop.x=origin.x+jet.dx*along;drop.y=origin.y+jet.dy*along;drop.z=origin.z+jet.lift*along;
-        const float direction=std::atan2(jet.dy,jet.dx)+(hashUnit(i,11,seed)-.5f)*1.16f;
-        const float speed=std::hypot(jet.dx,jet.dy)*(.20f+.35f*hashUnit(i,12,seed));
-        drop.vx=std::cos(direction)*speed;drop.vy=std::sin(direction)*speed;
-        drop.vz=jet.lift*.5f+(hashUnit(i,13,seed)-.5f)*100.f;
-        drop.size=.95f+1.65f*hashUnit(i,14,seed);
+        drop.release=.01f+.055f*hashUnit(i,9,seed);
+        drop.x=origin.x;drop.y=origin.y;drop.z=origin.z;
+        const float direction=heading+(hashUnit(i,11,seed)-.5f)*1.65f;
+        const float speed=26.f+42.f*hashUnit(i,12,seed);
+        drop.vx=std::cos(direction)*speed;
+        drop.vy=std::sin(direction)*speed;
+        drop.vz=12.f+48.f*hashUnit(i,13,seed);
+        drop.size=.65f+.60f*hashUnit(i,14,seed);
         planSevereFall(drop);
     }
 }
@@ -353,14 +328,11 @@ static void buildSevereBlood(const Uniforms &camera) {
     expireSevereBlood(now);
     if(std::none_of(severeBursts.begin(),severeBursts.end(),
                    [](const SevereBurst &burst){return burst.born>=0;}))return;
-    const auto &jetMask=bloodImage(bloodJet);
     const auto &speckMask=bloodImage(bloodSpeckFirst);
-    auto &jetVertices=effectBatches[-1-(bloodKeyBase+bloodJet)];
     auto &speckVertices=effectBatches[-1-(bloodKeyBase+bloodSpeckFirst)];
     for(auto &burst:severeBursts) {
         if(burst.born<0)continue;
         const float age=now-burst.born;
-        const float pressure=1.f-std::clamp((age-.17f)/(jetLifetime-.17f),0.f,1.f);
         const auto &origin=burst.event.impact;
         const auto color=bloodColorForTint(.54f,burst.event.tint);
         auto vertex=[&](const std::array<float,3> &p,const std::array<float,3> &axis,
@@ -370,52 +342,41 @@ static void buildSevereBlood(const Uniforms &camera) {
             result.red=color[0];result.green=color[1];result.blue=color[2];
             return result;
         };
-        for(int j=0;j<burst.jets;++j) {
-            auto &jet=burst.streams[j];
-            if(!jet.marked&&jet.wall.line>=0&&age>=jet.travel) {
-                markSevereWall(burst,j);
-                jet.marked=true;
-            }
-            const float front=std::min(age+.018f,jet.travel);
-            const float tail=std::max(0.f,(age-.27f)*.82f);
-            if(front<=tail)continue;
-            std::array<Vertex,jetSegments+1> left{},right{};
-            for(int s=0;s<=jetSegments;++s) {
-                const float u=s/float(jetSegments), t=tail+(front-tail)*u;
-                const std::array<float,3> p={origin.x+jet.dx*t,origin.y+jet.dy*t,origin.z+jet.lift*t};
-                const float vx=camera.eye[0]-p[0],vy=camera.eye[1]-p[1],vz=camera.eye[2]-p[2];
-                std::array<float,3> side={jet.dy*vz-jet.lift*vy,jet.lift*vx-jet.dx*vz,jet.dx*vy-jet.dy*vx};
-                const float length=std::hypot(side[0],side[1],side[2]);
-                for(int axis=0;axis<3;++axis)side[axis]=length>.001f?side[axis]/length:camera.right[axis];
-                const float surge=.85f+.15f*std::sin(age*47.f+j*2.1f-u*4.f);
-                const float width=(1.2f+pressure*3.8f)*(1.f-.32f*u)*surge;
-                const float opacity=pressure*(.95f-.25f*u)*surge;
-                left[s]=vertex(p,side,-width,u*jetMask.width,0,opacity);
-                right[s]=vertex(p,side,width,u*jetMask.width,float(jetMask.height),opacity);
-            }
-            for(int s=0;s<jetSegments;++s) {
-                const float split=.25f+.12f*hashUnit(j,s,burst.seed);
-                // Lose the outer sections first, then leave a gap near
-                // the wound while the last piece keeps moving outward.
-                if((s==2&&age>split+.08f)||(s==0&&age>split+.12f)||(s==1&&age>split+.20f))continue;
-                quad(jetVertices,left[s],left[s+1],right[s+1],right[s]);
-            }
+        // One irregular, quickly fading impact blossom at the original hit,
+        // using an existing WAD-derived blood splat mask. No stream geometry.
+        if(age>=0.f&&age<criticalImpactTime) {
+            const int variant=1+int(burst.seed%bloodSplats);
+            const auto &impactMask=bloodImage(variant);
+            auto &impactVertices=effectBatches[-1-(bloodKeyBase+variant)];
+            const float phase=age/criticalImpactTime;
+            const float radius=6.0f+2.0f*phase;
+            const float opacity=.84f*(1.f-phase)*(1.f-phase);
+            const std::array<float,3> right={camera.right[0],camera.right[1],camera.right[2]};
+            auto corner=[&](float x,float y,float u,float v) {
+                std::array<float,3> point={origin.x,origin.y,origin.z};
+                for(int axis=0;axis<3;++axis)point[axis]+=camera.up[axis]*y*radius;
+                return vertex(point,right,x*radius,u,v,opacity);
+            };
+            quad(impactVertices,
+                 corner(-1,1,0,0),corner(1,1,float(impactMask.width),0),
+                 corner(1,-1,float(impactMask.width),float(impactMask.height)),
+                 corner(-1,-1,0,float(impactMask.height)));
         }
         for(int i=0;i<burst.fragments;++i) {
             auto &drop=burst.fallout[i];
             const float t=age-drop.release;
             if(t<=0)continue;
             if(t>=drop.end) {
-                if(!drop.deposited) {collectSevereFall(burst,drop);drop.deposited=true;}
+                finishSevereDrop(burst,drop,i);
                 continue;
             }
             const auto p=drop.position(t);
             const std::array<float,3> right={camera.right[0],camera.right[1],camera.right[2]};
-            const float size=drop.size,elongation=1.f+.75f*std::min(1.f,t*3.f);
+            const float size=drop.size,elongation=1.f+.30f*std::min(1.f,t*3.f);
             auto corner=[&](float x,float y,float u,float v) {
                 auto point=p;
                 for(int axis=0;axis<3;++axis)point[axis]+=camera.up[axis]*y*size*elongation;
-                return vertex(point,right,x*size,u,v,.86f*std::clamp((severeLifetime-age)/.16f,0.f,1.f));
+                return vertex(point,right,x*size,u,v,.78f*std::clamp((severeLifetime-age)/.14f,0.f,1.f));
             };
             quad(speckVertices,corner(-1,1,0,0),corner(1,1,float(speckMask.width),0),
                  corner(1,-1,float(speckMask.width),float(speckMask.height)),
