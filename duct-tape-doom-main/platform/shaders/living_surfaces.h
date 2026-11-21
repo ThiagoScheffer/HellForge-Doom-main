@@ -10,6 +10,12 @@
 #define LS_DRY_SKIN       5u
 #define LS_TORTURED_FACES 6u
 #define LS_MARBLE_FACES   7u
+#define LS_PINNED_BODY    8u
+#define LS_TELEPORT     9u
+#define LS_BLOOD_FLOW   10u
+#define LS_EYE_SWITCH   11u
+#define LS_FIRE         12u
+#define LS_SKY          13u
 
 // Camera map.w: flags in bits 0-4, intensity (1-3) in bits 6-7.
 #define WORLD_SOFT_LIGHT   1u

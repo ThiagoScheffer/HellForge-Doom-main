@@ -72,8 +72,8 @@ inline float starportHaze(float intensity) {
     return std::clamp(.36f+.30f*intensity,.36f,.66f);
 }
 // E2 — Burning City: dark rising smoke, falling soot and rare orange embers.
-// A smoke puff uses two billboards; ash/embers use one. Fixed scene budgets.
-inline int citySmokeBudget(int density) {return density<=0?56:density==1?80:96;}
+// Smoke wisps, ash and embers each use one billboard. Fixed scene budgets.
+inline int citySmokeBudget(int density) {return density<=0?16:density==1?28:40;}
 inline int cityAshBudget(int density) {return density<=0?24:density==1?40:56;}
 struct CityAir {float intensity=0.f,gust=0.f,windScale=1.f;};
 inline CityAir burningCity(int tic,int rate,std::uint32_t seed) {
@@ -89,7 +89,7 @@ inline CityAir burningCity(int tic,int rate,std::uint32_t seed) {
     return a;
 }
 inline float cityHaze(float intensity) {
-    return std::clamp(.52f+.24f*intensity,.52f,.76f);
+    return std::clamp(.39f+.16f*intensity,.39f,.55f);
 }
 // E3 — Blood Hell: cold opaque crimson smog, heavy *cosmetic* blood drips
 // and floating cinders. Never affects water rain, splashes or wet textures.

@@ -1,6 +1,7 @@
 /* Drawing helpers: the per-frame upload of vertices and light and sector
    data, resource binding, and the world and overlay draws the passes share. */
 #include "internal.h"
+#include "../shaders/living_surfaces.h"
 #include <set>
 
 namespace gpu3d {
@@ -256,21 +257,23 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         else
             skyMode=gameepisode==2?3:gameepisode>=3?4:2;
     }
-    float hfSkyUniform[4]={(float)skyMode,0.0f,0.0f,0.0f};
-    SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
-    SDL_GPUTextureSamplerBinding skyImage[]={{gpu(wallImage(skytexture).texture),linearRepeat},{paletteTexture,nearestClamp},
-                                         {gpu(cloudTexture),linearRepeat}};
+    auto bindSky=[&](int texture) {
+        const Image &skyArt=wallImage(texture);
+        float hfSkyUniform[4]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,0.0f,0.0f};
+        SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
+        SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},
+                                               {gpu(cloudTexture),linearRepeat}};
+        SDL_BindGPUFragmentSamplers(pass,0,images,3);
+    };
     if(!skyVertices.empty()) {
-        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,skyImage,3);
+        SDL_BindGPUGraphicsPipeline(pass,skySurface);bindSky(skytexture);
         drawVertices(pass,skyVertices);
     }
     for(const auto &batch:transferredSkies)if(!batch.second.empty()){
-        SDL_GPUTextureSamplerBinding material[]={{gpu(wallImage(batch.first).texture),linearRepeat},{paletteTexture,nearestClamp},
-                                              {gpu(cloudTexture),linearRepeat}};
-        SDL_BindGPUGraphicsPipeline(pass,skySurface);SDL_BindGPUFragmentSamplers(pass,0,material,3);drawVertices(pass,batch.second);
+        SDL_BindGPUGraphicsPipeline(pass,skySurface);bindSky(batch.first);drawVertices(pass,batch.second);
     }
     SDL_BindGPUGraphicsPipeline(pass,sky);
-    SDL_BindGPUFragmentSamplers(pass,0,skyImage,3);
+    bindSky(skytexture);
     SDL_DrawGPUPrimitives(pass,3,1,0,0);
     float skyBlendReset[36]={};
     SDL_PushGPUFragmentUniformData(command,3,skyBlendReset,sizeof(skyBlendReset));

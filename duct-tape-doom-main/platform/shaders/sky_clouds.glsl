@@ -10,6 +10,19 @@ float hellforgeCloudPattern(vec2 uv) {
     return broad*0.59+detail*0.29+wisps*0.12;
 }
 
+vec3 burningCitySmoke(vec3 ray,float angle,vec3 sky,out float coverage) {
+    // Wind stretches the smoke into soft layers that thin above the roofs.
+    // Integer yaw repeats keep both layers continuous around the horizon.
+    float z=ray.z,t=c.fog.w,u=angle/6.2831853;
+    float bank=texture(skyCloudPattern,vec2(u*3.0-t*0.013,z*3.8-t*0.024)).r;
+    float drift=texture(skyCloudPattern,vec2(u*5.0-t*0.021,z*7.0-t*0.036)+vec2(0.27,0.41)).r;
+    float smoke=smoothstep(0.29,0.78,mix(bank,drift,0.32));
+    float aloft=smoothstep(-0.06,0.14,z)*(1.0-smoothstep(0.21,0.58,z));
+    coverage=0.11*smoke*aloft;
+    float haze=0.075*(1.0-smoothstep(-0.06,0.26,z));
+    return mix(sky,vec3(0.33,0.28,0.25),haze+coverage);
+}
+
 vec3 hellforgeCloudDecks(vec3 ray,vec3 skyColor,vec3 horizonColor,
                           int profile,out float cloudCover) {
     cloudCover=0.0;

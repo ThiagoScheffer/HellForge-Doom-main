@@ -371,7 +371,19 @@ static LivingMaterial livingSurfaceProfile(const char *name) {
         {"W103_1",{LS_DRY_SKIN}}, {"W103_2",{LS_DRY_SKIN}},
         {"W102_1",{LS_DRY_SKIN,1}}, {"W102_2",{LS_DRY_SKIN,1}},
         {"WALL25_1",{LS_TORTURED_FACES}},
-        {"MWALL4_1",{LS_MARBLE_FACES}}, {"MWALL4_2",{LS_MARBLE_FACES,1}}, {"MWALL5_1",{LS_MARBLE_FACES,2}}
+        {"MWALL4_1",{LS_MARBLE_FACES}}, {"MWALL4_2",{LS_MARBLE_FACES,1}}, {"MWALL5_1",{LS_MARBLE_FACES,2}},
+        {"BODY_1",{LS_PINNED_BODY}}, {"BODY_2",{LS_PINNED_BODY,1}},
+        {"WALL50_1",{LS_PINNED_BODY,2}}, {"WALL50_2",{LS_PINNED_BODY,3}},
+        {"WALL51_2",{LS_PINNED_BODY,4}}, {"WALL51_3",{LS_PINNED_BODY,5}},
+        {"GATE1",{LS_TELEPORT}}, {"GATE2",{LS_TELEPORT}}, {"GATE3",{LS_TELEPORT}}, {"GATE4",{LS_TELEPORT,1}},
+        {"RP2_1",{LS_BLOOD_FLOW}}, {"RP2_2",{LS_BLOOD_FLOW}}, {"RP2_3",{LS_BLOOD_FLOW}}, {"RP2_4",{LS_BLOOD_FLOW}},
+        {"WALL58_1",{LS_BLOOD_FLOW,1}}, {"WALL58_2",{LS_BLOOD_FLOW,1}}, {"WALL58_3",{LS_BLOOD_FLOW,1}},
+        {"SW2_5",{LS_EYE_SWITCH}}, {"SW2_6",{LS_EYE_SWITCH,1}},
+        {"W65B_1",{LS_FIRE,1}}, {"W65B_2",{LS_FIRE,1}},
+        {"W73A_1",{LS_FIRE}}, {"W73A_2",{LS_FIRE}}, {"W73B_1",{LS_FIRE}}, {"W73B_2",{LS_FIRE}},
+        {"W74A_1",{LS_FIRE}}, {"W74A_2",{LS_FIRE}}, {"W74B_1",{LS_FIRE}},
+        {"WALL22_1",{LS_FIRE}}, {"WALL22_2",{LS_FIRE}}, {"WALL23_1",{LS_FIRE}}, {"WALL23_2",{LS_FIRE}},
+        {"RSKY1",{LS_SKY,1}}, {"RSKY2",{LS_SKY,2}}, {"RSKY3",{LS_SKY,3}}
     };
     char canonical[9]={};
     for(int i=0;i<8&&name[i];++i)
@@ -409,6 +421,9 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
     if(selected<0)return;
     const auto &region=image.livingBounds;
     for(int part=0;R_TexturePatchInfo(index,part,patchName,bounds.data());++part) {
+        // The stock eye switch is painted over its flesh backing. Its shader
+        // mask stays inside the eye, where the switch patch is opaque.
+        if(material.profile==LS_EYE_SWITCH&&part<selected)continue;
         if(part!=selected&&part!=joined&&bounds[0]<region[2]&&bounds[2]>region[0]&&
            bounds[1]<region[3]&&bounds[3]>region[1])return;
     }

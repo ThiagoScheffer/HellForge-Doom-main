@@ -1,5 +1,11 @@
 # Selected Texture Immersion v1 verification
 
+## Final artwork set
+
+The Windows x64 Release build and Vulkan/Metal shader generation passed. The launcher embeds the matching engine, verified by SHA-256. All 39 configured CTest checks passed.
+
+The final Doom II gallery rendered 23 selected scenes with eight matching Off and High frames each at 640×400. All selected scenes changed, and the sampled ordinary wall was pixel-identical. The gallery covers the six body panels, the four gates, both eye-switch states, the animated pipe and fire families, all three fountain faces, and all three Doom II skies. The captures and logs are in `build/immersion-finish/`. Vulkan was the runtime backend for these checks.
+
 ## Production expansion
 
 `tools/Build-Hellforge.ps1 -RecompileShaders` regenerated both shader targets, built Windows x64 Release, and packaged `dist/DOOM-Hellforge.exe`. The launcher's embedded engine SHA-256 matched `build/Release/doom.exe`. All 37 CTest checks passed. F4 navigation and the two-process persistence test passed, including removal of the legacy `living_cavities` key on save.

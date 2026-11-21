@@ -416,13 +416,13 @@ SurfaceBinding surfaceBinding(int key) {
     }
     SurfaceBinding binding={&image,next,blend};
     // frameMean.a is an exact small integer: base material in bits 0-3,
-    // worn-plate marker in bit 4, Living Surface profile in bits 5-7.
+    // worn-plate marker in bit 4, Living Surface profile in the upper bits.
     unsigned metadata=(unsigned)std::lround(surfaceMaterial(sourceKey,pic,flat));
     if(settings.wornPlates&&wornPlate(sourceKey,pic,flat)) metadata|=16u;
     float floor=flat?liquidDetailFloor(pic):0;
     // Liquid averages own RGB when present. A crossfade between different
     // artwork regions keeps its original shading.
-    if(settings.livingSurfaces&&floor==0&&image.livingProfile!=LS_NONE&&
+    if(settings.livingSurfaces&&floor==0&&image.livingProfile!=LS_NONE&&image.livingProfile!=LS_SKY&&
        image.livingProfile==next->livingProfile&&image.livingVariant==next->livingVariant&&
        image.livingBounds==next->livingBounds) {
         metadata|=image.livingProfile<<5u;

@@ -1,5 +1,6 @@
 struct LivingShading { vec2 slope; float gloss,sharpness,finish; };
 #include "living_motion.glsl"
+#include "living_hazards.glsl"
 
 LivingShading livingSurface(uint profile,uint flags,vec2 uv,vec2 pixel,float lod,float footprint,
                             vec3 normal,vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 rgb) {
@@ -20,6 +21,8 @@ LivingShading livingSurface(uint profile,uint flags,vec2 uv,vec2 pixel,float lod
 
     vec2 tile=at-bounds.xy;
     float seed=dot(vWorld,vec3(0.007,0.009,0.006));
+    if(profile>=LS_PINNED_BODY)
+        return livingHazard(profile,uint(cycleMean.g),flags,uv,tile,extent,pixel,lod,seed,strength,rgb);
     bool pulse=(flags&LS_PULSE)!=0u,wet=(flags&LS_WETNESS)!=0u;
     bool morph=(flags&LS_MORPH)!=0u&&c.style.x==0.0&&blend==0.0;
     uint variant=uint(cycleMean.g);

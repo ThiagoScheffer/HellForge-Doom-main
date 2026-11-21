@@ -68,7 +68,7 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // over its whole animation; cycleMean.a is the contrast it keeps far away,
 // 0 for everything that is not a liquid (surfaceBinding in scene3d/scene.cpp).
 // frameMean.a packs material (bits 0-3), worn plates (bit 4) and Living
-// Surface profile (bits 5-7), assigned by surfaceBinding in scene3d/scene.cpp.
+// Surface profile (bits 5 and up), assigned by surfaceBinding in scene3d/scene.cpp.
 // Profiled nonliquids store patch bounds in frameMean.rgb and cycleMean.r,
 // and the artwork variant in cycleMean.g.
 // Material 1 remains ice floors (iceFlat): deep grooves, glassy shine.

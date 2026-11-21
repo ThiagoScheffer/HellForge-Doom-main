@@ -1087,7 +1087,7 @@ static void buildStarportAtmosphere(const Uniforms &camera) {
 // Two alpha-masked quads per puff (NSHSF0 and NSHSA0), not rectangular
 // pixelBlock tiers. Reuses the existing Fluid GPU image cache and effect
 // pipeline, with no persistent actors, gameplay RNG, rain, or wetness.
-// Maximum at High: 2*96 smoke + 56 ash = 248 quads.
+// Maximum at High: 40 wisps + 56 ash = 96 quads.
 // Renderer order: buildImpacts clears effectBatches BEFORE this function. 
 static void buildBurningCityAtmosphere(const Uniforms &camera) {
     if(camera.effects[2]!=0||levelSerial!=r_levelserial||seamCells.empty())return;
@@ -1114,7 +1114,7 @@ static void buildBurningCityAtmosphere(const Uniforms &camera) {
             const bool soot=kind!=0;
             if(soot?ash>=ashCap:smoke>=smokeCap)continue;
             if(hashUnit(gx,gy,seed^(soot?0x71d13au:0xe54c3bu))>
-               (soot?.48f:.76f+.12f*intensity))continue;
+               (soot?.48f:.34f+.10f*intensity))continue;
             const float life=soot?4.8f:6.3f;
             const float phase=hashUnit(gx,gy,seed^0x83a31du);
             const float clock=now+phase*life;
@@ -1151,51 +1151,29 @@ static void buildBurningCityAtmosphere(const Uniforms &camera) {
             }
             if(blocked)continue;
             const float dist=std::hypot(x-camera.eye[0],y-camera.eye[1]);
-            if(dist<15.f||dist>reach)continue;
+            const float near=soot?15.f:38.f;
+            if(dist<near||dist>reach)continue;
             const float fade=std::clamp(std::min({age*1.4f,(life-age)*1.4f,
-                (reach-dist)/90.f,(dist-15.f)/25.f}),0.f,1.f);
+                (reach-dist)/90.f,(dist-near)/(soot?25.f:48.f)}),0.f,1.f);
             if(fade<.03f)continue;
             const float hue=hashUnit(gx,gy,own^0x86u);
             const float light=std::clamp(lighting(at),.20f,1.0f);
             if(!soot) {
-                // The original Fluid mask NSHSF0 (13) has a dense soft centre,
-                // while NSHSA0 (16) provides wispy, feathered secondary edges.
-                // World-cell position and all variation remain deterministic.
-                // Build no weapon particles: append directly to the existing
-                // alpha-masked texture batches, shared with Fluid effects.
+                // Use the feathered Fluid mask (NSHSA0) for a thin wisp.
                 const std::array<float,3> gray={
                     (.23f+.10f*hue)*(.75f+.25f*light),
                     (.215f+.085f*hue)*(.75f+.25f*light),
                     (.20f+.075f*hue)*(.75f+.25f*light)};
-                const float opacity=fade*(.35f+.18f*intensity);
+                const float opacity=fade*(.13f+.075f*intensity);
                 // Clamp the textured quad to the local sky-sector clearance
                 // rather than allowing the soft sprite to cross a low roof.
                 const float clearance=std::min(z-floorZ(at),ceilZ(at)-z)-3.5f;
                 const float height=std::min(clearance,
-                    (5.4f+2.8f*hashUnit(gx,gy,own^0x29f17u))*(.82f+.045f*age));
+                    (3.4f+2.0f*hashUnit(gx,gy,own^0x29f17u))*(.84f+.035f*age));
                 if(height>1.5f) {
-                    const float radius=height*(1.08f+.25f*hue);
-                    const float roll=(hashUnit(gx,gy,own^0x7d912u)-.5f)*.60f;
-                    fluidWeatherSmoke(camera,x,y,z,radius,height,gray,opacity,roll,13);
-                    // A smaller displaced lobe makes the silhouette irregular.
-                    // The lobe remains inside the outdoor sector if the wind
-                    // drifts it near a wall or a covered neighboring sector.
-                    const float side=(hashUnit(gx,gy,own^0x47b2u)-.5f)*radius*.72f;
-                    const float px=x-wy*side,py=y+wx*side;
-                    const float offsetZ=height*.20f;
-                    const sector_t *wispy=sectorAt(px,py);
-                    if(wispy&&wispy->ceilingpic==skyflatnum) {
-                        const float wispyClearance=std::min(
-                            z+offsetZ-floorZ(wispy),ceilZ(wispy)-z-offsetZ)-3.5f;
-                        const float smallHeight=std::min(height*.75f,wispyClearance);
-                        if(smallHeight>1.5f) {
-                            const std::array<float,3> wispTint={
-                                gray[0]*.88f,gray[1]*.90f,gray[2]*.92f};
-                            fluidWeatherSmoke(camera,px,py,z+offsetZ,
-                                radius*.79f,smallHeight,wispTint,opacity*.66f,
-                                -roll*.67f,16);
-                        }
-                    }
+                    const float radius=height*(1.72f+.32f*hue);
+                    const float roll=(hashUnit(gx,gy,own^0x7d912u)-.5f)*.35f;
+                    fluidWeatherSmoke(camera,x,y,z,radius,height,gray,opacity,roll,16);
                 }
                 ++smoke;
             } else {

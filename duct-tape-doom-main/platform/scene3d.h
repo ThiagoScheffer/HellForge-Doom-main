@@ -337,7 +337,7 @@ struct FrameView {
 // at the crossfade, and the whole animation's; cycleMean's alpha is how much
 // of the artwork's contrast stays far away (0: not a liquid, no fade);
 // frameMean's alpha packs material bits 0-3, worn-plate bit 4 and optional
-// Living Surface profile bits 5-7 (surfaceBinding in scene3d/scene.cpp).
+// Living Surface profile above bit 4 (surfaceBinding in scene3d/scene.cpp).
 // For a profiled nonliquid, frameMean.rgb and cycleMean.r hold the patch rectangle; cycleMean.g holds its variant.
 struct SurfaceBinding { const Image *image,*next; float blend; std::array<float,4> frameMean{},cycleMean{}; };
 struct SpriteDraw { const Image *image; std::vector<Vertex> vertices; bool additive=false; };

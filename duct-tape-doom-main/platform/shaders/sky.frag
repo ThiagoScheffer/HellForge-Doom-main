@@ -24,6 +24,7 @@ layout(location=0) out vec4 outColor;
 #include "sky_storm.glsl"
 #include "sky_clouds.glsl"
 #include "sky_horizon.glsl"
+#include "sky_immersion.glsl"
 void main() {
     vec2 size=vec2(textureSize(image,0));
 #ifdef SURFACE
@@ -51,6 +52,7 @@ void main() {
         soft+=indexed(image,palette,vec2(uv.x+o.x,clamp(uv.y+o.y,0.5,size.y-0.5)),filtered,true).rgb;
     }
     color.rgb=mix(color.rgb,soft/4.0,0.6);
+    color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
     // The sky's own low-row color, the tint of air at the horizon.
     vec3 low=vec3(0);
     for(int i=0;i<8;++i)
@@ -100,11 +102,6 @@ void main() {
         float dust=1.0-smoothstep(-0.15,0.75,rise);
         color.rgb=mix(color.rgb,vec3(.42,.265,.155),.21*dust);
     }
-    if(city) {
-        // Distant smoke below the burning skyline, not a full-screen tint.
-        float smog=(1.0-smoothstep(-0.22,0.75,rise));
-        color.rgb=mix(color.rgb,vec3(.26,.23,.21),.27*smog);
-    }
     // Lightning is behind the three virtual horizon layers and clouds.
     // The skyline therefore masks the bolt rather than being lit on top.
     if(c.style.z>0.0) {
@@ -122,16 +119,16 @@ void main() {
     // sky cloud decks. No map geometry or additional GPU drawing is created.
     // Shared with far-plane, sky surfaces, transferred skies and reflections.
     int hfMode=int(skyEnvironment.x+0.5);
+    bool citySmoke=city||hfMode==5||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
+        (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
     if(hfMode>=2 && hfMode<=5) {
         color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
-        color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
+        if(hfMode!=5)color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
         // E1 Starport: existing clouds become slightly heavier at sundown.
         // No new layers or extra texture lookups are required.
         if(starport)color.rgb=mix(color.rgb,vec3(.23,.185,.14),
                                   .24*clamp(cloudCover,0.0,1.0));
-        if(city)color.rgb=mix(color.rgb,vec3(.19,.17,.16),
-                              .35*clamp(cloudCover,0.0,1.0));
         if(bloodHell)color.rgb=mix(color.rgb,vec3(.25,.10,.14),
                                    .22*clamp(cloudCover,0.0,1.0));
         // Electrical glow scatters through the soft cloud layers; the
@@ -143,6 +140,11 @@ void main() {
                          coldElectrical?vec3(0.20,0.33,0.41):vec3(0.18,0.23,0.34);
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
+    }
+    if(citySmoke) {
+        float smokeCover;
+        color.rgb=burningCitySmoke(ray,angle,color.rgb,smokeCover);
+        cloudCover=1.0-(1.0-cloudCover)*(1.0-smokeCover);
     }
     // The sun at the baked yaw and the height the sky paints it (c.outdoor.w;
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
@@ -215,10 +217,6 @@ void main() {
         // E3: a cold blood-grey horizon veil over the existing skull sky art.
         float band=(1.0-smoothstep(-.16,.80,ray.z))*.58;
         color.rgb=mix(color.rgb,vec3(.31,.17,.23),band);
-    } else if(city) {
-        // E2: thick pollution retains the recognizable burning-city artwork.
-        float band=(1.0-smoothstep(-.18,.67,ray.z))*.30;
-        color.rgb=mix(color.rgb,vec3(.23,.20,.19),band);
     } else if(deimos) {
         // D2.1: a cold, opaque-looking whiteout over the far horizon.
         // c.haze.w is already gated by the user's Fog setting; this affects

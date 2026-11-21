@@ -1,5 +1,15 @@
 # Selected Texture Immersion v1 design
 
+## Final artwork set
+
+The last expansion uses the same Selected Texture Immersion switch. Pinned bodies (`SP_DUDE7/8`) breathe at the chest. Hanging bodies (`SP_DUDE1/2/4/5`) twitch inside the painted silhouette while their supports stay anchored. `GATE1`–`GATE4` pulse inside their flat's metal rim. Animated `BLODRIP` pipes and `GSTFONT` mouths draw the red parts downward. `SW1SKIN` and `SW2SKIN` retain their gameplay switch states and animate the embedded eye. `FIREBLU`, `FIRELAV`, `FIREMAG`, and `FIREWAL` use color-masked heat motion over their existing frame cycles.
+
+Doom II's `RSKY1`–`RSKY3` patches are identified independently of map number. The first has two moving cloud scales. The second keeps the city silhouette fixed under rising smoke and firelight. The third moves the red artwork behind a cold, stable mountain ridge. The sky shader uses the existing indexed artwork, cloud texture, and sky uniform on normal and transferred sky draws. Morph controls layer motion, and Organic Pulse controls firelight.
+
+The new profiles extend the numeric metadata above bit 4 without changing the GPU binding layout. `python duct-tape-doom-main/tests/selected_texture_scene.py build/immersion-finish/gallery.wad --finish` builds a Doom II test gallery using stock artwork.
+
+## Production expansion
+
 The production expansion supersedes the initial settings and profile list below. The approved spine motion now runs through the normal master switch. The expansion removes the cavity control and its contrast samples. Stock relief still provides the base material shading.
 
 | Stock surface | Production motion |

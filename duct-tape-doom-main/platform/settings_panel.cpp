@@ -313,15 +313,15 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     [](const Settings &d){return d.windowGlass!=0;})}},
             {"Selected Texture Immersion",{
                 check("living_surfaces","Selected Texture Immersion",&s.livingSurfaces,
-                    "Animates selected spine, flesh, skin, face and marble artwork. Default off."),
+                    "Animates selected organic walls, teleports, fire, switches, and Doom II skies. Default off."),
                 choice("living_intensity","Intensity",&s.livingIntensity,{"Low","Medium","High"},{1,2,3},
                     "Adjusts the strength of all enabled immersion effects.",
                     [](const Settings &d){return d.livingSurfaces!=0;}),
                 check("living_morph","Morph",&s.livingMorph,
-                    "Moves tissue, ribs, and selected facial details with the chosen texture filter.",
+                    "Moves selected artwork and sky layers with the chosen texture filter.",
                     [](const Settings &d){return d.livingSurfaces!=0;}),
                 check("living_pulse","Organic pulse",&s.livingPulse,
-                    "Adds local changes in tissue brightness and surface relief.",
+                    "Adds breathing, blinking, surging energy, and flickering light.",
                     [](const Settings &d){return d.livingSurfaces!=0;}),
                 check("living_wetness","Wetness",&s.livingWetness,
                     "Adds surface blood runoff and wet highlights to selected flesh and torn skin.",
@@ -496,7 +496,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     {"Low","Normal","High"},{0,1,2},
                     "Inferno ash/embers: 48/12, 96/24, 128/32; Deimos ice/dust: 180/80, 320/144, 480/220; "
                     "Starport fine sand/heavy grit: 80/16, 128/24, 160/32; "
-                    "Burning City smoke/ash: 56/24, 80/40, 96/56; "
+                    "Burning City smoke/ash: 16/24, 28/40, 40/56; "
                     "Blood Hell droplets/embers: 64/12, 96/24, 120/32. "
                     "Only open-sky sectors and swept sky-exposed paths are eligible.",
                     [](const Settings &d){return d.accelerated!=0&&d.episodeAtmosphere!=0;}),
