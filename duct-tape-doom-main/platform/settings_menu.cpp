@@ -729,7 +729,7 @@ extern "C" int I_TestSettingsPersistence(int mode) {
             return false;
         };
         if(!press("living_surfaces",SDL_SCANCODE_RETURN)||!press("living_intensity",SDL_SCANCODE_RIGHT))return 0;
-        for(const char *key:{"living_morph","living_pulse","living_wetness","living_cavities"})
+        for(const char *key:{"living_morph","living_pulse","living_wetness"})
             if(!press(key,SDL_SCANCODE_RETURN))return 0;
         I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
         return !panel.open;

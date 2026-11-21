@@ -13,7 +13,7 @@ static void settingsPersistenceFrame(){
             check(I_TestSettingsPersistence(11),"F4 applies and saves every immersion control");
         }
         check(settings.livingSurfaces&&settings.livingIntensity==3&&!settings.livingMorph&&!settings.livingPulse&&
-              !settings.livingWetness&&!settings.livingCavities,"all immersion choices match the persisted profile");
+              !settings.livingWetness,"all immersion choices match the persisted profile");
     }else if(settingsCase=="--settings-layout-write"){
         check(settings.speedrunLayout==0&&settings.speedrunX==0&&settings.speedrunY==0,"existing profiles retain column layout and zero adjustments");
         char sample[8][48]={"MAP04","ATT 1","DTH 0","KS 0","TIME 00:00.00","RUN 00:00:00","DEALT 0","TAKEN 0"};int visible[8]={1,1,1,1,1,1,1,1};

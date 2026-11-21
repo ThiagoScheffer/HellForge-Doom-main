@@ -360,40 +360,46 @@ static Image &speckledPanel(Image &image,const char *name,bool flat) {
 }
 // Classify once when a wall or flat is loaded. WAD names are eight bytes,
 // NUL padded, and compared without ASCII case distinctions.
-static unsigned livingSurfaceProfile(const char *name) {
-    static constexpr struct { const char *name; unsigned profile; } profiles[]={
-        {"HELL5_1",LS_HELL_FLESH}, {"SPINE3_1",LS_SPINE_WALL}, {"BODIES",LS_BODY_MASS},
-        {"SFLR6_4",LS_TENTACLE_MEAT}, {"W98_1",LS_DRY_SKIN}, {"WALL25_1",LS_TORTURED_FACES}
+struct LivingMaterial { unsigned profile=LS_NONE,variant=0; };
+static LivingMaterial livingSurfaceProfile(const char *name) {
+    static constexpr struct { const char *name; LivingMaterial material; } profiles[]={
+        {"HELL5_1",{LS_HELL_FLESH}}, {"HELL5_2",{LS_HELL_FLESH}},
+        {"SPINE3_1",{LS_SPINE_WALL}}, {"SPINE3_2",{LS_SPINE_WALL}}, {"SPINE4_1",{LS_SPINE_WALL}},
+        {"BODIES",{LS_BODY_MASS}}, {"SFLR6_4",{LS_TENTACLE_MEAT}},
+        {"W98_1",{LS_DRY_SKIN}}, {"W98_2",{LS_DRY_SKIN}}, {"W99_1",{LS_DRY_SKIN}}, {"W99_2",{LS_DRY_SKIN}},
+        {"W100_1",{LS_DRY_SKIN}}, {"W100_2",{LS_DRY_SKIN}}, {"W101_1",{LS_DRY_SKIN}}, {"W101_2",{LS_DRY_SKIN}},
+        {"W103_1",{LS_DRY_SKIN}}, {"W103_2",{LS_DRY_SKIN}},
+        {"W102_1",{LS_DRY_SKIN,1}}, {"W102_2",{LS_DRY_SKIN,1}},
+        {"WALL25_1",{LS_TORTURED_FACES}},
+        {"MWALL4_1",{LS_MARBLE_FACES}}, {"MWALL4_2",{LS_MARBLE_FACES,1}}, {"MWALL5_1",{LS_MARBLE_FACES,2}}
     };
     char canonical[9]={};
     for(int i=0;i<8&&name[i];++i)
         canonical[i]=name[i]>='a'&&name[i]<='z'?char(name[i]-'a'+'A'):name[i];
     for(const auto &entry:profiles)
-        if(strcmp(canonical,entry.name)==0)return entry.profile;
-    if(spinePrototypeEnabled()&&(!strcmp(canonical,"SPINE3_2")||!strcmp(canonical,"SPINE4_1")))
-        return LS_SPINE_WALL;
-    return LS_NONE;
+        if(strcmp(canonical,entry.name)==0)return entry.material;
+    return {};
 }
-// Restrict material effects to the selected patch. The spine preview can
-// join two adjacent spine patches into one rectangle for a continuous wall.
+// Adjacent patches with the same material can animate as one wall. Leave
+// unrelated or ambiguous overlapping composites on the normal path.
 static void setLivingWallProfile(Image &image,int index,const char *name) {
-    image.livingProfile=livingSurfaceProfile(name);
-    if(image.livingProfile!=LS_NONE) {
+    LivingMaterial material=livingSurfaceProfile(name);
+    if(material.profile!=LS_NONE) {
+        image.livingProfile=material.profile;image.livingVariant=material.variant;
         image.livingBounds={0,0,image.width,image.height};
         return;
     }
     char patchName[9];std::array<int,4> bounds;
     int selected=-1,joined=-1;
-    unsigned profile=LS_NONE;
     for(int part=0;R_TexturePatchInfo(index,part,patchName,bounds.data());++part) {
-        unsigned candidate=livingSurfaceProfile(patchName);
-        if(candidate==LS_NONE||bounds[0]>=bounds[2]||bounds[1]>=bounds[3])continue;
+        LivingMaterial candidate=livingSurfaceProfile(patchName);
+        if(candidate.profile==LS_NONE||bounds[0]>=bounds[2]||bounds[1]>=bounds[3])continue;
         if(selected<0) {
-            selected=part;profile=candidate;image.livingBounds=bounds;
+            selected=part;material=candidate;image.livingBounds=bounds;
             continue;
         }
         auto &region=image.livingBounds;
-        if(!spinePrototypeEnabled()||joined>=0||profile!=LS_SPINE_WALL||candidate!=LS_SPINE_WALL||
+        if(joined>=0||material.profile!=candidate.profile||material.variant!=candidate.variant||
            bounds[1]!=region[1]||bounds[3]!=region[3]||
            (bounds[0]!=region[2]&&bounds[2]!=region[0]))return;
         joined=part;
@@ -406,7 +412,7 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
         if(part!=selected&&part!=joined&&bounds[0]<region[2]&&bounds[2]>region[0]&&
            bounds[1]<region[3]&&bounds[3]>region[1])return;
     }
-    image.livingProfile=profile;
+    image.livingProfile=material.profile;image.livingVariant=material.variant;
 }
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */
 Image &wallImage(int index) {
@@ -451,7 +457,8 @@ Image &lumpImage(int lump,bool flat) {
         Image &result=withRelief(withGlassFrame(speckledPanel(images.emplace(key,upload(64,64,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
             glass.empty()?nullptr:glass.data(),true)).first->second,name,true),frame),animated?nullptr:flatTiles);
         int kind=doom_emissive_kind(name,true);
-        result.livingProfile=livingSurfaceProfile(name);
+        LivingMaterial material=livingSurfaceProfile(name);
+        result.livingProfile=material.profile;result.livingVariant=material.variant;
         if(result.livingProfile!=LS_NONE)result.livingBounds={0,0,64,64};
         result.liquidEmitter=kind==DOOM_EMISSIVE_LAVA||kind==DOOM_EMISSIVE_SLIME;
         return result;

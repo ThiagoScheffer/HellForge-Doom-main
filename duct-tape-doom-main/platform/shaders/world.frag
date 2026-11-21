@@ -69,7 +69,8 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // 0 for everything that is not a liquid (surfaceBinding in scene3d/scene.cpp).
 // frameMean.a packs material (bits 0-3), worn plates (bit 4) and Living
 // Surface profile (bits 5-7), assigned by surfaceBinding in scene3d/scene.cpp.
-// Profiled nonliquids use frameMean.rgb and cycleMean.r as the patch bounds.
+// Profiled nonliquids store patch bounds in frameMean.rgb and cycleMean.r,
+// and the artwork variant in cycleMean.g.
 // Material 1 remains ice floors (iceFlat): deep grooves, glassy shine.
 layout(std140,set=3,binding=3) uniform Blend { float blend; vec4 weaponProbe[6]; vec4 frameMean; vec4 cycleMean; };
 layout(location=0) out vec4 outColor;
@@ -233,7 +234,7 @@ void main() {
     uint surfaceMeta=uint(frameMean.a);
     uint mapFlags=uint(c.map.w);
     if(mapped&&!blood&&!glassy&&(vMode&MODE_ROCK)==0u&&color.a>=0.98&&(mapFlags&LS_ENABLED)!=0u)
-        living=livingSurface(surfaceMeta>>5u,mapFlags,uv,texelPixel,lod,footprint,color.rgb);
+        living=livingSurface(surfaceMeta>>5u,mapFlags,uv,texelPixel,lod,footprint,normal,dp1,dp2,duv1,duv2,color.rgb);
     uint sector=(vMode>>MODE_SECTOR_SHIFT)-1u;
     // Excavation changes the slope, not the source lightmap. Steep crater
     // sides must not switch to a wall atlas or wall-floor contact shadow.

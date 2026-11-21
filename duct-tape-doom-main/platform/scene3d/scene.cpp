@@ -376,10 +376,6 @@ static float surfaceMaterial(int key,int pic,bool flat) {
     else if(flat)material=3+(float)Game_FlatSurface(name);
     return known[key]=material;
 }
-bool spinePrototypeEnabled() {
-    static const bool enabled=M_CheckParm((char*)"-spineprototype")!=0;
-    return enabled;
-}
 // Plain metal plates that use has worn (Game_WornPlate; world/wear.glsl plateGrime).
 static bool wornPlate(int key,int pic,bool flat) {
     static std::unordered_map<int,bool> known;
@@ -417,10 +413,12 @@ SurfaceBinding surfaceBinding(int key) {
     // Liquid averages own RGB when present. A crossfade between different
     // artwork regions keeps its original shading.
     if(settings.livingSurfaces&&floor==0&&image.livingProfile!=LS_NONE&&
-       image.livingProfile==next->livingProfile&&image.livingBounds==next->livingBounds) {
+       image.livingProfile==next->livingProfile&&image.livingVariant==next->livingVariant&&
+       image.livingBounds==next->livingBounds) {
         metadata|=image.livingProfile<<5u;
         for(int axis=0;axis<3;++axis)binding.frameMean[axis]=(float)image.livingBounds[axis];
         binding.cycleMean[0]=(float)image.livingBounds[3];
+        binding.cycleMean[1]=(float)image.livingVariant;
     }
     binding.frameMean[3]=(float)metadata;
     static unsigned meanLevel=~0u;
@@ -515,9 +513,7 @@ FrameView prepareFrame(int w,int h) {
     if(settings.livingSurfaces&&worldPending) {
         mapFlags|=LS_ENABLED|(settings.livingMorph?LS_MORPH:0u)|
             (settings.livingPulse?LS_PULSE:0u)|(settings.livingWetness?LS_WETNESS:0u)|
-            (settings.livingCavities?LS_CAVITIES:0u)|
             ((unsigned)std::clamp(settings.livingIntensity,1,3)<<LS_INTENSITY_SHIFT);
-        if(spinePrototypeEnabled())mapFlags|=LS_SPINE_PROTOTYPE;
     }
     camera.map[3]=(float)mapFlags;
     camera.materials[2]=settings.fog&&worldPending;

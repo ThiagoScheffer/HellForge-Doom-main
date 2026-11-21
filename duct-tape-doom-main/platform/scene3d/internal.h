@@ -144,7 +144,6 @@ extern const char *graphicsConfig;
 void loadSettings();
 
 // images.cpp
-bool spinePrototypeEnabled();
 int translucentWallImage(int index);
 void imagesShutdown();
 void prepareVoxelModels();

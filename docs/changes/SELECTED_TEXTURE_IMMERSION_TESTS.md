@@ -1,5 +1,13 @@
 # Selected Texture Immersion v1 verification
 
+## Production expansion
+
+`tools/Build-Hellforge.ps1 -RecompileShaders` regenerated both shader targets, built Windows x64 Release, and packaged `dist/DOOM-Hellforge.exe`. The launcher's embedded engine SHA-256 matched `build/Release/doom.exe`. All 37 CTest checks passed. F4 navigation and the two-process persistence test passed, including removal of the legacy `living_cavities` key on save.
+
+The Vulkan gallery ran at 640×400 with the default crisp wall filter. Each room recorded eight matched Off and High frames. All 14 selected surfaces changed. The ordinary wall and animated ceiling control had identical sampled pixels. Both sampled iron rails on `SKINMET1` were pixel-identical while the leather changed. Captures and logs are under `build/immersion-expansion/`.
+
+## Initial v1 verification
+
 ## Build and regression tests
 
 | Check | Result |

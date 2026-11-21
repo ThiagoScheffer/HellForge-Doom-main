@@ -1,5 +1,20 @@
 # Selected Texture Immersion v1 design
 
+The production expansion supersedes the initial settings and profile list below. The approved spine motion now runs through the normal master switch. The expansion removes the cavity control and its contrast samples. Stock relief still provides the base material shading.
+
+| Stock surface | Production motion |
+| --- | --- |
+| `SKSPINE1`, `SKSPINE2`, `SKINFACE` | Offset contraction waves across the original ribs, bone, and flesh, with red seepage and wet highlights. |
+| `SKINMET1`, `SKINMET2`, `SKINSCAB`, `SKINSYMB` | Pressure from hand-like shapes rises behind the dry leather. The iron bands remain fixed. |
+| `SKINCUT` | Pressure in the leather and downward seepage confined to the red tears. |
+| `SP_FACE1` | Localized eye movement and changes to mouth shape on five face landmarks. |
+| `MARBFACE`, `MARBFAC2`, `MARBFAC3` | Small changes inside the eyes based on the viewer's angle to the wall. |
+| `SP_FACE2` | Seepage across the red parts of the skull mass. |
+
+The effects use WAD pixels and the current texture filter. The two stock IWADs have no `W100_1` or `W100_2` patches. Exact-name support covers those names if an add-on supplies them. The feature uses the same GPU bindings and allows one additional artwork sample for animated pixels. No replacement textures are needed.
+
+## Initial v1 design
+
 The renderer adds cavity depth, subtle motion and material highlights to six named pieces of WAD artwork. The effect is opt-in and uses the existing indexed textures, relief, and world lighting.
 
 | Selected artwork | Stock surface | Profile |

@@ -1,9 +1,9 @@
 """Generate a Doom II render-check PWAD using only stock artwork.
 
 Usage: python tests/selected_texture_scene.py output.wad
-Maps 01–06 are the five stock wall composites and the tentacle flat.
-Map 07 provides an ordinary wall plus an animated ceiling as a control.
-Map 08 previews the taller single-patch spine wall.
+Maps 01–06 show the initial five wall profiles and the tentacle flat.
+Map 07 is an ordinary wall and animated ceiling control. Maps 08–15
+show the taller spine wall, additional leathers, and engraved marble faces.
 """
 
 import struct
@@ -34,7 +34,8 @@ def room(number, wall, floor="FLOOR0_1", ceiling="CEIL3_5"):
 
 
 def write_gallery(path):
-    walls = ("SKINFACE", "SKSPINE2", "SP_FACE2", "STARTAN3", "SKINMET1", "SP_FACE1", "STARTAN3", "SKSPINE1")
+    walls = ("SKINFACE", "SKSPINE2", "SP_FACE2", "STARTAN3", "SKINMET1", "SP_FACE1", "STARTAN3", "SKSPINE1",
+             "SKINMET2", "SKINSCAB", "SKINSYMB", "SKINCUT", "MARBFACE", "MARBFAC2", "MARBFAC3")
     data, directory = bytearray(), bytearray()
     for i, wall in enumerate(walls, 1):
         floor = "SFLR6_4" if i == 4 else "FLOOR0_1"
