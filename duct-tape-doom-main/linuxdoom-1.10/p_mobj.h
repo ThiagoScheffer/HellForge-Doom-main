@@ -281,6 +281,9 @@ typedef struct mobj_s
     // For nightmare respawn.
     mapthing_t		spawnpoint;	
 
+    // Internal ammo-drop tag in native save padding before tracer.
+    unsigned short      monsterAmmoDrop;
+
     // Thing being chased/attacked for tracers.
     struct mobj_s*	tracer;	
     

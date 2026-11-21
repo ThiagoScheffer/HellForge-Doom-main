@@ -35,6 +35,15 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "doomstat.h"
 #include "r_state.h"
 #include <stdlib.h>
+#include <stddef.h>
+
+// The ammo-drop tag must fit before the original tracer field of the
+// archived mobj record. Existing saves use that space as zeroed padding.
+#define OLD_TRACER_OFFSET ((offsetof(mobj_t, spawnpoint) + sizeof(mapthing_t) + \
+                           _Alignof(mobj_t *) - 1) & ~(_Alignof(mobj_t *) - 1))
+_Static_assert(offsetof(mobj_t, tracer) == OLD_TRACER_OFFSET,
+               "Monster ammo tag must preserve the native save layout");
+#undef OLD_TRACER_OFFSET
 
 byte*		save_p;
 

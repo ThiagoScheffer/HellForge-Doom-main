@@ -55,6 +55,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #pragma implementation "p_inter.h"
 #endif
 #include "p_inter.h"
+#include "p_drop_policy.h"
 #include "d_deh.h"
 
 unsigned p_toasty_serial;
@@ -80,6 +81,53 @@ void P_UpdateChaingunAmmo(player_t *player){
 
 int	clipammo[NUMAMMO] = {10, 4, 20, 1};
 
+static int monsterWeaponDrops;
+// These tags identify the quantity in an already-spawned drop, independent
+// of the player's current setting and DeHackEd clip sizes.
+enum { DROP_AMMO_FULL = 0x4841, DROP_AMMO_SCARCE = 0x4842 };
+
+void P_SetMonsterWeaponDrops(int mode)
+{
+    monsterWeaponDrops = mode == MONSTER_DROPS_AMMO || mode == MONSTER_DROPS_SCARCE
+        ? mode : MONSTER_DROPS_CLASSIC;
+}
+
+typedef struct {
+    mobjtype_t type;
+    unsigned short ammoTag;
+} monster_death_drop_t;
+
+static monster_death_drop_t P_MonsterDeathDrop(mobjtype_t monster)
+{
+    if (monster == MT_POSSESSED || monster == MT_WOLFSS)
+        return (monster_death_drop_t){MT_CLIP, 0};
+    if (monster != MT_SHOTGUY && monster != MT_CHAINGUY)
+        return (monster_death_drop_t){NUMMOBJTYPES, 0};
+    if (monsterWeaponDrops == MONSTER_DROPS_CLASSIC || netgame || lan_session ||
+        deathmatch || demoplayback || demorecording || arcade_active)
+        return (monster_death_drop_t){monster == MT_SHOTGUY ? MT_SHOTGUN : MT_CHAINGUN, 0};
+    return (monster_death_drop_t){
+        monster == MT_SHOTGUY ? MT_MISC22 : MT_CLIP,
+        monsterWeaponDrops == MONSTER_DROPS_SCARCE ? DROP_AMMO_SCARCE : DROP_AMMO_FULL
+    };
+}
+
+static int P_MonsterDropAmmo(const mobj_t *item, ammotype_t *ammo)
+{
+    if (!(item->flags & MF_DROPPED) ||
+        (item->monsterAmmoDrop != DROP_AMMO_FULL && item->monsterAmmoDrop != DROP_AMMO_SCARCE))
+        return 0;
+    const boolean scarce = item->monsterAmmoDrop == DROP_AMMO_SCARCE;
+    if (item->type == MT_MISC22) {
+        *ammo = am_shell;
+        return scarce ? 2 : 4;
+    }
+    if (item->type == MT_CLIP) {
+        *ammo = am_clip;
+        return scarce ? 5 : 10;
+    }
+    return 0;
+}
 
 //
 // GET STUFF
@@ -92,11 +140,8 @@ int	clipammo[NUMAMMO] = {10, 4, 20, 1};
 // Returns false if the ammo can't be picked up at all
 //
 
-boolean
-P_GiveAmmo
-( player_t*	player,
-  ammotype_t	ammo,
-  int		num )
+static boolean P_GiveAmmoInternal(player_t *player, ammotype_t ammo, int num,
+                                 boolean clipLoads, boolean autoSwitch)
 {
     int		oldammo;
 	
@@ -109,10 +154,8 @@ P_GiveAmmo
     if ( player->ammo[ammo] == player->maxammo[ammo]  )
 	return false;
 		
-    if (num)
-	num *= clipammo[ammo];
-    else
-	num = clipammo[ammo]/2;
+    if (clipLoads)
+	num = num ? num * clipammo[ammo] : clipammo[ammo] / 2;
     
     if (gameskill == sk_baby
 	|| gameskill == sk_nightmare)
@@ -132,7 +175,7 @@ P_GiveAmmo
     // If non zero ammo, 
     // don't change up weapons,
     // player was lower on purpose.
-    if (oldammo)
+    if (!autoSwitch || oldammo)
 	return true;	
 
     // We were down to zero,
@@ -181,6 +224,10 @@ P_GiveAmmo
     return true;
 }
 
+boolean P_GiveAmmo(player_t *player, ammotype_t ammo, int num)
+{
+    return P_GiveAmmoInternal(player, ammo, num, true, true);
+}
 
 //
 // P_GiveWeapon
@@ -399,8 +446,15 @@ P_TouchSpecialThing
     if (toucher->health <= 0)
 	return;
 
-    // Identify by sprite.
-    switch (special->sprite)
+    ammotype_t ammo;
+    const int amount = P_MonsterDropAmmo(special, &ammo);
+    if (amount) {
+        if (!P_GiveAmmoInternal(player, ammo, amount, false, false))
+            return;
+        player->message = DEH_String(ammo == am_shell ? "Picked up shotgun shells." : GOTCLIP);
+    }
+    // Ordinary pickups retain their sprite-based behavior.
+    else switch (special->sprite)
     {
 	// armor
       case SPR_ARM1:
@@ -689,7 +743,7 @@ P_TouchSpecialThing
 	I_Error ("P_SpecialThing: Unknown gettable thing");
     }
 	
-    switch(special->sprite){
+    if (!amount) switch(special->sprite){
     case SPR_SOUL:P_Notice((int)(player-players),N_SOUL,0);break;
     case SPR_MEGA:P_Notice((int)(player-players),N_MEGA,0);break;
     case SPR_PINV:P_Notice((int)(player-players),N_INVUL,0);break;
@@ -718,7 +772,6 @@ P_KillMobj
 ( mobj_t*	source,
   mobj_t*	target )
 {
-    mobjtype_t	item;
     mobj_t*	mo;
 	
     ED_Died(target);
@@ -788,27 +841,12 @@ P_KillMobj
     // Drop stuff.
     // This determines the kind of object spawned
     // during the death frame of a thing.
-    switch (target->type)
-    {
-      case MT_WOLFSS:
-      case MT_POSSESSED:
-	item = MT_CLIP;
-	break;
-	
-      case MT_SHOTGUY:
-	item = MT_SHOTGUN;
-	break;
-	
-      case MT_CHAINGUY:
-	item = MT_CHAINGUN;
-	break;
-	
-      default:
-	return;
-    }
-
-    mo = P_SpawnMobj (target->x,target->y,ONFLOORZ, item);
+    const monster_death_drop_t drop = P_MonsterDeathDrop(target->type);
+    if (drop.type == NUMMOBJTYPES)
+        return;
+    mo = P_SpawnMobj (target->x,target->y,ONFLOORZ, drop.type);
     mo->flags |= MF_DROPPED;	// special versions of items
+    mo->monsterAmmoDrop = drop.ammoTag;
 }
 
 

@@ -75,6 +75,24 @@ static void run(){
  fclose(profile);finishReading(restored);
  check(restored.livingSurfaces&&restored.livingIntensity==1&&!restored.livingMorph&&!restored.livingPulse&&
        !restored.livingWetness,"the real settings writer and reader round-trip all five values");
+ I_Render3DSettingsMenu();
+ int gameplay=-1;
+ for(size_t i=0;i<panel.tabs.size();++i)if(!strcmp(panel.tabs[i].title,"Gameplay"))gameplay=int(i);
+ check(gameplay>=0,"Gameplay category is present");selectTab(gameplay);choose("monster_weapon_drops");
+ check(panel.draft.monsterWeaponDrops==MONSTER_DROPS_CLASSIC,"Classic drop mode is the default");
+ I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+ check(panel.draft.monsterWeaponDrops==MONSTER_DROPS_AMMO,"F4 selects Ammo Instead");
+ I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+ I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+ check(settings.monsterWeaponDrops==MONSTER_DROPS_SCARCE&&applied==3,"F4 applies Scarce Ammo");
+ profile=tmpfile();check(profile!=nullptr,"drop mode profile stream");
+ writeOptions(profile,settings);rewind(profile);
+ Settings dropProfile;
+ while(fgets(line,sizeof(line),profile))if(sscanf(line,"%63s %lf",key,&value)==2)readOption(dropProfile,key,value);
+ fclose(profile);finishReading(dropProfile);
+ check(dropProfile.monsterWeaponDrops==MONSTER_DROPS_SCARCE,"drop mode survives settings round-trip");
+ readOption(dropProfile,"monster_weapon_drops",99);
+ check(dropProfile.monsterWeaponDrops==MONSTER_DROPS_SCARCE,"invalid drop mode ignored");
  puts("PASS F4 nested director navigation and repaint boundaries");fflush(stdout);std::exit(0);
 }
 int main(int argc,char**argv){if(argc!=2)return 2;char app[]="settings-navigation",iwad[]="-iwad",warp[]="-warp",one[]="1",checkmap[]="-checkbigmap",nomusic[]="-nomusic",nosound[]="-nosound",cfg[]="-config",path[]="navigation-doom.cfg";char*args[]={app,iwad,argv[1],warp,one,checkmap,nomusic,nosound,cfg,path};myargc=10;myargv=args;R_BeforeTic=run;D_DoomMain();return 0;}

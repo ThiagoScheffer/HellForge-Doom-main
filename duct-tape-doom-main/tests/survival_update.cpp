@@ -10,13 +10,158 @@ extern "C" {
 #include "m_argv.h"
 #include "p_weakpoints.h"
 #include "r_main.h"
+#include "p_drop_policy.h"
+#include "p_acid.h"
 extern void G_DoSaveGame(void),G_DoLoadGame(void);
+void A_VileChase(mobj_t *);
+void A_VileTarget(mobj_t *);
+void A_VileAttack(mobj_t *);
+void A_Explode(mobj_t *);
+void P_SpawnMapThing(mapthing_t *);
 }
 static void check(bool ok,const char* text){if(!ok){std::fprintf(stderr,"FAIL survival update: %s\n",text);std::exit(1);}std::printf("PASS survival update: %s\n",text);}
 static mobj_t* playerBody;
 static void clearActors(){
  for(auto* t=thinkercap.next;t!=&thinkercap;){auto* next=t->next;if(t->function.acp1==(actionf_p1)P_MobjThinker&&(mobj_t*)t!=playerBody)P_RemoveMobj((mobj_t*)t);t=next;}
  P_WeakpointClear();P_WeakpointInitFeedingHooks();
+}
+static mobj_t* dropAt(int x,int y,mobjtype_t type) {
+ mobj_t* match=nullptr;
+ for(auto* t=thinkercap.next;t!=&thinkercap;t=t->next) {
+  if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
+  auto* thing=(mobj_t*)t;
+  if(thing->type!=type||thing->x!=x||thing->y!=y||!(thing->flags&MF_SPECIAL))continue;
+  check(!match,"one pickup at the drop location");
+  match=thing;
+ }
+ return match;
+}
+static void monsterDrops(){
+ clearActors();
+ auto kill=[](mobjtype_t type,int x,int y,mobj_t* source=nullptr) {
+  auto* enemy=P_SpawnMobj(x,y,ONFLOORZ,type);
+  P_DamageMobj(enemy,nullptr,source,1000);
+  P_DamageMobj(enemy,nullptr,source,1000);
+ };
+ auto pickup=[](mobj_t* item) {
+  check(item&&P_TeleportMove(playerBody,item->x,item->y),"reach pickup");
+  P_TouchSpecialThing(item,playerBody);
+ };
+ auto* player=playerBody->player;
+ constexpr int y=128*FRACUNIT;
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_CLASSIC);
+ kill(MT_SHOTGUY,0,y);kill(MT_CHAINGUY,64*FRACUNIT,y);
+ check(dropAt(0,y,MT_SHOTGUN)&&dropAt(64*FRACUNIT,y,MT_CHAINGUN),"Classic gives both original weapons");
+ pickup(dropAt(0,y,MT_SHOTGUN));
+ check(player->weaponowned[wp_shotgun],"Classic pickup grants the dropped weapon");
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_AMMO);
+ pickup(dropAt(64*FRACUNIT,y,MT_CHAINGUN));
+ check(player->weaponowned[wp_chaingun],"mode change keeps existing weapon drops collectible");
+ clearActors();
+ mapthing_t placed{64,128,0,2001,7};
+ P_SpawnMapThing(&placed);
+ auto* placedShotgun=dropAt(64*FRACUNIT,y,MT_SHOTGUN);
+ kill(MT_SHOTGUY,0,y);kill(MT_CHAINGUY,-64*FRACUNIT,y);
+ kill(MT_POSSESSED,128*FRACUNIT,y);kill(MT_WOLFSS,192*FRACUNIT,y);
+ check(!dropAt(0,y,MT_SHOTGUN)&&!dropAt(-64*FRACUNIT,y,MT_CHAINGUN)&&
+       placedShotgun&&!(placedShotgun->flags&MF_DROPPED),"weapon replacements coexist with a map shotgun");
+ player->weaponowned[wp_shotgun]=player->weaponowned[wp_chaingun]=0;
+ player->readyweapon=wp_fist;player->pendingweapon=wp_nochange;
+ player->ammo[am_shell]=player->ammo[am_clip]=0;
+ auto* shells=dropAt(0,y,MT_MISC22);
+ auto* bullets=dropAt(-64*FRACUNIT,y,MT_CLIP);
+ check(shells&&bullets&&(shells->flags&MF_DROPPED)&&(bullets->flags&MF_DROPPED),"replacements retain dropped-item flags");
+ player->ammo[am_shell]=player->maxammo[am_shell];pickup(shells);
+ check(dropAt(0,y,MT_MISC22)==shells,"full ammo leaves the pickup available");
+ player->ammo[am_shell]=0;pickup(shells);pickup(bullets);
+ check(player->ammo[am_shell]==4&&player->ammo[am_clip]==10&&
+       !player->weaponowned[wp_shotgun]&&!player->weaponowned[wp_chaingun]&&
+       player->pendingweapon==wp_nochange,"normal replacements give exact ammo without ownership or switching");
+ pickup(dropAt(128*FRACUNIT,y,MT_CLIP));pickup(dropAt(192*FRACUNIT,y,MT_CLIP));
+ check(player->ammo[am_clip]==20,"Zombieman and SS both retain half-clip drops");
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_SCARCE);
+ pickup(placedShotgun);
+ check(player->weaponowned[wp_shotgun]&&player->pendingweapon==wp_shotgun,"map shotgun still grants weapon and switches normally after mode change");
+ clearActors();
+ mapthing_t backpack{0,128,0,8,7};P_SpawnMapThing(&backpack);
+ pickup(dropAt(0,y,MT_MISC24));
+ check(player->backpack&&player->maxammo[am_shell]==2*maxammo[am_shell],"standard backpack capacity");
+ auto* killer=P_SpawnMobj(128*FRACUNIT,192*FRACUNIT,ONFLOORZ,MT_TROOP);
+ kill(MT_SHOTGUY,0,y,killer);
+ auto* gunner=P_SpawnMobj(64*FRACUNIT,y,ONFLOORZ,MT_CHAINGUY);
+ P_DamageMobjAcid(gunner,playerBody,1000);
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_CLASSIC);
+ G_SaveGame(5,(char*)"MONSTER AMMO");G_DoSaveGame();gameaction=ga_nothing;
+ G_LoadGame((char*)"doomsav5.dsg");G_DoLoadGame();gameaction=ga_nothing;
+ playerBody=players[0].mo;player=playerBody->player;
+ player->ammo[am_clip]=player->ammo[am_shell]=0;
+ pickup(dropAt(0,y,MT_MISC22));pickup(dropAt(64*FRACUNIT,y,MT_CLIP));
+ check(player->ammo[am_shell]==2&&player->ammo[am_clip]==5,"scarce infighting and acid drops preserve exact quantities through save/load");
+
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_AMMO);
+ clearActors();
+ auto skill=gameskill;gameskill=sk_baby;
+ kill(MT_SHOTGUY,0,y);player->ammo[am_shell]=0;pickup(dropAt(0,y,MT_MISC22));
+ check(player->ammo[am_shell]==8,"replacement ammo uses native easy skill bonus");
+ gameskill=skill;
+ clearActors();
+ auto* corpse=P_SpawnMobj(0,y,ONFLOORZ,MT_SHOTGUY);
+ P_DamageMobj(corpse,nullptr,playerBody,corpse->health);
+ P_SetMobjState(corpse,S_SPOS_DIE5);corpse->tics=-1;
+ pickup(dropAt(0,y,MT_MISC22));
+ check(P_TeleportMove(playerBody,-200*FRACUNIT,-300*FRACUNIT),"move player clear of resurrection");
+ auto* vile=P_SpawnMobj(0,y-48*FRACUNIT,ONFLOORZ,MT_VILE);
+ vile->movedir=2;A_VileChase(vile);
+ check(corpse->health>0,"native resurrection restores monster");
+ check(!dropAt(0,y,MT_MISC22),"resurrection alone creates no drop");
+ P_DamageMobj(corpse,nullptr,playerBody,1000);
+ check(dropAt(0,y,MT_MISC22)!=nullptr,"second genuine death creates one drop");
+
+ clearActors();
+ P_SpawnMobj(0,y,ONFLOORZ,MT_SHOTGUY);
+ check(P_TeleportMove(playerBody,0,y)&&dropAt(0,y,MT_MISC22),"telefrag uses the same drop policy");
+ check(P_TeleportMove(playerBody,-200*FRACUNIT,-300*FRACUNIT),"player clear of blast fixture");
+ clearActors();
+ auto* barrel=P_SpawnMobj(0,y,ONFLOORZ,MT_BARREL);
+ P_SpawnMobj(48*FRACUNIT,y,ONFLOORZ,MT_CHAINGUY);
+ A_Explode(barrel);
+ check(dropAt(48*FRACUNIT,y,MT_CLIP)!=nullptr,"barrel death uses the same drop policy");
+ clearActors();
+ auto* caster=P_SpawnMobj(0,y-104*FRACUNIT,ONFLOORZ,MT_VILE);
+ caster->target=P_SpawnMobj(0,y,ONFLOORZ,MT_SHOTGUY);
+ A_VileTarget(caster);A_VileAttack(caster);
+ check(dropAt(0,y,MT_MISC22)!=nullptr,"Arch-vile fire attack uses the same drop policy");
+ clearActors();
+ auto* victim=P_SpawnMobj(0,y,ONFLOORZ,MT_SHOTGUY);
+ P_WeakpointConfigure(1,0,0);
+ P_WeakpointBeginShot(playerBody,wp_shotgun);
+ wp_damage_event_t head{};
+ head.target=victim;head.source=head.inflictor=playerBody;
+ head.kind=WP_SHOTGUN_PELLET;head.baseDamage=100;head.impact.region=WP_HEAD;head.impact.confidence=100;
+ P_WeakpointApply(&head);P_WeakpointEndShot();
+ check(dropAt(0,y,MT_MISC22)!=nullptr,"weakpoint kill uses the same drop policy");
+ P_WeakpointConfigure(0,0,0);
+
+ clearActors();
+ demorecording=true;kill(MT_SHOTGUY,0,y);demorecording=false;
+ demoplayback=true;kill(MT_SHOTGUY,64*FRACUNIT,y);demoplayback=false;
+ netgame=true;kill(MT_CHAINGUY,128*FRACUNIT,y);netgame=false;
+ deathmatch=2;kill(MT_CHAINGUY,192*FRACUNIT,y);deathmatch=0;
+ check(dropAt(0,y,MT_SHOTGUN)&&dropAt(64*FRACUNIT,y,MT_SHOTGUN)&&
+       dropAt(128*FRACUNIT,y,MT_CHAINGUN)&&dropAt(192*FRACUNIT,y,MT_CHAINGUN),
+       "demos, co-op and deathmatch retain Classic drops");
+ clearActors();
+ deathmatch=2;
+ mapthing_t mapClip{0,128,0,2007,7};P_SpawnMapThing(&mapClip);
+ player->ammo[am_clip]=0;pickup(dropAt(0,y,MT_CLIP));
+ check(player->ammo[am_clip]==clipammo[am_clip],"map clip retains original quantity");
+ leveltime+=30*TICRATE;
+ for(int i=0;i<128&&!dropAt(0,y,MT_CLIP);++i)P_RespawnSpecials();
+ check(dropAt(0,y,MT_CLIP)!=nullptr,"map clip still respawns in alternate deathmatch");
+ deathmatch=0;
+ G_InitNew(skill,gameepisode,gamemap);
+ check(!dropAt(0,y,MT_CLIP),"a fresh level clears prior pickups");
+ P_SetMonsterWeaponDrops(MONSTER_DROPS_CLASSIC);
 }
 static void tests(){
  R_BeforeTic=nullptr;playerBody=players[0].mo;clearActors();
@@ -82,6 +227,7 @@ static void tests(){
  int health=vile->health;P_WeakpointTick(vile);for(int i=0;i<4&&vile->health==health;++i)P_WeakpointFeedingChase(vile);
  check(vile->health==health+24&&prey->health==76,"Arch-vile hunts and steals only actual 24-HP prey damage without requiring bleeding");
  P_WeakpointConfigureFeeding(0);check(!P_WeakpointFeeding(vile)&&P_WeakpointWalkSpeed(vile,100*FRACUNIT)==100*FRACUNIT,"feeding toggle removes survival overrides");
+ monsterDrops();
  std::puts("PASS focused native survival update");std::exit(0);
 }
 int main(int argc,char** argv){

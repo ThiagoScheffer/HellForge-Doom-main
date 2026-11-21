@@ -135,6 +135,10 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("swarm_debug","Swarm diagnostics",&s.swarmDebug,"Print an aggregate monster summary once per second: dormant, awake, reused idle searches, sound wakes and spawns.")}},
             {"Save recovery",{
                 check("death_load_last_save","Load last save on death",&s.deathLoadLastSave,"After dying, press Use to load the last save successfully written or loaded this session. If no usable save is available, restart the map normally. Single player only; disabled in demos and Arcade.")}},
+            {"Balance",{
+                choice("monster_weapon_drops","Monster Weapon Drops",&s.monsterWeaponDrops,
+                    {"Classic","Ammo Instead","Scarce Ammo"},{MONSTER_DROPS_CLASSIC,MONSTER_DROPS_AMMO,MONSTER_DROPS_SCARCE},
+                    "Controls future Shotgun Guy and Chaingunner drops. Classic keeps their weapons. Ammo Instead drops ammo and Scarce Ammo drops less. Map pickups stay available. Strict modes can make some PWADs much harder. Single player only. Demos and Arcade use Classic.")}},
             {"Combat and arenas",{
                 check("boost_chaingun","Enhanced chaingun",&s.boostChaingun,"50% faster chaingun fire. Backpack bullet capacity increases from 400 to 600; without a backpack it stays 200. Bullets are shared with the pistol. Turning off restores the normal cap and clips excess bullets. Works with classic and Fluid weapons; disabled in Arcade, demos and multiplayer."),
                 check("monster_recovery","Stuck monster recovery",&s.monsterRecovery,"Helps monsters after repeated failed movement. Tries small escape steps first. Trapped lockdown enemies can teleport to safe explored ground; ordinary monsters require invalid footing and a nearby visible safe spot. Disabled in Arcade, demos and multiplayer."),

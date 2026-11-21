@@ -177,6 +177,7 @@ void applySettings() {
     I_SetNearMissSounds(settings.nearMissSounds);
     p_fluidfastpistol=settings.fluidFastPistol;
     p_boostchaingun=settings.boostChaingun;
+    P_SetMonsterWeaponDrops(settings.monsterWeaponDrops);
     g_death_load_last_save=settings.deathLoadLastSave;
     p_noticecombat=settings.combatNotices;
     if(gameWindow&&bool(SDL_GetWindowFlags(gameWindow)&SDL_WINDOW_FULLSCREEN)!=bool(settings.fullscreen))
