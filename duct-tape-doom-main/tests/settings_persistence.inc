@@ -7,7 +7,14 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-layout-write"){
+    if(settingsCase=="--settings-immersion-write"||settingsCase=="--settings-immersion-read") {
+        if(settingsCase=="--settings-immersion-write") {
+            check(!settings.livingSurfaces&&settings.livingIntensity==2,"new profile starts Off and Medium");
+            check(I_TestSettingsPersistence(11),"F4 applies and saves every immersion control");
+        }
+        check(settings.livingSurfaces&&settings.livingIntensity==3&&!settings.livingMorph&&!settings.livingPulse&&
+              !settings.livingWetness&&!settings.livingCavities,"all immersion choices match the persisted profile");
+    }else if(settingsCase=="--settings-layout-write"){
         check(settings.speedrunLayout==0&&settings.speedrunX==0&&settings.speedrunY==0,"existing profiles retain column layout and zero adjustments");
         char sample[8][48]={"MAP04","ATT 1","DTH 0","KS 0","TIME 00:00.00","RUN 00:00:00","DEALT 0","TAKEN 0"};int visible[8]={1,1,1,1,1,1,1,1};
         for(int layout:{0,1})for(float offset:{-100.f,0.f,100.f}){

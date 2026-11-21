@@ -67,8 +67,10 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // frameMean, cycleMean: a liquid flat's average color at this crossfade and
 // over its whole animation; cycleMean.a is the contrast it keeps far away,
 // 0 for everything that is not a liquid (surfaceBinding in scene3d/scene.cpp).
-// frameMean.a is 1 on ice floors (iceFlat): deep grooves, glassy shine;
-// worn plates add 16 to it (wornPlate in scene3d/scene.cpp).
+// frameMean.a packs material (bits 0-3), worn plates (bit 4) and Living
+// Surface profile (bits 5-7), assigned by surfaceBinding in scene3d/scene.cpp.
+// Profiled nonliquids use frameMean.rgb and cycleMean.r as the patch bounds.
+// Material 1 remains ice floors (iceFlat): deep grooves, glassy shine.
 layout(std140,set=3,binding=3) uniform Blend { float blend; vec4 weaponProbe[6]; vec4 frameMean; vec4 cycleMean; };
 layout(location=0) out vec4 outColor;
 #define BLOCKERS
@@ -78,6 +80,8 @@ layout(location=0) out vec4 outColor;
 // The parts of the shading main() runs, by topic.
 #include "world/tiles.glsl"
 #include "world/surface.glsl"
+#include "living_surfaces.h"
+#include "world/living_surfaces.glsl"
 #include "world/glass.glsl"
 #include "world/bake.glsl"
 #include "world/sector_light.glsl"
@@ -225,6 +229,11 @@ void main() {
     if(glassy&&(dead||unpowered)) color.rgb=mix(color.rgb*0.08,vec3(0.45),crack);
     // Map surfaces carry sector+1 in mode bits 12+; 0 means no sector.
     bool mapped=(vMode>>MODE_SECTOR_SHIFT)>0u&&!sprite&&c.effects.z==0.0;
+    LivingShading living=LivingShading(vec2(0),0.0,0.0,0.0);
+    uint surfaceMeta=uint(frameMean.a);
+    uint mapFlags=uint(c.map.w);
+    if(mapped&&!blood&&!glassy&&(vMode&MODE_ROCK)==0u&&color.a>=0.98&&(mapFlags&LS_ENABLED)!=0u)
+        living=livingSurface(surfaceMeta>>5u,mapFlags,uv,texelPixel,lod,footprint,color.rgb);
     uint sector=(vMode>>MODE_SECTOR_SHIFT)-1u;
     // Excavation changes the slope, not the source lightmap. Steep crater
     // sides must not switch to a wall atlas or wall-floor contact shadow.
@@ -234,8 +243,10 @@ void main() {
     // Weather and wear (world/wear.glsl): streaks and wet ground.
     Wear wear=Wear(0.0,0.0,false,0.0,0.0);
     if(mapped&&!blood&&!glassy&&cycleMean.a==0.0) wear=surfaceWear(vWorld,normal,sector,bakeFlags);
-    // Worn plates (frameMean.a 16 and up, wornPlate in scene3d/scene.cpp).
-    if(mapped&&!blood&&!glassy&&frameMean.a>=15.5) {wear.grime=plateGrime(vUV,vWorld,normal,sector,vStatic);plateWear=wear.grime;}
+    // Worn plates are bit 4; higher bits carry Living Surface profiles.
+    if(mapped&&!blood&&!glassy&&(surfaceMeta&16u)!=0u) {
+        wear.grime=plateGrime(vUV,vWorld,normal,sector,vStatic);plateWear=wear.grime;
+    }
     // Grounding: things resting on the floor darken over their lowest 24
     // units in colormap-like 1/16 steps; vSun holds strength and height.
     float grounding=1.0;
@@ -268,7 +279,7 @@ void main() {
         vec3 pulse=sprite?vTint*grounding:vec3(0);
         if(sprite&&(vMode&(MODE_SCREEN|MODE_RELIT))==MODE_RELIT) billboardLight(color,pulse,specular);
         if(weapon) weaponLight(relit,light,pulse,specular);
-        if(!sprite) surfaceLight(lit,mapped,normal,screenNormal,glassy,blood,color,dp1,dp2,duv1,duv2,pulse,specular,pickupTint);
+        if(!sprite) surfaceLight(lit,mapped,normal,screenNormal,glassy,blood,color,dp1,dp2,duv1,duv2,living,pulse,specular,pickupTint);
         illumination*=pickupTint;
         illumination=clamp(illumination+pulse+c.flashlightTint.rgb,vec3(0),vec3(2.2));
         // Like extralight, the classic beam brightens toward a little past

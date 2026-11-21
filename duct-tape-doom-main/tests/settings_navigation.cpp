@@ -53,6 +53,28 @@ static void run(){
  for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option&&panel.lines[i].option->action==resetDirectorDraft){panel.selected=int(i);break;}
  I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);check(!panel.draft.encounter.enabled&&panel.draft.fov==100,"nested reset affects director draft only");
  I_Render3DSettingsKey(SDL_SCANCODE_F10,0);check(settings.encounter.enabled,"reset remains discardable");
+ I_Render3DSettingsMenu();
+ int textures=-1;
+ for(size_t i=0;i<panel.tabs.size();++i)if(!strcmp(panel.tabs[i].title,"Textures"))textures=int(i);
+ check(textures>=0,"Textures category is present");selectTab(textures);choose("living_surfaces");
+ check(!panel.draft.livingSurfaces&&panel.draft.livingIntensity==2,"immersion defaults to Off and Medium");
+ I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);choose("living_intensity");
+ I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.livingIntensity==3,"intensity can reach High");
+ I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.livingIntensity==1,"intensity wraps to Low");
+ for(const char *key:{"living_morph","living_pulse","living_wetness","living_cavities"}) {
+     choose(key);I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+ }
+ I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+ check(!panel.open&&applied==2&&settings.livingSurfaces&&settings.livingIntensity==1&&
+       !settings.livingMorph&&!settings.livingPulse&&!settings.livingWetness&&!settings.livingCavities,
+       "F4 applies the master, intensity and four independent immersion toggles");
+ FILE *profile=tmpfile();check(profile!=nullptr,"immersion settings profile stream");
+ writeOptions(profile,settings);rewind(profile);
+ Settings restored;char line[256],key[64];double value;
+ while(fgets(line,sizeof(line),profile))if(sscanf(line,"%63s %lf",key,&value)==2)readOption(restored,key,value);
+ fclose(profile);finishReading(restored);
+ check(restored.livingSurfaces&&restored.livingIntensity==1&&!restored.livingMorph&&!restored.livingPulse&&
+       !restored.livingWetness&&!restored.livingCavities,"the real settings writer and reader round-trip all six values");
  puts("PASS F4 nested director navigation and repaint boundaries");fflush(stdout);std::exit(0);
 }
 int main(int argc,char**argv){if(argc!=2)return 2;char app[]="settings-navigation",iwad[]="-iwad",warp[]="-warp",one[]="1",checkmap[]="-checkbigmap",nomusic[]="-nomusic",nosound[]="-nosound",cfg[]="-config",path[]="navigation-doom.cfg";char*args[]={app,iwad,argv[1],warp,one,checkmap,nomusic,nosound,cfg,path};myargc=10;myargv=args;R_BeforeTic=run;D_DoomMain();return 0;}

@@ -5,7 +5,7 @@
 // gloss, added to pulse; highlights and wet blood glints into specular.
 // glassy surfaces use the glass dome (screenNormal) for their normal.
 void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool glassy,bool blood,vec4 color,
-                  vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 pulse,inout vec3 specular,inout vec3 pickupTint) {
+                  vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,LivingShading living,inout vec3 pulse,inout vec3 specular,inout vec3 pickupTint) {
     uint bakeFlags=uint(c.flashlightTint.w);
     vec4 baked=lit.baked,direction=lit.direction;vec3 bounce=lit.bounce;float shownLight=lit.shown,occlusion=lit.occlusion;
     vec3 specularBefore=specular;
@@ -18,15 +18,21 @@ void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool g
     vec3 staticLight=useBake?baked.rgb*staticKept*occlusion:vec3(0);
     float staticShare=useBake&&c.bake.z>0.0?direction.b:0.0;
     bool staticDetail=staticShare>0.05&&dot(staticLight,vec3(0.299,0.587,0.114))>0.02;
-    // Ice floors (frameMean.a 1, iceFlat) always show their grooves.
-    uint material=uint(round(frameMean.a))&15u;
+    uint material=uint(frameMean.a)&15u;
     bool ice=material==1u&&!blood&&!glassy;
-    bool detail=(vMode&MODE_ROCK)==0u&&(uint(c.flashlightTint.w)&FEATURE_SURFACE_DETAIL)!=0u&&(any(notEqual(mask,uvec2(0)))||staticDetail||ice);
+    bool detail=(vMode&MODE_ROCK)==0u&&(bakeFlags&FEATURE_SURFACE_DETAIL)!=0u&&
+                (any(notEqual(mask,uvec2(0)))||staticDetail||ice);
     // Glass is smooth: its bulge replaces the artwork's bump detail,
     // and it takes a tighter, stronger highlight than painted metal.
     float busy=0.0;
     bool tiles=(bakeFlags&(normal.z>0.5?FEATURE_UNEVEN_TILES:FEATURE_UNEVEN_WALLS))!=0u&&!blood;
     vec3 bumped=glassy?screenNormal:detail?detailNormal(vUV,normal,dp1,dp2,duv1,duv2,tiles,busy):normal;
+    bool livingRelief=any(notEqual(living.slope,vec2(0)));
+    if(livingRelief) {
+        vec3 tangent,bitangent;
+        textureFrame(normal,dp1,dp2,duv1,duv2,tangent,bitangent);
+        bumped=normalize(bumped-living.slope.x*tangent-living.slope.y*bitangent);
+    }
     if((vMode&MODE_LIQUID)!=0u)
         bumped=normalize(mix(bumped,normal,0.8*smoothstep(192.0,1024.0,length(vWorld-c.eye.xyz))));
     float gloss=0.0,shininess=glassy?64.0:24.0;
@@ -50,6 +56,10 @@ void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool g
         // Worn plates (plateWear) have lost their polish: a broad, dim
         // sheen on the bare metal, none where grime sits.
         if(plateWear>=0.0) {shininess*=0.5;gloss*=0.4*(1.0-plateWear);}
+    }
+    if(living.finish>0.0&&plateWear<0.0) {
+        gloss=mix(gloss,living.gloss,living.finish);
+        shininess=mix(shininess,living.sharpness,living.finish);
     }
     vec3 view=normalize(c.eye.xyz-vWorld);
     vec3 lampSpecular=vec3(0);
@@ -76,7 +86,7 @@ void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool g
             vec3 b=abs(normal.z)>0.5?vec3(0,1,0):vec3(0,0,1);
             vec3 toLight=normalize(t*frame.x+b*frame.y+normal*sqrt(saturate(1.0-dot(frame,frame))));
             vec3 shaded=staticLight;
-            if(detail) {
+            if(detail||livingRelief) {
                 float flatFacing=mix(1.0,saturate(dot(normal,toLight)),0.75);
                 float bumpFacing=mix(1.0,saturate(dot(bumped,toLight)),0.75);
                 shaded*=mix(1.0,bumpFacing/flatFacing,staticShare);

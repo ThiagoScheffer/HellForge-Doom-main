@@ -715,6 +715,25 @@ extern "C" int I_TestSettingsControls(void) {
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
+    if(mode==11) {
+        for(size_t tab=0;tab<panel.tabs.size();++tab)
+            if(!strcmp(panel.tabs[tab].title,"Textures")) {selectTab((int)tab);break;}
+        auto press=[&](const char *key,SDL_Scancode scancode) {
+            for(size_t row=0;row<panel.lines.size();++row) {
+                const Option *option=panel.lines[row].option;
+                if(!option||!option->key||strcmp(option->key,key))continue;
+                panel.selected=(int)row;
+                I_Render3DSettingsKey(scancode,0);
+                return true;
+            }
+            return false;
+        };
+        if(!press("living_surfaces",SDL_SCANCODE_RETURN)||!press("living_intensity",SDL_SCANCODE_RIGHT))return 0;
+        for(const char *key:{"living_morph","living_pulse","living_wetness","living_cavities"})
+            if(!press(key,SDL_SCANCODE_RETURN))return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+        return !panel.open;
+    }
     if(mode==9||mode==10){
         panel.draft.accelerated=1;bool discard=mode==10;int beforeDot=settings.elementalDot,beforeHud=settings.speedrunHUD,beforeMessage=settings.combatMessages;
         auto chooseKey=[&](const char *key,const char *tab){for(size_t t=0;t<panel.tabs.size();++t){selectTab((int)t);for(size_t i=0;i<panel.lines.size();++i){auto *o=panel.lines[i].option;if(o&&o->key&&!strcmp(o->key,key)){if(strcmp(panel.tabs[t].title,tab))return false;panel.selected=(int)i;return true;}}}return false;};

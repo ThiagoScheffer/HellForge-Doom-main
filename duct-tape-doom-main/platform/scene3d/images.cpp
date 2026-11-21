@@ -1,6 +1,7 @@
 /* Textures from the WAD: upload with palette mips (sprites with their normals), bump
    relief, emissive masks and monitor glass; average and brightest colors. */
 #include "internal.h"
+#include "../shaders/living_surfaces.h"
 #include "../monster_regions.h"
 #include "../monster_skin_damage.h"
 #include "../monster_skin_regions.h"
@@ -357,6 +358,56 @@ static Image &speckledPanel(Image &image,const char *name,bool flat) {
     if(kind==DOOM_EMISSIVE_DIFFUSE)image.emissionWeight*=0.5f;   // diffuser panels: a dim, broad light
     return image;
 }
+// Classify once when a wall or flat is loaded. WAD names are eight bytes,
+// NUL padded, and compared without ASCII case distinctions.
+static unsigned livingSurfaceProfile(const char *name) {
+    static constexpr struct { const char *name; unsigned profile; } profiles[]={
+        {"HELL5_1",LS_HELL_FLESH}, {"SPINE3_1",LS_SPINE_WALL}, {"BODIES",LS_BODY_MASS},
+        {"SFLR6_4",LS_TENTACLE_MEAT}, {"W98_1",LS_DRY_SKIN}, {"WALL25_1",LS_TORTURED_FACES}
+    };
+    char canonical[9]={};
+    for(int i=0;i<8&&name[i];++i)
+        canonical[i]=name[i]>='a'&&name[i]<='z'?char(name[i]-'a'+'A'):name[i];
+    for(const auto &entry:profiles)
+        if(strcmp(canonical,entry.name)==0)return entry.profile;
+    if(spinePrototypeEnabled()&&(!strcmp(canonical,"SPINE3_2")||!strcmp(canonical,"SPINE4_1")))
+        return LS_SPINE_WALL;
+    return LS_NONE;
+}
+// Restrict material effects to the selected patch. The spine preview can
+// join two adjacent spine patches into one rectangle for a continuous wall.
+static void setLivingWallProfile(Image &image,int index,const char *name) {
+    image.livingProfile=livingSurfaceProfile(name);
+    if(image.livingProfile!=LS_NONE) {
+        image.livingBounds={0,0,image.width,image.height};
+        return;
+    }
+    char patchName[9];std::array<int,4> bounds;
+    int selected=-1,joined=-1;
+    unsigned profile=LS_NONE;
+    for(int part=0;R_TexturePatchInfo(index,part,patchName,bounds.data());++part) {
+        unsigned candidate=livingSurfaceProfile(patchName);
+        if(candidate==LS_NONE||bounds[0]>=bounds[2]||bounds[1]>=bounds[3])continue;
+        if(selected<0) {
+            selected=part;profile=candidate;image.livingBounds=bounds;
+            continue;
+        }
+        auto &region=image.livingBounds;
+        if(!spinePrototypeEnabled()||joined>=0||profile!=LS_SPINE_WALL||candidate!=LS_SPINE_WALL||
+           bounds[1]!=region[1]||bounds[3]!=region[3]||
+           (bounds[0]!=region[2]&&bounds[2]!=region[0]))return;
+        joined=part;
+        region[0]=std::min(region[0],bounds[0]);
+        region[2]=std::max(region[2],bounds[2]);
+    }
+    if(selected<0)return;
+    const auto &region=image.livingBounds;
+    for(int part=0;R_TexturePatchInfo(index,part,patchName,bounds.data());++part) {
+        if(part!=selected&&part!=joined&&bounds[0]<region[2]&&bounds[2]>region[0]&&
+           bounds[1]<region[3]&&bounds[3]>region[1])return;
+    }
+    image.livingProfile=profile;
+}
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */
 Image &wallImage(int index) {
     auto found=images.find(index); if(found!=images.end()) return found->second;
@@ -374,6 +425,7 @@ Image &wallImage(int index) {
     Image &image=speckledPanel(images.emplace(index,upload(w,h,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
         glass.empty()?nullptr:glass.data(),true)).first->second,name,false);
     image.switchIndicator=doom_switch_texture(name);
+    setLivingWallProfile(image,index,name);
     if(image.leaded)return withLeadedRelief(withGlassFrame(image,frame));
     return withRelief(withGlassFrame(image,frame),image.opaque&&!animated?wallTiles:nullptr);
 }
@@ -399,6 +451,8 @@ Image &lumpImage(int lump,bool flat) {
         Image &result=withRelief(withGlassFrame(speckledPanel(images.emplace(key,upload(64,64,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
             glass.empty()?nullptr:glass.data(),true)).first->second,name,true),frame),animated?nullptr:flatTiles);
         int kind=doom_emissive_kind(name,true);
+        result.livingProfile=livingSurfaceProfile(name);
+        if(result.livingProfile!=LS_NONE)result.livingBounds={0,0,64,64};
         result.liquidEmitter=kind==DOOM_EMISSIVE_LAVA||kind==DOOM_EMISSIVE_SLIME;
         return result;
     }

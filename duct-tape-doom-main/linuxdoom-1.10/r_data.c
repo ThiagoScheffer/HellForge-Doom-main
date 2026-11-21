@@ -166,6 +166,24 @@ void R_TextureName(int texture, char name[9])
     name[8] = 0;
 }
 
+boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4])
+{
+    if (texture < 0 || texture >= numtextures) I_Error("Invalid GPU texture");
+    const texture_t *tex = textures[texture];
+    if (part < 0 || part >= tex->patchcount) return false;
+    const texpatch_t *source = &tex->patches[part];
+    const patch_t *patch = W_CacheLumpNum(source->patch, PU_CACHE);
+    memcpy(name, lumpinfo[source->patch].name, 8);
+    name[8] = 0;
+    bounds[0] = source->originx > 0 ? source->originx : 0;
+    bounds[1] = source->originy > 0 ? source->originy : 0;
+    int right = source->originx + SHORT(patch->width);
+    int bottom = source->originy + SHORT(patch->height);
+    bounds[2] = right < tex->width ? right : tex->width;
+    bounds[3] = bottom < tex->height ? bottom : tex->height;
+    return true;
+}
+
 void R_CopyIndexedTexture(int texture, byte *pixels)
 {
     texture_t *tex = textures[texture];

@@ -104,7 +104,7 @@ float flowLight(vec3 world,vec3 normal,uint sector,float light) {
 struct SectorLit { float light,shown,sunShare,skyShare,occlusion; vec4 baked,direction; vec3 bounce; };
 SectorLit sectorLighting(vec3 normal,bool mapped,uint sector,uint bakeFlags) {
     float light=vLight,sunShare=0.0;
-    if(mapped&&c.map.w>0.0&&abs(normal.z)>0.5) light=seamLight(vWorld.xy,sector,normal.z<0.0,light);
+    if(mapped&&(uint(c.map.w)&WORLD_SOFT_LIGHT)!=0u&&abs(normal.z)>0.5) light=seamLight(vWorld.xy,sector,normal.z<0.0,light);
     if(mapped&&(bakeFlags&FEATURE_LIGHT_FLOW)!=0u) light=flowLight(vWorld,normal,sector,light);
     // Static light fills the headroom above this light, which seams and flow
     // already carry smoothly across sector edges, so a bright sector beside a
@@ -112,7 +112,7 @@ SectorLit sectorLighting(vec3 normal,bool mapped,uint sector,uint bakeFlags) {
     float shownLight=light;
     // Contact shading darkens the baked lamp and bounce light too (through
     // occlusion), or lamp-lit rooms would wash their corners out.
-    float contact=mapped&&c.map.w>0.0?contactShade(vWorld,normal,sector):1.0;
+    float contact=mapped&&(uint(c.map.w)&WORLD_SOFT_LIGHT)!=0u?contactShade(vWorld,normal,sector):1.0;
     light*=contact;
     vec3 bounce=vec3(0);vec2 ambient=vec2(0,1);vec4 direction=vec4(0.5,0.5,0,0);
     vec4 baked=mapped?bakedSurface(normal,sector,bounce,ambient,direction):vec4(0,0,0,-1);

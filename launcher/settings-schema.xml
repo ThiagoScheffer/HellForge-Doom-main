@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="7e3a22adcb0c8973e9a10de482518cae111de76dbf1384a898b56cf3a182de44">
+<settings source="platform/settings_panel.cpp" source_sha256="920e2179e750211258d1d18ea5c797a5c7a912fae2bb39a09a826ca3bd53962b">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -98,6 +98,12 @@
   <option key="window_glass" title="Window glass" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="progressive_glass" title="Progressive glass damage" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="glass_reflections" title="Glass reflections" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="living_surfaces" title="Selected Texture Immersion" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="living_intensity" title="Intensity" category="Textures" kind="choice" choices="1=Low|2=Medium|3=High" />
+  <option key="living_morph" title="Morph" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="living_pulse" title="Organic pulse" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="living_wetness" title="Wetness" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="living_cavities" title="Cavity enhancement" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="emissive" title="Emissive textures" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="glossy_screens" title="Glossy monitor screens" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="live_readouts" title="Live readouts" category="Textures" kind="check" choices="0=Off|1=On" />
