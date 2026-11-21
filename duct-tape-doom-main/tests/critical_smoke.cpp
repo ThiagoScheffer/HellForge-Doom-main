@@ -24,6 +24,7 @@ static bool visualEnhanced=false;
 static bool visualSevere=false;
 static bool acidMode=false,visualAcid=false;
 static bool visualFeedback=false;
+static bool vileMode=false,visualVile=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
 static bool eyeMode=false;
@@ -241,6 +242,7 @@ static void visualFrame() {
 #include "eye_injury_visual.inc"
 #include "e1m8_regression.inc"
 #include "acid_smoke.inc"
+#include "vile_fx_smoke.inc"
 extern "C" int I_TestSevereWallMarks();
 extern "C" int I_TestSeverePools();
 static void severeVisualFrame() {
@@ -326,6 +328,8 @@ static void severeVisualFrame() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(vileMode){vileIntegration();I_Quit();return;}
+    if(visualVile){vileVisualFrame();return;}
     if(acidMode){acidIntegration();I_Quit();return;}
     if(visualAcid){acidVisualFrame();return;}
     if(e1m8Mode){e1m8Frame();return;}
@@ -352,12 +356,14 @@ int main(int argc,char **argv) {
     solidMode=solidMode||solidAcid;
     visualAcid=argc==5&&!std::strcmp(argv[4],"--visual-acid");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
+    vileMode=argc==5&&!std::strcmp(argv[4],"--vile-fx");
+    visualVile=argc==5&&!std::strcmp(argv[4],"--visual-vile-fx");
     visualEyes=argc==5&&!std::strcmp(argv[4],"--visual-eye-injuries");
     visualElemental=argc==5&&!std::strcmp(argv[4],"--visual-elemental");
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualAcid||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualAcid||visualVile||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -383,7 +389,7 @@ int main(int argc,char **argv) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
-        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode)?"1":"4"};
+        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode||vileMode)?"1":"4"};
     if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());

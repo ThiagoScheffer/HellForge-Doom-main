@@ -1518,6 +1518,8 @@ void A_VileAttack (mobj_t* actor)
     fire->y = actor->target->y - FixedMul (24*FRACUNIT, finesine[an]);	
     P_RadiusAttack (fire, actor, 70 );
     P_CombatFireEnd();
+    if (R_VileImpact)
+        R_VileImpact(fire->x,fire->y,fire->z);
 }
 
 

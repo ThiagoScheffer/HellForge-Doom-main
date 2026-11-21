@@ -1142,9 +1142,14 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         bool mirrored = glassMirrorActive && camera.effects[2] == 0;
         static std::vector<ThingLighting> lightingJobs;
         lightingJobs.clear();
+        const bool vileFx = vileEffectsEnabled() && camera.effects[2] == 0;
+        bool hasVileActors = false;
+        mobj_t *liveViewer = nullptr;
         for (int i = 0; i < numsectors; ++i)
             for (mobj_t *thing = sectors[i].thinglist; thing; thing = thing->snext)
             {
+                if (vileFx && thing == players[displayplayer].mo)
+                    liveViewer = thing;
                 bool inFront = mirrored && glassMirrorPlane[0] * units(thing->x) + glassMirrorPlane[1] * units(thing->y) > glassMirrorPlane[3];
                 if ((thing == players[displayplayer].mo && !inFront && !director_view_active) || thing->sprite < 0 || thing->sprite >= numsprites ||
                     (thing->frame & FF_FRAMEMASK) >= sprites[thing->sprite].numframes)
@@ -1155,6 +1160,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 item.mirrored = inFront;
                 interpolatedPosition(*thing, fraction, item.x, item.y, item.z);
                 lightingJobs.push_back(item);
+                if (vileFx && (thing->type == MT_FIRE || thing->type == MT_VILE))
+                    hasVileActors = true;
             }
         filterStats = {};
         filterStats.examined = lightingJobs.size();
@@ -1204,6 +1211,41 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // addThing queues enhanced monster shots; draw them only after the
         // actor pass, and after buildImpacts has cleared the FX batches.
         drawMonsterProjectileEffects(camera);
+        if (hasVileActors)
+        {
+            // Resolve gameplay links against the current sector lists before
+            // dereferencing them. The overlays own no actor references.
+            auto live = [&](mobj_t *actor) -> mobj_t *
+            {
+                if (!actor || actor == liveViewer)
+                    return actor;
+                auto found = std::find_if(lightingJobs.begin(), lightingJobs.end(),
+                    [actor](const ThingLighting &item) { return item.thing == actor; });
+                return found == lightingJobs.end() ? nullptr : found->thing;
+            };
+            int handChecks = 8, fireChecks = 8;
+            for (const auto &item : lightingJobs)
+            {
+                mobj_t &actor = *item.thing;
+                if (item.culled || (actor.type != MT_VILE && actor.type != MT_FIRE) ||
+                    !vileEffectNear(actor, camera))
+                    continue;
+                if (actor.type == MT_VILE && actor.health > 0 && actor.target && handChecks > 0)
+                {
+                    --handChecks;
+                    drawVileHands(actor, live(actor.target), camera, fraction);
+                }
+                if (actor.type == MT_FIRE && actor.target && actor.tracer && fireChecks > 0)
+                {
+                    --fireChecks;
+                    const mobj_t *vile = live(actor.target), *victim = live(actor.tracer);
+                    if (vile && victim)
+                        drawVileFire(actor, *vile, *victim, camera, fraction);
+                }
+            }
+        }
+        if (vileFx)
+            drawVileBursts(camera, fraction);
         timing(7);
         profileAdd(profile.frame.spritesMs, spritesStart);
         std::sort(casters.begin(), casters.end(), [](const Caster &a, const Caster &b)

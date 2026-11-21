@@ -126,6 +126,8 @@ extern void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_
 extern void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
 // Every damage event, before it is applied (renderer only: who hit what, with what).
 extern void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
+extern void (*R_VileHurt)(const mobj_t *vile);
+extern void (*R_VileImpact)(fixed_t x,fixed_t y,fixed_t z);
 // Renderer-only hitscan floor or ceiling impact (la_freeaim shots); true when
 // the renderer shows it as a splash, so no puff is spawned.
 extern boolean (*R_PlaneImpact)(sector_t *sector, boolean ceiling, fixed_t x, fixed_t y, fixed_t z);

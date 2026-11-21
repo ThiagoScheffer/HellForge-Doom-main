@@ -87,6 +87,7 @@ bool wallSpan(const line_t &line,int side,int section,WallSpan &span) {
 #include "surface_glow.inc"
 #include "fluid_effects.inc"
 #include "monster_projectiles.inc"
+#include "vile_effects.inc"
 #include "environment_reactions.inc"
 
 void wallImpact(line_t *line,int side,fixed_t fx,fixed_t fy,fixed_t fz) {

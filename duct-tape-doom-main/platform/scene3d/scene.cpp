@@ -152,7 +152,7 @@ static void acceleratedView(player_t *player) {
     }
 }
 void applySettings() {
-    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();};
+    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -209,6 +209,9 @@ void applySettings() {
     R_WallImpact=settings.accelerated?wallImpact:nullptr;
     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
     R_BloodHit=settings.accelerated?bloodHit:nullptr;
+    R_VileHurt=vileEffectsEnabled()?vileHurt:nullptr;
+    R_VileImpact=vileEffectsEnabled()?vileImpact:nullptr;
+    if(!vileEffectsEnabled())resetVileEffects();
     P_WeakpointConfigure(settings.accelerated&&settings.enhancedWeakPoints,settings.accelerated&&settings.weaponVulnerabilities,settings.accelerated&&settings.localizedInjuries);
     P_WeakpointConfigureExtras(settings.accelerated&&settings.monsterBleeding,settings.accelerated&&settings.headshotFrenzy);
     P_WeakpointConfigureEyes(settings.accelerated&&settings.eyeInjuries);
@@ -287,6 +290,7 @@ static void clearLevelGeometry() {
     translucentWorld.clear();transferredSkies.clear();rubbleEmissionVertices.clear();
 }
 void sceneShutdown() {
+    R_VileHurt=nullptr;R_VileImpact=nullptr;resetVileEffects();
     P_WeakpointImpact=nullptr;P_WeakpointBleedVisual=nullptr;P_WeakpointBulletLocate=nullptr;P_WeakpointConfigureExtras(0,0);
     P_WeakpointConfigureFeeding(0);
     P_WeakpointConfigureEyes(0);

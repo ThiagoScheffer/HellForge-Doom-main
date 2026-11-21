@@ -972,6 +972,9 @@ damageMobj
 	return;
     }
 
+    if(R_VileHurt&&target->type==MT_VILE&&target->health<healthBefore&&
+       !p_wp_bleed_damage&&!p_wp_dot_damage)
+        R_VileHurt(target);
     if(!acid)P_CombatConfirmed(target,source,elementKind,damage,-1);
     if(p_wp_bleed_damage||p_wp_dot_damage)return;
     if(damage>0&&!acid){P_WeakpointRetaliationDamage(target,inflictor,source);P_WeakpointFeedingHurtFrom(target,source);}

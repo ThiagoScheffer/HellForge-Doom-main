@@ -543,6 +543,15 @@ void sprayShutdown();
 struct BodyPose { float lean[2],whip[2],squash,lift,flatten;bool flier; };
 void bodyHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,int damage);
 void bodyDamaged(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage);
+bool vileEffectsEnabled();
+bool vileEffectNear(const mobj_t &actor,const Uniforms &camera);
+void resetVileEffects();
+void vileHurt(const mobj_t *vile);
+void vileImpact(fixed_t x,fixed_t y,fixed_t z);
+void drawVileFire(const mobj_t &fire,const mobj_t &vile,const mobj_t &victim,
+                  const Uniforms &camera,float fraction);
+void drawVileHands(mobj_t &vile,const mobj_t *victim,const Uniforms &camera,float fraction);
+void drawVileBursts(const Uniforms &camera,float fraction);
 void watchBodies();
 void bodyMotionShutdown();
 bool bodyPose(const mobj_t &thing,float fraction,BodyPose &pose);
