@@ -244,4 +244,19 @@ Very bloody improvement when it used on Pinkdemons and spectre - it will create 
 for small monster : zombieman,shotgunguy,heavy duke - it will be only much more blood splash and spread around.
 
 
+for BFG FX explosions final effect around any lights on the room.
+anvil crawler (also called spider lightning  
+only for maps with less 200 monsters
+after it explode the bgf9000 will have  final effect on anvil crawler (also called spider lightning   style on all lights acrros the room giving a intense immersion and power full depth
+
+
+Blood pool steps.
+after a monster die - if player step on its blood pool, and walk away it will spread the blood on the ground for 2 seconds, like blood trails steps
+
+hanging corpses decorations - create bloody,bleeding and moviments alive like to immersion horror on the decorations.
+
+
+
+
+
 https://doom.fandom.com/wiki/Thing_types

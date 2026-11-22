@@ -35,6 +35,7 @@ static byte bloodTintIndex(byte index,int tint) {
 }
 constexpr int bloodKeyBase=-0x40000000; // Image keys clear of walls and lumps.
 constexpr int bloodPool=0,bloodSplats=4,bloodSpeckFirst=1+bloodSplats,bloodSpecks=3,bloodDrip=bloodSpeckFirst+bloodSpecks,bloodSmear=bloodDrip+1;
+constexpr int bloodFootHeavy=10,bloodFootMedium=11,bloodFootFaint=12;
 static std::vector<byte> bloodShades;static bool bloodShadesLoaded=false;
 const std::vector<byte> &bloodPalette() {
     if(bloodShadesLoaded)return bloodShades;
@@ -87,9 +88,10 @@ static Image &bloodImage(int variant) {
     int key=bloodKeyBase+variant;
     auto found=images.find(key);if(found!=images.end())return found->second;
     int tint=variant/32;variant%=32;
-    uint32_t seed=hash32(variant*7919u+17u);
-    int width=variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
-    int height=variant==bloodDrip?40:variant==bloodSmear?16:width;
+    bool footprint=variant>=bloodFootHeavy&&variant<=bloodFootFaint;
+    uint32_t seed=hash32((footprint?bloodFootHeavy:variant)*7919u+17u);
+    int width=footprint?16:variant==bloodPool?64:variant==bloodDrip?3:variant==bloodSmear?32:variant>=bloodSpeckFirst?8:32;
+    int height=footprint?32:variant==bloodDrip?40:variant==bloodSmear?16:width;
     std::vector<byte> pixels((size_t)width*height*2,0);
     auto put=[&](int x,int y,float shade) {
         if(x<0||y<0||x>=width||y>=height)return;
@@ -113,6 +115,22 @@ static Image &bloodImage(int variant) {
             float streak=valueNoise((float)x*0.15f,(float)y,1.5f,seed^3u);
             if(streak<0.2f+0.55f*along*d/reach)continue;
             put(x,y,0.12f+0.35f*streak*(1-0.5f*along));
+        }
+    } else if(footprint) {
+        // Toe at the top, heel at the bottom. An asymmetric arch and tread
+        // make the mirrored masks distinct; later variants lose coverage.
+        int depletion=variant-bloodFootHeavy;
+        for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+            float px=(x+0.5f-8.f)/7.f,py=(y+0.5f)/32.f;
+            float toe=std::pow(px,2.f)+std::pow((py-.23f)/.22f,2.f);
+            float heel=std::pow((px+.08f)/.72f,2.f)+std::pow((py-.82f)/.16f,2.f);
+            bool sole=toe<1.f||(py>.31f&&py<.63f&&px>-.72f&&px<.48f-(py-.31f)*.35f)||heel<1.f;
+            if(!sole)continue;
+            float noise=hashUnit(x,y,seed^0x41a7u);
+            bool tread=(y>=8&&y<=19&&y%5==0&&x>3)||(y>=23&&y%4==0&&x<11);
+            float threshold=depletion==0?.08f:depletion==1?.33f:.64f;
+            if(noise<threshold||(tread&&noise<.75f))continue;
+            put(x,y,.18f+.30f*hashUnit(x,y,seed^0xc317u));
         }
     } else if(variant>=bloodSpeckFirst) {
         // A drop's splat at one texel a unit: a blob and a stray texel or two.
@@ -163,6 +181,19 @@ static std::vector<BloodWall> severeWallMarks;
 static std::vector<BloodPool> severePools;
 static std::unordered_map<const mobj_t*,bool> pooledCorpses;
 static unsigned bloodLevelSerial;
+constexpr int bloodTransferTics=2*TICRATE,maxPrintsPerTrail=20;
+constexpr float footprintStride=20.f,footprintLength=17.f,bootOffset=4.5f;
+constexpr float poolFreshSeconds=8.f,footprintLifetime=45.f;
+constexpr size_t maxFootprints=96;
+struct BloodFootprint {float x,y,born,angle;int sector,variant;bool flip;};
+struct BloodFootstepState {
+    bool initialized=false,inside=false,left=true;
+    const mobj_t *actor=nullptr; // Identity only; never dereferenced after the current tic.
+    int player=-1,trailStart=-1,prints=0,tint=0,lastTic=-1;
+    float x=0,y=0,stride=0;
+};
+static BloodFootstepState footsteps;
+static std::vector<BloodFootprint> bloodFootprints;
 namespace {
 // A critical injury is a compact impact, not a pressurized fountain.
 // Five bounded effects can coexist, each with just six tiny ballistic drops.
@@ -391,7 +422,8 @@ static void buildSevereBlood(const Uniforms &camera) {
 constexpr size_t maxFloorBlood=320,maxWallBlood=160;
 static void checkBloodLevel() {
     if(bloodLevelSerial==r_levelserial)return;
-    bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();bloodLevelSerial=r_levelserial;
+    bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();
+    bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
 void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind) {
     if(!bloodOn()||sector<0||sector>=numsectors)return;
@@ -515,6 +547,82 @@ static float rainWash(bool rained,float age,float &dark,float &spread) {
     float wash=std::clamp(std::floor((age-6)/15*8)/8,0.0f,1.0f);
     return wash>=1?-1:pale*2+wash;
 }
+// Track only the displayed player. Pool owners are identity tokens and are
+// deliberately never dereferenced here.
+void tickBloodFootsteps() {
+    checkBloodLevel();
+    if(!settings.accelerated||totalkills>=200||levelSerial!=r_levelserial||!bloodOn()||
+       displayplayer<0||displayplayer>=MAXPLAYERS) {footsteps={};return;}
+    const player_t &player=players[displayplayer];const mobj_t *mo=player.mo;
+    if(!mo||player.health<=0||mo->health<=0||!mo->subsector) {footsteps={};return;}
+    float x=units(mo->x),y=units(mo->y),z=units(mo->z),now=gameSeconds();
+    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)) {footsteps={};return;}
+    if(!footsteps.initialized||footsteps.player!=displayplayer||footsteps.actor!=mo||leveltime<footsteps.lastTic||
+       leveltime-footsteps.lastTic>1) {
+        footsteps={};footsteps.initialized=true;footsteps.player=displayplayer;footsteps.actor=mo;footsteps.x=x;footsteps.y=y;
+    }
+    footsteps.lastTic=leveltime;
+    float dx=x-footsteps.x,dy=y-footsteps.y,moved=std::hypot(dx,dy);
+    footsteps.x=x;footsteps.y=y;
+    if(moved>96.f) {footsteps={};return;}
+    bool grounded=mo->z<=mo->floorz+2*FRACUNIT;
+    const sector_t *current=mo->subsector->sector;
+    int currentIndex=int(current-sectors);
+    if(currentIndex<0||currentIndex>=numsectors) {footsteps={};return;}
+    const BloodPool *contact=nullptr;float nearest=INFINITY;
+    if(grounded)for(const auto &pool:bloodPools) {
+        float age=now-pool.born;
+        if(age<0||age>poolFreshSeconds||pool.sector<0||pool.sector>=numsectors)continue;
+        const sector_t *surface=&sectors[pool.sector];
+        if(surface->floorpic==skyflatnum||std::abs(floorZ(surface)-z)>2.f)continue;
+        float grow=.3f+.7f*std::min(1.f,std::floor(age*2.f)/8.f);
+        float wet,dark,spread;bloodAge(age,4,6,wet,dark);
+        if(rainWash(rainedOn(pool.sector,pool.x,pool.y),age,dark,spread)<0)continue;
+        float px=pool.x-x,py=pool.y-y,distance=std::hypot(px,py);
+        if(distance>pool.size*grow*spread*.4f+4.f||distance>=nearest)continue;
+        WallHit wall;
+        if(distance>.01f&&firstSolidWall(x,y,z+2,px/distance,py/distance,0,distance,wall))continue;
+        if(SV_Active()&&distance>.01f&&SV_Trace(x,y,z+2,px,py,0,nullptr,nullptr)<1.f)continue;
+        contact=&pool;nearest=distance;
+    }
+    if(contact) {
+        footsteps.inside=true;footsteps.tint=contact->tint;footsteps.trailStart=-1;
+        footsteps.stride=0;footsteps.prints=0;footsteps.left=true;return;
+    }
+    if(footsteps.inside) {
+        footsteps.inside=false;footsteps.trailStart=leveltime;footsteps.stride=0;
+        // The exit sample marks the start, not a stride across the pool.
+        return;
+    }
+    if(!grounded) {footsteps.stride=0;return;}
+    int age=leveltime-footsteps.trailStart;
+    if(footsteps.trailStart<0||age<0||age>=bloodTransferTics||footsteps.prints>=maxPrintsPerTrail)return;
+    footsteps.stride+=moved;
+    if(footsteps.stride<footprintStride||moved<.001f)return;
+    footsteps.stride=std::fmod(footsteps.stride,footprintStride);
+    float direction=std::atan2(dy,dx);
+    float facing=float(mo->angle*(2.0*doomPi/4294967296.0));
+    // When moving backwards, the toes and left/right offsets still follow
+    // the player's facing, while the trail continues along actual movement.
+    if(dx*std::cos(facing)+dy*std::sin(facing)<-.1f*moved)direction+=float(doomPi);
+    float side=footsteps.left?-bootOffset:bootOffset;
+    float fx=x-std::sin(direction)*side,fy=y+std::cos(direction)*side;
+    const subsector_t *sub=R_PointInSubsector(fixed_t(fx*FRACUNIT),fixed_t(fy*FRACUNIT));
+    if(!sub||!sub->sector)return;
+    int sector=int(sub->sector-sectors);
+    if(sector<0||sector>=numsectors||sub->sector->floorpic==skyflatnum||
+       std::abs(floorZ(sub->sector)-z)>2.f||
+       (size_t(sector)<sectorMist.size()&&sectorMist[sector].liquid))return;
+    WallHit wall;
+    if(firstSolidWall(x,y,z+2,-std::sin(direction)*(side<0?-1.f:1.f),
+                      std::cos(direction)*(side<0?-1.f:1.f),0,std::abs(side),wall))return;
+    if(SV_Active()&&SV_Trace(x,y,z+2,fx-x,fy-y,0,nullptr,nullptr)<1.f)return;
+    int variant=age*3/bloodTransferTics;
+    if(bloodFootprints.size()>=maxFootprints)bloodFootprints.erase(bloodFootprints.begin());
+    bloodFootprints.push_back({fx,fy,now,direction-float(doomPi)*.5f,sector,
+                               bloodFootHeavy+variant+32*footsteps.tint,footsteps.left});
+    footsteps.left=!footsteps.left;++footsteps.prints;
+}
 void buildBlood(const Uniforms &camera) {
     buildSevereBlood(camera);
     if(!settings.blood||bloodPalette().empty())return;
@@ -580,6 +688,14 @@ void buildBlood(const Uniforms &camera) {
         if(wash<0)continue;
         flatBlood(d.variant,d.sector,d.x,d.y,d.size*spread,d.angle,d.stretch,d.flip,d.ceiling,d.ceiling?0:wet,dark,wash,camera);
     }
+    bloodFootprints.erase(std::remove_if(bloodFootprints.begin(),bloodFootprints.end(),
+        [&](const BloodFootprint &p){return now<p.born||now-p.born>footprintLifetime;}),bloodFootprints.end());
+    if(settings.accelerated&&totalkills<200&&levelSerial==r_levelserial)for(const auto &p:bloodFootprints) {
+        if(p.sector<0||p.sector>=numsectors||camera.eye[2]<floorZ(&sectors[p.sector]))continue;
+        float age=now-p.born,wet,dark,spread;bloodAge(age,0,3,wet,dark);
+        float wash=rainWash(rainedOn(p.sector,p.x,p.y),age,dark,spread);
+        if(wash>=0)flatBlood(p.variant,p.sector,p.x,p.y,footprintLength*spread,p.angle,1,p.flip,false,wet,dark,wash,camera);
+    }
     // Wall splats stay matte; thin spray doesn't glint believably.
     bloodWalls.erase(std::remove_if(bloodWalls.begin(),bloodWalls.end(),[&](const BloodWall &d){return now-d.born>180;}),bloodWalls.end());
     severeWallMarks.erase(std::remove_if(severeWallMarks.begin(),severeWallMarks.end(),
@@ -628,6 +744,7 @@ void buildBlood(const Uniforms &camera) {
     buildSpray(camera);
 }
 void bloodShutdown() {
+    bloodFootprints.clear();footsteps={};
     severeBursts={};severeLevel=~0u;
     severeWallMarks.clear();
     severePools.clear();

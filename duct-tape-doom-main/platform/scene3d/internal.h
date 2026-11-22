@@ -482,6 +482,7 @@ bool addBrokenFlat(std::vector<Vertex> &out,int leaf,int sector,bool ceiling,con
 
 // blood.cpp
 void bloodShutdown();
+void tickBloodFootsteps();
 // acid.cpp
 void buildAcid(const Uniforms &camera);
 // Opaque blood-sprite palette indices, ordered from dark to bright.

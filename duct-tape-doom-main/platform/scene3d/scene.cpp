@@ -117,6 +117,7 @@ static double worldInterpolation(uint64_t now){
     last=now;return std::clamp(progress,0.0,1.0);
 }
 static void beforeTic() {
+    if(!paused)tickBloodFootsteps();
     if(gamestate==GS_LEVEL&&!paused)tickHellfire();
     if(gamestate!=GS_LEVEL||!players[displayplayer].mo||paused) {tickTime=0;return;}
     renderViewPlace(players[displayplayer]);
