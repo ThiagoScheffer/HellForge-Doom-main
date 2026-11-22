@@ -742,6 +742,8 @@ void environmentBlast(float x,float y,float z,float strength);
 void tickEnvironment();
 void buildEnvironment(const Uniforms &camera);
 void buildElectricalArcs(const Uniforms &camera);
+void collectBfgAftershockLights();
+std::vector<int> linesAround(float x,float y,float reach);
 void resetEnvironment();
 void debrisLiquidSplash(float x,float y,float z,int sector,float size);
 void discoverRunoff(float x,float y,float z);

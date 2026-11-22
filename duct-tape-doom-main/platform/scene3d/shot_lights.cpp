@@ -100,7 +100,9 @@ static void tickFaults(){
         sparkFlash(f.x+f.n[0]*4,f.y+f.n[1]*4,f.z+f.n[2]*4,64,.6f,{.3f,.6f,1.f});
     }
 }
+static void drawBfgArcs(const Uniforms &camera);
 void buildElectricalArcs(const Uniforms &camera){
+    drawBfgArcs(camera);
     if(!settings.environmentEffects||!settings.electricalDamage||!settings.shootableLights||!settings.emissive||faultLevel!=r_levelserial)return;
     float now=gameSeconds();
     for(const auto &f:faults){
@@ -388,6 +390,184 @@ void shotThrough(const mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t f
     float pitch=std::atan(aimslope/(float)FRACUNIT)+randomRange(-8,16)*degree;
     carryShot(units(fx),units(fy),units(fz),std::cos(yaw),std::sin(yaw),std::tan(std::clamp(pitch,-1.3f,1.3f)),length);
 }
+
+// BFG aftershocks are renderer-owned, bounded, and never consume Doom's RNG.
+constexpr float bfgReach=768.f, bfgEnd=1.2f;
+constexpr size_t bfgEventsMax=2, bfgPathsMax=12, bfgBranchesMax=24, bfgFixturesMax=32;
+using BfgPoint=std::array<float,3>;
+struct BfgPath { std::array<BfgPoint,7> points; float start, duration; bool branch; };
+struct BfgTarget { SurfaceLightKey key; BfgPoint pos; float strike; bool reached=false; };
+struct BfgEvent {
+    unsigned level; int born; uint32_t seed; BfgPoint origin;
+    std::vector<BfgPath> paths; std::vector<BfgTarget> targets;
+    int failure=-1; bool failureApplied=false, sounded=false;
+};
+static std::vector<BfgEvent> bfgEvents;
+static uint32_t bfgSerial=0;
+static bool bfgEligible() {
+    return settings.accelerated&&settings.emissive&&settings.shootableLights&&
+        settings.environmentEffects&&settings.electricalDamage&&gamestate==GS_LEVEL&&
+        totalkills<200&&!netgame&&!demoplayback&&!demorecording;
+}
+static float bfgDistance(const BfgPoint &a,const BfgPoint &b) {
+    return std::sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]));
+}
+// The bake map alone can be stale when a door moves. Check every crossed
+// portal against its current floor and ceiling before consulting the bake.
+static bool bfgVisible(const BfgPoint &a,const BfgPoint &b) {
+    float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    float length=bfgDistance(a,b); if(length<1) return true;
+    if(bakeMap.sectors.size()!=(size_t)numsectors)return false;
+    for(int i:linesAround((a[0]+b[0])*.5f,(a[1]+b[1])*.5f,std::hypot(d[0],d[1])*.5f+4)) {
+        const line_t &l=lines[i]; float x=units(l.v1->x),y=units(l.v1->y);
+        float ex=units(l.v2->x)-x,ey=units(l.v2->y)-y,den=d[0]*ey-d[1]*ex;
+        if(std::abs(den)<1e-6f)continue;
+        float t=((x-a[0])*ey-(y-a[1])*ex)/den, u=((x-a[0])*d[1]-(y-a[1])*d[0])/den;
+        if(t<=0||t>=1-4/length||u<0||u>1)continue;
+        float z=a[2]+t*d[2];
+        if(!l.frontsector||!l.backsector||z<=std::max(floorZ(l.frontsector),floorZ(l.backsector))+1||
+           z>=std::min(ceilZ(l.frontsector),ceilZ(l.backsector))-1)return false;
+    }
+    int sector=int(R_PointInSubsector((fixed_t)(a[0]*FRACUNIT),(fixed_t)(a[1]*FRACUNIT))->sector-sectors);
+    if(SV_Active()&&length>4&&SV_Trace(a[0],a[1],a[2],d[0]*(length-4)/length,d[1]*(length-4)/length,d[2]*(length-4)/length,nullptr,nullptr)<1)return false;
+    for(float &v:d)v/=length;
+    return length<=4||traceRay(bakeMap,sector,a[0],a[1],a[2],d,length-4,SkyCeiling::open);
+}
+static bool bfgPath(BfgEvent &e,const BfgPoint &a,const BfgPoint &b,float start,bool branch) {
+    if(!bfgVisible(a,b))return false;
+    BfgPath path{}; path.start=start; path.duration=branch?.09f:.14f; path.branch=branch;
+    float dx=b[0]-a[0],dy=b[1]-a[1],len=std::max(1.f,std::hypot(dx,dy));
+    uint32_t seed=e.seed+uint32_t(e.paths.size())*0x9e3779b9u;
+    path.points[0]=a;path.points[6]=b;
+    for(int i=1;i<6;++i) {
+        float t=i/6.f, offset=(hashUnit(i,0,seed)-.5f)*std::min(12.f,bfgDistance(a,b)*.06f)*std::sin(t*float(doomPi));
+        path.points[i]={a[0]+(b[0]-a[0])*t-dy/len*offset,a[1]+(b[1]-a[1])*t+dx/len*offset,
+                        a[2]+(b[2]-a[2])*t+(hashUnit(i,1,seed)-.5f)*3};
+    }
+    for(int i=1;i<=6;++i)if(!bfgVisible(path.points[i-1],path.points[i]))return false;
+    e.paths.push_back(path);return true;
+}
+static void scheduleBfg(float x,float y,float z) {
+    BfgEvent e{};e.level=r_levelserial;e.born=leveltime;e.origin={x,y,z};
+    e.seed=++bfgSerial*2654435761u ^ uint32_t(leveltime)*2246822519u ^ uint32_t(std::abs(x)*17+std::abs(y)*31+std::abs(z)*7) ^ r_levelserial;
+    // Limit expensive fixture grouping and ray tests even in very large maps.
+    std::vector<std::pair<float,SurfaceLight>> candidates;
+    for(const auto &l:surfaceLights) {
+        if(tileShotOut(l.key))continue;
+        float d=bfgDistance(e.origin,{l.x,l.y,l.z});if(d>bfgReach)continue;
+        int kind=tileKind(l.key);if(kind!=DOOM_EMISSIVE_LAMP&&kind!=DOOM_EMISSIVE_PANEL)continue;
+        candidates.push_back({d,l});
+        if(candidates.size()>128) {
+            auto far=std::max_element(candidates.begin(),candidates.end(),[](const auto &a,const auto &b){return a.first<b.first;});candidates.erase(far);
+        }
+    }
+    std::sort(candidates.begin(),candidates.end(),[](const auto &a,const auto &b){return a.first==b.first?a.second.key<b.second.key:a.first<b.first;});
+    std::set<SurfaceLightKey> grouped;
+    for(const auto &c:candidates) {
+        const auto &l=c.second;if(grouped.count(l.key))continue;
+        for(const auto *tile:fixtureTiles(l))grouped.insert(tile->key);
+        BfgPoint p={l.x,l.y,l.z};
+        // Offset away from the fixture's plane to avoid embedding the bolt.
+        float dist=std::max(1.f,bfgDistance(e.origin,p));
+        for(int j=0;j<3;++j)p[j]+=(e.origin[j]-p[j])*std::min(4.f/dist,.25f);
+        if(!bfgVisible(e.origin,p))continue;
+        e.targets.push_back({l.key,p,0,false});if(e.targets.size()>=bfgFixturesMax)break;
+    }
+    // Prefer an upper fixture for the trunk, then choose spatially separated
+    // targets; later links may relay from any already connected fixture.
+    std::vector<BfgTarget> connected;
+    while(!e.targets.empty()&&connected.size()<bfgPathsMax) {
+        size_t choice=0;float best=-1e9f;
+        for(size_t i=0;i<e.targets.size();++i) {
+            float separation=bfgReach;
+            for(const auto &t:connected)separation=std::min(separation,bfgDistance(t.pos,e.targets[i].pos));
+            float score=connected.empty()?e.targets[i].pos[2]-z-bfgDistance(e.origin,e.targets[i].pos)*.15f:separation;
+            if(score>best){best=score;choice=i;}
+        }
+        BfgTarget target=e.targets[choice];e.targets.erase(e.targets.begin()+choice);
+        BfgPoint from=e.origin;float start=.40f,nearest=bfgDistance(from,target.pos);
+        for(const auto &prior:connected) {
+            float d=bfgDistance(prior.pos,target.pos);
+            if(d<nearest&&bfgVisible(prior.pos,target.pos)){nearest=d;from=prior.pos;start=prior.strike+.035f;}
+        }
+        start=std::min(start,.72f);
+        if(!bfgPath(e,from,target.pos,start,false))continue;
+        target.strike=start+.14f;connected.push_back(target);
+    }
+    e.targets=std::move(connected);
+    size_t mainCount=e.paths.size();
+    for(size_t i=0;i<mainCount&&e.paths.size()<mainCount+bfgBranchesMax;++i) {
+        BfgPath main=e.paths[i];
+        for(int j=0;j<2;++j) {
+            BfgPoint a=main.points[2+j],b=main.points[4+j];
+            float dx=b[0]-a[0],dy=b[1]-a[1],len=std::max(1.f,std::hypot(dx,dy));
+            float side=(j?1.f:-1.f)*(20.f+hashUnit(int(i),j,e.seed)*36.f);
+            b[0]+=-dy/len*side;b[1]+=dx/len*side;b[2]+=(j?8.f:-8.f);
+            bfgPath(e,a,b,main.start+.06f+j*.04f,true);
+        }
+    }
+    if(e.targets.size()>=2&&hashUnit(0,0,e.seed)<.25f) {
+        std::vector<size_t> order(e.targets.size());for(size_t i=0;i<order.size();++i)order[i]=i;
+        std::sort(order.begin(),order.end(),[&](size_t a,size_t b){return e.targets[a].key<e.targets[b].key;});
+        e.failure=int(order[std::min(order.size()-1,size_t(hashUnit(1,0,e.seed)*order.size()))]);
+    }
+    if(bfgEvents.size()>=bfgEventsMax)bfgEvents.erase(bfgEvents.begin());
+    bfgEvents.push_back(std::move(e));
+}
+static void tickBfg() {
+    if(!bfgEligible()){bfgEvents.clear();return;}
+    for(auto &e:bfgEvents) {
+        float age=(leveltime-e.born)/float(TICRATE);
+        if(e.level!=r_levelserial||age<0||age>bfgEnd)continue;
+        for(size_t i=0;i<e.targets.size();++i) {
+            auto &t=e.targets[i];if(t.reached||age<t.strike)continue;t.reached=true;
+            auto found=std::find_if(surfaceLights.begin(),surfaceLights.end(),[&](const SurfaceLight &l){return l.key==t.key;});
+            if(found==surfaceLights.end()||tileShotOut(t.key))continue;
+            float n[3]={e.origin[0]-t.pos[0],e.origin[1]-t.pos[1],e.origin[2]-t.pos[2]};
+            float len=std::max(1.f,std::sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]));for(float &v:n)v/=len;
+            sparks(t.pos[0],t.pos[1],t.pos[2],n,3,false);
+            if(!e.sounded){I_MadeSound(IMPACT_SPARK_ZAP,t.pos[0],t.pos[1],t.pos[2]);e.sounded=true;}
+            if(int(i)==e.failure&&!e.failureApplied) {
+                e.failureApplied=true;SurfaceLight hit=*found;breakFixture(hit);
+                dyingSound(tileKind(hit.key),hit.x,hit.y,hit.z);addFault(hit.x,hit.y,hit.z,n);
+                sparks(hit.x,hit.y,hit.z,n,10,false);
+            }
+        }
+    }
+    bfgEvents.erase(std::remove_if(bfgEvents.begin(),bfgEvents.end(),[](const BfgEvent &e){return e.level!=r_levelserial||leveltime<e.born||(leveltime-e.born)/float(TICRATE)>bfgEnd;}),bfgEvents.end());
+}
+static void drawBfgArcs(const Uniforms &camera) {
+    if(!bfgEligible())return;
+    for(const auto &e:bfgEvents) {
+        if(e.level!=r_levelserial)continue;float age=(leveltime-e.born)/float(TICRATE);
+        for(const auto &p:e.paths) {
+            float progress=std::clamp((age-p.start)/p.duration,0.f,1.f);
+            float fade=std::clamp((1.1f-age)/.25f,0.f,1.f);if(progress<=0||fade<=0)continue;
+            if(p.branch&&hashUnit(leveltime/2,int(&p-&e.paths[0]),e.seed)<.18f)continue;
+            for(int i=0;i<6;++i) {
+                float part=std::clamp(progress*6-i,0.f,1.f);if(part<=0)break;
+                BfgPoint a=p.points[i],b=p.points[i+1];for(int j=0;j<3;++j)b[j]=a[j]+(b[j]-a[j])*part;
+                for(int layer=0;layer<2;++layer) {
+                    float width=layer==0?1.8f:.38f,alpha=fade*(layer==0?.28f:1.f);
+                    auto vertex=[&](const BfgPoint &v,float side){Vertex out={v[0]+camera.up[0]*side,v[1]+camera.up[1]*side,v[2]+camera.up[2]*side,0,0,alpha,0};out.red=layer?.85f:.15f;out.green=layer?.95f:.8f;out.blue=1;return out;};
+                    quad(particleVertices,vertex(a,width),vertex(b,width),vertex(b,-width),vertex(a,-width));
+                }
+            }
+        }
+    }
+}
+void collectBfgAftershockLights() {
+    if(!bfgEligible())return;int count=0;
+    for(const auto &e:bfgEvents) {
+        if(e.level!=r_levelserial)continue;float age=(leveltime-e.born)/float(TICRATE);
+        for(const auto &t:e.targets) {
+            if(age<t.strike||age>1.15f||tileShotOut(t.key))continue;
+            float strength=.6f*std::clamp((1.15f-age)/.35f,0.f,1.f)*(.65f+.35f*hashUnit(leveltime/2,count,e.seed));
+            appendLight(t.pos[0],t.pos[1],t.pos[2],144,strength,{.3f,.85f,1.f},nullptr,.5f);
+            if(++count>=2)return;
+        }
+    }
+}
 // A blast (a rocket, BFG ball or barrel bursting) breaks every lamp or
 // screen with a tile within radius that it can see, and lampless wall pieces
 // of lamps and screens it faces within radius. Liquids glow on.
@@ -457,7 +637,9 @@ static std::unordered_map<const mobj_t*,Flight> flights;
 static void projectileBurst(const mobj_t &thing,const Flight &flight) {
     float x=units(thing.x),y=units(thing.y),z=units(thing.z)+units(thing.height)/2;
     game_thing_role role=Game_ThingRole(thing.type);
-    if(role==GAME_THING_ROCKET||role==GAME_THING_BIG_SHOT)blastLights(x,y,z,128);
+    bool aftershock=role==GAME_THING_BIG_SHOT&&bfgEligible();
+    if(role==GAME_THING_ROCKET||(role==GAME_THING_BIG_SHOT&&!aftershock))blastLights(x,y,z,128);
+    auto directImpact=[&]() {
     int reach=std::max(1,(int)std::lround(units(thing.radius)*0.5f));
     int sector=int(thing.subsector->sector-sectors);
     if(thing.z<=thing.floorz+FRACUNIT) {if(sectors[sector].floorpic!=skyflatnum)shotFlat(sector,false,x,y,units(thing.floorz),reach);return;}
@@ -470,9 +652,13 @@ static void projectileBurst(const mobj_t &thing,const Flight &flight) {
         if(along>-room&&along<ahead+room&&std::abs(ox*dy-oy*dx)<room)return;
     }
     carryShot(x,y,z,dx,dy,flight.slope,ahead,reach);
+    };
+    directImpact();
+    if(aftershock)scheduleBfg(x,y,z);
 }
 void watchShotLights() {
     tickFaults();
+    tickBfg();
     if(!settings.shootableLights||!settings.emissive||gamestate!=GS_LEVEL) {flights.clear();return;}
     for(auto &entry:flights)entry.second.seen=false;
     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
@@ -647,7 +833,7 @@ void dimShotSector(int sector,float share) {
     if(shotDim.size()!=(size_t)numsectors)shotDim.assign(numsectors,1.0f);
     shotDim[sector]=std::max(0.1f,shotDim[sector]*(1-0.85f*std::clamp(share,0.0f,1.0f)));
 }
-void shotLightsShutdown() {faults.clear();faultLevel=~0u;brokenTiles.clear();brokenPieces.clear();shotDim.clear();flights.clear();}
+void shotLightsShutdown() {bfgEvents.clear();faults.clear();faultLevel=~0u;brokenTiles.clear();brokenPieces.clear();shotDim.clear();flights.clear();}
 } // namespace doom3d
 
 extern "C" void I_TestElectricalFaults(){

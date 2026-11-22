@@ -54,7 +54,7 @@ void muzzleFlash(mobj_t *source,int weapon,int projectile) {
 
 // The map's lines by 128-unit cell, built once a level (lines don't move), so
 // a light asks only the lines near it instead of the whole map.
-static std::vector<int> linesAround(float x,float y,float reach) {
+std::vector<int> linesAround(float x,float y,float reach) {
     constexpr float cell=128;
     static std::vector<std::vector<int>> cells;
     static std::vector<unsigned> seen;
@@ -551,6 +551,8 @@ void collectFlashes(float fraction,const Uniforms &camera) {
     }
     lightKind=I_RENDER3D_LIGHT_DOOR;
     doorSpill(camera);
+    lightKind=I_RENDER3D_LIGHT_SHOT;
+    collectBfgAftershockLights();
 }
 float flashAt(float x,float y,float z,const Flash &f) {
     return doom_flash_at(x,y,z,&f,lightBlockers.data());
