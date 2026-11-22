@@ -223,4 +223,13 @@ Add a new compatible monster on the same place of archvile for normal Doom.wad a
 ----------
 
 
+
+fix: Sever critical - should be only displayed when player hit - not by in monster fighting
+
+
+improver map: refine details and give doors key colors and secrete sectors colors
+
+
+
+
 https://doom.fandom.com/wiki/Thing_types

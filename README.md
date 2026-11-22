@@ -1,6 +1,6 @@
 # DOOM: HELLFORGE by Thiago Scheffer
 
-**Current build: 2026.11.15.6** | [DOOM2 startup crash fix](docs/changes/DOOM2-STARTUP-LIGHT-CACHE-CRASH.md) · [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Documented source baseline: 2026.11.15.6** | [DOOM2 startup crash fix](docs/changes/DOOM2-STARTUP-LIGHT-CACHE-CRASH.md) · [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
 
 DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
 from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
@@ -35,7 +35,7 @@ the sections that follow.
 | **Corpse Decomposition & Organic Decay** | Selected corpses progressively dry and discolor; at Stage 2 their scavengers and associated blood pool disappear. | Map-wide gameplay-time aging, 2/5/8/10-minute F4 delays, eight stock monster types, cached palette-aware sprite variants, owned-pool cleanup, and the same 200-monster performance gate. |
 | 🎯 **[Sprite-based headshots](docs/changes/CRITICAL-PARTS.md)** | 2× human headshots, per-pellet hits, and shots through transparent sprite gaps. | Uses the displayed frame, rotation, mirroring, and silhouette; shares impact coordinates with attached wounds. |
 | 👁️ **[Monster weak points](docs/changes/ENHANCED-MONSTER-COMBAT.md)** | Heads, eyes, faces, brains, and mechanical legs have distinct combat rules. Weapon choice matters. | Monster profiles, conservative region classification, projectile provenance, and damage multipliers that do not stack. |
-| **[Elemental Damage 2.0, combat notifications & Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md)** | Optional Imp/Mancubus fire damage, blue plasma burns, charred Cacodemons, colored combat events and seven independent session metrics. | One authoritative DoT stream per actor, v6 status saves, bounded event queue and event-based session history that survives checkpoint reloads. |
+| **[Elemental Damage 2.0, combat notifications & Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md)** | Optional Imp/Mancubus fire damage, blue plasma burns, charred Cacodemons, colored combat events and session metrics. | One authoritative DoT stream per actor, v6 status saves, bounded event queue and event-based session history that survives checkpoint reloads. |
 | **[Elemental combat & injury reactions](docs/changes/ELEMENTAL-COMBAT.md)** | Cosmetic fire, blue plasma burns, charred corpses, Mancubus stagger, wounded Baron aggression and Arch-vile health siphoning. | Confirmed health-loss provenance, bounded local donor queries, immutable corpse artwork variants and versioned actor status saves. |
 | 👁️ **[Eye injuries](docs/changes/EYE-INJURIES.md)** | Hitscan eye hits can blind Cacodemons/Pain Elementals until they eat a corpse, or provoke ten seconds of Spider Mastermind rage. | Fingerprint-validated visible-eye masks, one chance per discharge, normal projectiles, bounded feeding and versioned save state. |
 | 💥 **[Impact feedback & frenzy](docs/changes/MONSTER-FEEDBACK-AND-STATUSES.md)** | Metal-leg sparks, headshot confirmation, and close super-shotgun hits that can provoke infighting. | Confirmed-impact events, per-discharge bookkeeping, bounded particles, and preserved attacker attribution. |
@@ -45,9 +45,18 @@ the sections that follow.
 | ⚙️ **[Settings that stay saved](docs/changes/F4-SETTINGS-PERSISTENCE.md)** | Applied F4 choices survive quitting, Low-FX launches, and settings export/import. | A comment-tolerant config reader and same-directory temporary writes that preserve the previous file on failure. |
 | ↩️ **[Use-to-load after death](docs/changes/DEATH-SAVE-RECOVERY.md)** | Press Use after dying to return to the last save written or loaded in the current session. | An optional death-flow hook into the normal loader, with ordinary map restart when no usable save is available. |
 | **[Launcher tools & settings tabs](docs/changes/LAUNCHER-TOOLS-AND-SETTINGS.md)** | New forge icon, animated Arch-vile/fire, log/config shortcuts, backed-up fresh start and tabbed preferences. | 355 F4/balance controls, config-preserving edits and IWAD-sourced animation; saves remain intact. |
+| **Launcher map and add-on loadout** | Keep a reusable add-on selection while switching between separately listed map WADs. | Map WADs are detected from map markers; only the selected map is launched before the ordered add-ons. Existing mixed lists migrate automatically. |
+| **Organized F4 settings** | Browse settings through 16 categories with focused sub-tabs, or find a setting by name/help text. | Preserves the existing settings registry and persistence; Q/E cycles sub-tabs, F opens Find, and search results edit the same settings draft. |
+| **Original Doom monster preview** | The launcher shows a Baron of Hell in the selected place for original Doom and Final Doom IWADs, and an Arch-vile for Doom II. | Uses the selected IWAD's sprite and palette for the preview; this is launcher artwork selection and does not change gameplay actors. |
+| **Oku large-map geometry visibility** | Conservatively skips world geometry outside the camera view on large maps. | On the 64-view Oku harness, world preparation went from 8.58 ms to 4.73 ms and generated triangles from 122,036 to 35,068 per view. Full visual parity and moving-door coverage remain open; mirrors, reflections, probes, baking, and uncertain geometry use the existing path. |
+| **Moving-sector baked-light relighting** | Reduce long CPU pauses when doors and other moving sectors trigger baked-light updates. | Oku live no-monster traversal improved from 28.07 to 33.22 FPS; median frame time changed 28.147 to 26.477 ms, p99 252.692 to 70.801 ms, and max 337.400 to 77.471 ms in the same harness. Background bake time was unchanged. |
 | **[Encounter Director](docs/changes/ENCOUNTER-DIRECTOR.md)** | Independent monster randomization, hidden reinforcements, category-safe item randomization and original-population staging. | Protected progression actors, native placement checks, separate budgets, single-player eligibility and nested F4 tabs. |
 | **[Exact solid-world sight acceleration](docs/changes/SOLID-SIGHT-MESH-CACHE.md)** | Reduce repeated visibility geometry work on large monster maps while retaining destruction and activation. | Bounded, invalidated geometry cache and conservative triangle filtering; fresh visibility queries rather than cached sight answers. |
 | **[HUD opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) & [Speedrun layout](docs/changes/SPEEDRUN-LAYOUT.md)** | Transparent panel backgrounds, screen-edge X/Y positioning and row/column statistics. | Independent persisted opacity controls, widescreen bounds and text-preserving layout. |
+| **Custom Speedrun HUD** | Choose map/run and player stats, arrange them in one row or separate left/right columns, or use only the Speedrun HUD for a cleaner screen. | Independent persistent stat toggles and column anchors; HUD-only mode suppresses standard overlays while preserving menus, automap and weapon wheel. |
+| **[Selected Texture Immersion](docs/changes/SELECTED_TEXTURE_IMMERSION_REPORT.md)** | Opt-in motion and material effects bring selected flesh, faces, gates, eye switches, blood pipes, fire walls and Doom II skies to life using original WAD artwork. | Curated patch regions, shader masks and bounded animation; no replacement textures or gameplay changes. Windows/Vulkan gallery checks passed; Metal runtime coverage remains pending. |
+| **Natural critical bloodspill** | Critical monsters can produce forceful, irregular blood jets, detached droplets, wall splashes and floor pools. | Bounded spray budget and blood-color profiles; effect remains optional and is separate from the critical-hit notification. |
+| **Weapon Discovery** | Optional monster-drop modes replace dropped weapons with ammo, including a scarce-ammo option. | Uses native ammo/skill limits and persists the selected drop tier without changing the save-record layout. [Test report](docs/changes/WEAPON_DISCOVERY_TEST_REPORT.md) |
 | **[Reload stability & lighting cache](docs/changes/RELOAD-LIGHTING-CACHE.md)** | Safer restarts and reuse of static lighting across sessions. | Render-resource lifecycle cleanup and versioned, validated disk entries; live effects remain outside the cache. |
 | **[Large moving-platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md)** | Keep breakable surfaces enabled while protecting large floor movers from excavation damage. | Rejects protected cuts before remeshing; small platforms and ordinary surfaces retain destruction. Manual lag confirmation remains pending in the linked report. |
 | **[Monster visibility performance](docs/changes/AMBUSH-SIGHT-F4.md)** | Toggle ambush sight reuse from F4 without changing hearing or encounter activation. | Reuses only an unchanged false sight result within one action; no cross-tic LOS cache. |
@@ -301,7 +310,7 @@ full campaign or performance certification.
 
 1. Build or obtain `DOOM-Hellforge.exe`.
 2. Launch it and select a compatible Doom, Doom II, Final Doom, or Freedoom IWAD.
-3. Add compatible WAD/PK3 add-ons in load order, then choose **PLAY GAME**.
+3. Add WAD/PK3 add-ons in **ADD-ON LOADOUT** and choose the active level WAD in **MAP WADS**. The selected map launches first, followed by the add-ons in load order. Use **PLAY GAME** to start.
 4. Use **GAME SETTINGS / TABS** before launching, or **F4** in-game, for graphics, lighting, combat and other preferences.
 
 Launcher quick tools open the last log and graphics config. **CLEAR ALL / FRESH
@@ -376,7 +385,17 @@ the extensions highlighted above.
   controls, widescreen anchoring, kills/secrets/items counters, notices, Toasty
   presentation, photo mode, camera director, arcade scoring, and LAN/co-op.
 - Independent HUD/Speedrun background opacity down to **0%**, plus Speedrun
-  **Row/Column** layout and **X/Y offsets** that reach the widescreen edges.
+  **Column**, **Row**, or **Split Columns** layout and **X/Y offsets** that
+  reach the widescreen edges. Split Columns place map/run information on the
+  left and player information on the right, with independent player-column
+  positioning.
+- F4 → SPEEDRUN lets players independently show the map name, secrets, items,
+  health, armor, ammo, attempts, deaths, killstreak, time and damage metrics.
+  **Speedrun HUD only** hides the standard HUD, crosshair and gameplay notices;
+  menus, automap and weapon wheel remain usable. Disabled widgets skip their
+  formatting and drawing work. This reuses the existing HUD atlas and does not
+  remove its GPU allocation, so it is a clean-screen option rather than a
+  claimed memory-saving mode.
 - Local single-player movement options including autorun, jumping, mouse look,
   and limited air steering. Demo, multiplayer, voxel, and unsupported scripted
   content retain their documented restrictions.
@@ -488,11 +507,99 @@ Recent source updates for this build family:
   rebuilt. The in-game visual check is still open. [HF-003](Log-Status.md#hf-003--pinky-faces-the-player-while-moving-away)
 - **DOOM II atmosphere profiles.** Episode Atmosphere includes Starport
   duststorms (SKY1), Burning City smoke and ash (SKY2), and Blood Hell rain and
-  fog (SKY3). Burning City uses the Fluid smoke masks for its puffs. The F4 menu
+  fog (SKY3). Burning City smoke was reduced to sparse, thin drifting haze
+  with soft, masked edges instead of dense plumes filling the view. The F4 menu
   offers manual profiles and a mode that follows the active sky, including on
   custom WADs when selected. [Atmosphere settings](duct-tape-doom-main/platform/settings_panel.cpp)
+- **Launcher map/add-on separation.** The launcher now has separate tabs for
+  the persistent add-on loadout and selectable map WADs. Adding WADs classifies
+  them by map markers, legacy mixed lists migrate on load, and switching maps
+  does not replace the add-on selection. The launcher preview selects a Baron
+  for original Doom and Final Doom IWADs and an Arch-vile for Doom II; this only
+  changes preview artwork. [Launcher source](launcher/Launcher.cs)
+- **F4 settings reorganization.** The former flat settings presentation is now
+  grouped into 16 categories with relevant sub-tabs and a Find mode. All 312
+  unique settings retain their existing keys, ranges, dependencies and saved
+  values. Search can match setting names, keys and help text; editing remains
+  part of the normal apply/discard flow. The native headless navigation check
+  passed 1,910 checks against both Doom and Doom II WADs.
+- **Expanded Speedrun HUD.** Secrets, items, health, armor and equipped-weapon
+  ammo can each be enabled independently. Split Columns puts map/run statistics
+  on the left and player information on the right with separately adjustable
+  placement; Row and Column remain available. Speedrun HUD only hides other
+  gameplay overlays while keeping menus, automap and the weapon wheel available.
+  Settings persist through the normal F4 flow, and native settings/render
+  checks cover the layouts and stat toggles.
+- **Selected Texture Immersion expansion.** The opt-in shader effect now covers
+  selected body and flesh panels, gates, eye switches, bleeding pipes and
+  faces, animated fire walls, and Doom II skies. It uses original WAD artwork;
+  the approved production pass removed the cavity enhancement that caused
+  unwanted dark spots. The Doom II Vulkan gallery rendered 23 selected scenes;
+  selected regions changed while sampled unselected artwork stayed unchanged.
+  Shader generation and Windows x64 packaging passed. Metal runtime checks
+  remain pending. [Design](docs/changes/SELECTED_TEXTURE_IMMERSION_DESIGN.md) ·
+  [Verification](docs/changes/SELECTED_TEXTURE_IMMERSION_TESTS.md)
+- **Critical bloodspill refinement.** Critical-hit blood was reshaped from a
+  uniform burst into irregular pressure streams that fragment and fade, with
+  wall splashes and small floor pools. The severe effect remains separately
+  gated from the low-health/critical combat message. Monster color mappings and
+  effect budgets are documented in the source and combat settings.
+- **Weapon Discovery.** F4 can keep Classic monster weapon drops, replace them
+  with skill-scaled ammo, or use Scarce Ammo quantities. Focused native checks
+  covered quantities, ammo caps, save/load and mode fallbacks. The CTest run
+  passed 38/39 in the existing build directory; the one portability test passed
+  when rerun from a fresh writable directory. [Report](docs/changes/WEAPON_DISCOVERY_TEST_REPORT.md)
+- **Revenant Soul Release.** Added a bounded visual soul-release effect to
+  Revenant deaths, with focused native smoke coverage. This is cosmetic and
+  does not change weapon damage or monster behavior.
+- **Arch-vile fire spawn coordinate.** Corrected `A_VileTarget()` to pass the
+  target's Y coordinate as the fire actor's Y position. This is a one-line
+  placement fix; Arch-vile AI, damage, sound, timing and rendering are unchanged.
 
-**README baseline: build 2026.11.15.6.** The sky, soft sun-shaft, HUD bloom,
+- **Oku map visibility work.** Conservative camera-frustum checks reject
+  subsectors and wall geometry before vertex generation, while uncertain cases
+  keep the original renderer path. In the 64-view diagnostic comparison, world
+  preparation measured 8.58 ms without culling and 4.73 ms with culling;
+  generated world triangles fell from 122,036 to 35,068 per view. This is a
+  geometry-stage result, not a claim of whole-game FPS improvement. Full image
+  parity and moving-door edge-case coverage remain incomplete, so the README
+  does not characterize the feature as fully validated.
+- **Oku moving-sector relight optimization.** A reusable spatial index narrows
+  the baked wall strips checked during relighting, and each job deduplicates
+  identical marked regions. In a same-build, uninstrumented 12-second moving,
+  no-monster traversal, frame rate changed from 28.07 to 33.22 FPS; median frame
+  time changed from 28.147 to 26.477 ms, p95 from 57.625 to 52.393 ms, p99 from
+  252.692 to 70.801 ms, and maximum from 337.400 to 77.471 ms. The player
+  traveled 4,232 and 4,445 map units respectively, so path lengths were close
+  but not identical. Detailed profiling measured relight setup at 201.435 to
+  12.193 ms and marking at 185.413 to 0.483 ms; background worker time and GPU
+  upload staging did not improve. The optimization preserves exact masks in
+  the Oku verification run. [Relight implementation](duct-tape-doom-main/platform/scene3d/relight.cpp)
+
+### Known checks and debugging history
+
+The [bug and debugging log](Log-Status.md) records reproductions, causes,
+fixes, verification levels and follow-up checks. Current open validation items:
+
+- Inferno lightning now recognizes the short `TRE1` tree actor correctly, but
+  the E3M1 in-game visual check is still open. See [HF-004](Log-Status.md#hf-004--inferno-lightning-targets-only-the-large-tree).
+- The Pinky facing correction builds successfully; its retreat, obstacle
+  detour and feeding animation still need an in-game visual check. See
+  [HF-003](Log-Status.md#hf-003--pinky-faces-the-player-while-moving-away).
+- Burning City smoke uses thin, soft-edged haze; inspect the result in-game
+  against a bright sky. See [HF-010](Log-Status.md#hf-010--burning-city-smoke-has-rectangular-edges).
+- Large-map visibility culling still needs full image-parity and moving-door
+  coverage. Its measured geometry-stage result is not whole-game FPS evidence.
+
+Resolved build issues include relocation-stale CMake caches, launcher settings
+skipped by fast builds, ambiguous Windows Python discovery, and tracked files
+inside `test-references/`; see HF-005 through HF-008 in the log. The Sunder
+2308 slow-exit and SDL storm-audio shutdown crash fixes are recorded as verified
+there as well.
+
+**README baseline: build 2026.11.15.6.** This identifier is the documented
+source baseline; the improvements above were rebuilt and packaged afterward,
+but do not assert a new release identifier. The sky, soft sun-shaft, HUD bloom,
 monster skin-damage, decoration-ambience and Corpse Decomposition M1/M2 updates
 above were developed as incremental source patches for this build family.
 The user reported successful Windows build and gameplay tests for decomposition
