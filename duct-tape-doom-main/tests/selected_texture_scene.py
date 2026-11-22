@@ -1,10 +1,11 @@
 """Generate a Doom II render-check PWAD using only stock artwork.
 
-Usage: python tests/selected_texture_scene.py output.wad [--finish]
+Usage: python tests/selected_texture_scene.py output.wad [--finish | --horror]
 Maps 01–06 show the initial five wall profiles and the tentacle flat.
 Map 07 is an ordinary wall and animated ceiling control. Maps 08–15
 show the taller spine wall, additional leathers, and engraved marble faces.
 --finish generates a separate gallery for the remaining walls, flats and skies.
+--horror shows the marble faces, skull eyes, and intestine walls.
 """
 
 import struct
@@ -56,6 +57,14 @@ def final_rooms():
         yield room(14 + gate, "STARTAN3", floor=f"GATE{gate}")
 
 
+def horror_rooms():
+    walls = ("MARBFACE", "MARBFAC2", "MARBFAC3", "SW1MARB", "SW2MARB", "WOOD4",
+             "SLADSKUL", "WOODGARG", "SKSNAKE1", "SKSNAKE2", "SW2SKIN", "STARTAN3")
+    for i, wall in enumerate(walls, 1):
+        yield room(i, wall, height=128)
+    yield room(13, "WOOD4", height=64)  # Bring the upper skull to eye level.
+
+
 def write_gallery(path, rooms):
     data, directory = bytearray(), bytearray()
     for lumps in rooms:
@@ -66,4 +75,6 @@ def write_gallery(path, rooms):
 
 
 if __name__ == "__main__":
-    write_gallery(Path(sys.argv[1]), final_rooms() if "--finish" in sys.argv[2:] else initial_rooms())
+    mode = sys.argv[2:]
+    gallery = horror_rooms if "--horror" in mode else final_rooms if "--finish" in mode else initial_rooms
+    write_gallery(Path(sys.argv[1]), gallery())

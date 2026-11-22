@@ -16,6 +16,8 @@
 #define LS_EYE_SWITCH   11u
 #define LS_FIRE         12u
 #define LS_SKY          13u
+#define LS_SKULL_SWITCH 14u
+#define LS_INTESTINES   15u
 
 // Camera map.w: flags in bits 0-4, intensity (1-3) in bits 6-7.
 #define WORLD_SOFT_LIGHT   1u

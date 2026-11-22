@@ -67,10 +67,95 @@ vec2 trappedFaceMotion(vec2 tile,float seed) {
     return vec2(0);
 }
 
-const vec4 marbleEyes[3]=vec4[3](vec4(40,57,85,57),vec4(51,78,78,78),vec4(46,66,80,66));
+const vec4 marbleEyes[3]=vec4[3](vec4(45.5,61.0,81.5,61.0),vec4(51.0,77.0,78.0,77.0),
+                                 vec4(48.0,64.0,80.0,64.0));
+const vec4 skullEyes[5]=vec4[5](vec4(13.5,22.8,22.5,22.8),vec4(14.7,23.9,21.6,23.9),
+                                vec4(6.7,16.7,15.4,16.7),vec4(6.5,17.6,15.6,17.6),
+                                vec4(20.1,20.0,34.1,20.0));
 
-vec2 marbleEyeMotion(vec2 tile,uint style,float gaze) {
-    vec4 eyes=marbleEyes[min(style,2u)];
-    float eye=max(featureMask(tile-eyes.xy,vec2(10,7)),featureMask(tile-eyes.zw,vec2(10,7)));
-    return vec2(-2.65*gaze,0.28*sin(c.fog.w*1.1))*eye;
+float engravedBlink(float clock,float seed) {
+    float cycle=(clock+seed*8.0)/6.3;
+    float beat=fract(cycle)*6.3;
+    float variation=fract(sin(floor(cycle)*13.137+seed*71.57)*2053.31);
+    float dt=beat-(0.7+variation*4.15);
+    float blink=smoothstep(-0.10,-0.018,dt)*(1.0-smoothstep(0.029,0.16,dt));
+    // Short reflex blink after some of the longer pauses.
+    float reflex=smoothstep(0.24,0.31,dt)*(1.0-smoothstep(0.34,0.46,dt));
+    return max(blink,variation>0.77?reflex:0.0);
+}
+
+float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float strength,float footprint,
+                   vec3 normal,vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 rgb) {
+    if(!morph&&!pulse)return 1.0;
+    float row=0.0;
+    if(!stone&&variant==5u) {
+        row=tile.y<42.0?0.0:58.0;
+        variant=row==0.0?3u:2u;
+    }
+    vec4 eyes=stone?marbleEyes[min(variant,2u)]:skullEyes[min(variant,4u)];
+    eyes.yw+=row;
+    bool right=tile.x>0.5*(eyes.x+eyes.z);
+    vec2 center=right?eyes.zw:eyes.xy;
+    bool lit=!stone&&(variant==1u||variant==3u||variant==4u);
+    vec2 radius=stone?(variant==2u?vec2(8.3,3.4):vec2(6.4,3.5)):
+               (variant==4u?vec2(5.7,3.45):lit?vec2(4.45,2.95):vec2(4.0,2.55));
+    vec2 p=tile-center;
+    float tilt=stone?(variant==1u?0.18:0.32):variant==1u?-0.27:0.10;
+    p.y-=p.x*tilt*(right?-1.0:1.0);
+    if(any(greaterThan(abs(p),radius)))return 1.0;
+    float shape=length(p/radius);
+    float socket=1.0-smoothstep(lit?0.82:0.67,1.0,shape);
+    if(socket<=0.0)return 1.0;
+
+    // Invert the texture derivatives to recover world units per texel.
+    // Both sockets must use the same world-space center, even at an angle.
+    float determinant=duv1.x*duv2.y-duv1.y*duv2.x;
+    if(abs(determinant)<1e-8)return 1.0;
+    vec3 worldU=(dp1*duv2.y-dp2*duv1.y)/determinant;
+    vec3 worldV=(dp2*duv1.x-dp1*duv2.x)/determinant;
+    vec2 offset=tile-0.5*(eyes.xy+eyes.zw);
+    vec3 origin=vWorld-worldU*offset.x-worldV*offset.y;
+    vec3 toward=c.eye.xyz-origin;
+    vec2 aim=vec2(dot(toward,normalize(worldU)),dot(toward,normalize(worldV)));
+    vec2 gaze=morph?clamp(aim/(abs(dot(toward,normal))+13.0),vec2(-0.85),vec2(0.85)):vec2(0);
+    ivec3 cell=ivec3(floor(origin*0.125+vec3(0.313,0.423,0.317)));
+    float seed=float(tileHash(cell.xy,uint(cell.z))&65535u)/65536.0;
+    float close=pulse?engravedBlink(c.fog.w,seed):0.0;
+    float open=1.0-close;
+    float edge=clamp(footprint*0.48,0.16,0.46);
+    float along=p.x/(radius.x*0.87);
+    float oval=sqrt(max(0.0,1.0-along*along));
+    float upper=oval*radius.y*(0.66*open-0.15);
+    float lower=oval*radius.y*(0.19+0.17*open);
+    float aperture=smoothstep(-edge,edge,p.y+upper)*smoothstep(-edge,edge,lower-p.y)*
+                   smoothstep(0.0,0.21,oval)*(1.0-smoothstep(0.81,1.0,close));
+
+    vec2 irisAt=(p-gaze*radius*vec2(0.40,0.22))/vec2(radius.y*0.76,radius.y*0.89);
+    float ring=length(irisAt);
+    float iris=1.0-smoothstep(0.78,1.07,ring);
+    float pupil=1.0-smoothstep(0.64,1.1,length(irisAt/vec2(stone?0.39:0.29,0.70)));
+    float shine=1.0-smoothstep(0.12,0.36,length(irisAt-vec2(-0.28,-0.32)));
+    vec3 irisTint=stone?vec3(0.48,0.49,0.28):lit?vec3(0.80,0.18,0.055):vec3(0.37,0.23,0.105);
+    vec3 socketShade=stone?vec3(0.105,0.112,0.069):vec3(0.104,0.059,0.036);
+    vec3 globe=mix(socketShade*(0.67+0.33*oval),irisTint*(0.83-0.26*ring),iris);
+    globe=mix(globe,vec3(0.026,0.018,0.013),pupil*iris);
+    globe+=vec3(0.52,0.44,0.29)*shine*iris*(stone||lit?0.51:0.32);
+    vec3 lid=rgb*(stone?0.48:lit?0.12:0.28)+socketShade*(0.39+0.24*oval);
+    float weight=socket*saturate(strength*1.55);
+    rgb=mix(rgb,mix(lid,globe,aperture),weight);
+    // Let the blink dim the baked-in switch indicator through the closed lid.
+    return lit?1.0-weight*(0.25+0.75*close):1.0;
+}
+
+// The lengthwise contractions travel down different folds at staggered
+// speeds. The closed periodic field joins across both texture seams.
+vec2 intestineMotion(vec2 part,uint variant,float seed,out float pressure) {
+    const float turn=6.2831853;
+    vec2 a=part*turn;
+    float lane=a.x+0.74*sin(a.y*2.0+float(variant)*0.9)+0.29*sin(a.x+a.y);
+    float phase=a.y*2.0+0.82*sin(lane)-c.fog.w*(1.97+float(variant)*0.42)+seed;
+    float slow=a.y+lane-c.fog.w*0.73+seed*0.71;
+    float swell=0.5+0.5*cos(phase);
+    pressure=swell*swell*swell*(0.74+0.26*cos(slow));
+    return vec2(sin(lane)*3.6*pressure+0.75*sin(slow),2.45*sin(phase)*swell+1.1*sin(slow));
 }

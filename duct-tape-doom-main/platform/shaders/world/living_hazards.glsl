@@ -21,7 +21,7 @@ void livingEye(vec2 p,uint state,float clock,bool morph,bool pulse,float strengt
 
 LivingShading livingHazard(uint profile,uint variant,uint flags,vec2 uv,vec2 tile,vec2 extent,
                           vec2 pixel,float lod,float seed,float strength,inout vec3 rgb) {
-    LivingShading result=LivingShading(vec2(0),0.0,0.0,0.0);
+    LivingShading result=LivingShading(vec2(0),0.0,0.0,0.0,1.0);
     bool pulse=(flags&LS_PULSE)!=0u,wet=(flags&LS_WETNESS)!=0u;
     bool morph=(flags&LS_MORPH)!=0u&&c.style.x==0.0;
     if(!morph&&!pulse&&(!wet||(profile!=LS_PINNED_BODY&&profile!=LS_BLOOD_FLOW)))return result;

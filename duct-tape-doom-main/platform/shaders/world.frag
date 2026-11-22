@@ -230,7 +230,7 @@ void main() {
     if(glassy&&(dead||unpowered)) color.rgb=mix(color.rgb*0.08,vec3(0.45),crack);
     // Map surfaces carry sector+1 in mode bits 12+; 0 means no sector.
     bool mapped=(vMode>>MODE_SECTOR_SHIFT)>0u&&!sprite&&c.effects.z==0.0;
-    LivingShading living=LivingShading(vec2(0),0.0,0.0,0.0);
+    LivingShading living=LivingShading(vec2(0),0.0,0.0,0.0,1.0);
     uint surfaceMeta=uint(frameMean.a);
     uint mapFlags=uint(c.map.w);
     if(mapped&&!blood&&!glassy&&(vMode&MODE_ROCK)==0u&&color.a>=0.98&&(mapFlags&LS_ENABLED)!=0u)
@@ -319,7 +319,7 @@ void main() {
             if(!glassy) color.rgb=mix(color.rgb,vec3(dot(color.rgb,vec3(0.299,0.587,0.114))*0.15),emission);
             emission=0.0;
         }
-        emission*=unpackUnorm4x8(vLampTint).a;
+        emission*=unpackUnorm4x8(vLampTint).a*living.glowTransmission;
         emission=max(emission,edgeGlow);
         illumination=max(illumination,vec3(emission));
     }
