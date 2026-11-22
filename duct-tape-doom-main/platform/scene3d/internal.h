@@ -419,7 +419,7 @@ void geometry(const Uniforms &camera,float fraction);
 struct RagdollCard;
 void addEnemyShadow(const mobj_t &thing,const Image &image,int lump,bool flip,
                     float x,float y,float z,const Uniforms &camera,const ShadowLight *light=nullptr,bool anyThing=false,const RagdollCard *card=nullptr);
-void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card=nullptr);
+void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card=nullptr,float roll=0,float pivot=0,float pivotDown=0);
 
 // decoration_ambience.cpp
 // Independent, map-wide corpse-decomposition timeline. Do not remove when
@@ -430,6 +430,18 @@ int corpseDecayStage(const mobj_t *thing); // 0 fresh; 1-3 dry, independent of c
 void decorationAmbienceReset();
 void decorationAmbienceBegin(const Uniforms &camera);
 void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera);
+struct DecorationArt;
+bool horrorDecorEnabled();
+const DecorationArt *decorationArt(const mobj_t &thing,int lump);
+float decorationRoll(const mobj_t &thing,const DecorationArt &art,float fraction,float rx,float ry,float top,float ceiling,float &pivotDown);
+float decorationPivot(const DecorationArt &art,const Image &image,bool flip);
+Image &decorationStain(const DecorationArt &art,Image &image,int &key);
+void queueDecorationCritter(const mobj_t &thing,const DecorationArt &art,const Image &image,
+                            float x,float y,float top,float rx,float ry,float roll,float pivotDown,bool flip);
+void drawDecorationCritters(const Uniforms &camera);
+float decorationSpriteTop(const mobj_t &thing,const Image &image);
+void decorationBloodTick(const mobj_t &thing,float eyeX,float eyeY,float rx,float ry,unsigned &budget);
+void decorationBloodDrop(const mobj_t &source,float x,float y,float z,uint32_t seed);
 
 // atmosphere.cpp
 void buildShafts(const Uniforms &camera);
@@ -514,7 +526,7 @@ void buildBlood(const Uniforms &camera);
 // Splats shown from born on: a splat, a drop's speck, or a body's smear
 // (thick end forward along angle). size across, stretched along angle.
 enum { BLOOD_SPLAT,BLOOD_SPECK,BLOOD_SMEAR };
-void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind);
+void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr);
 // On the wall hit at (x,y,z), stretched along it; drips: one or two run down from it.
 void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips);
 

@@ -30,9 +30,24 @@ inline bool specialCreature(std::uint32_t seed,CorpseProfile profile) {
 }
 // Additional hard cap on sprite blocks for any combination of scavengers.
 constexpr unsigned critterBlockLimit=192;
-inline bool active(unsigned mapMonsters,bool switchOn,int insects) {
-    return switchOn&&insects>0&&mapMonsters<monsterLimit;
+constexpr unsigned maxDecorationDrops=12,maxDripsPerTic=6,maxLarvae=4,maxSpiders=3;
+inline bool horrorActive(unsigned mapMonsters,bool switchOn) {
+    return switchOn&&mapMonsters<monsterLimit;
 }
+inline bool active(unsigned mapMonsters,bool switchOn,int insects) {
+    return insects>0&&horrorActive(mapMonsters,switchOn);
+}
+inline int eventAge(int tic,std::uint32_t seed,int period) {
+    return (tic%period+int(hash(seed)%unsigned(period)))%period;
+}
+struct SpriteRoll {
+    float pivot=0,down=0,sine=0,cosine=1;
+    void apply(float &x,float &y) const {
+        const float across=x-pivot,below=y-down;
+        x=pivot+across*cosine+below*sine;
+        y=down+below*cosine-across*sine;
+    }
+};
 inline bool flies(std::uint32_t seed) {return hash(seed^0x91ab3d11u)%100u<40u;}
 inline bool worms(std::uint32_t seed) {return hash(seed^0x68271c47u)%100u<45u;}
 inline float delayScale(int preset) {return preset<=0?0.5f:preset==1?1.0f:2.0f;}

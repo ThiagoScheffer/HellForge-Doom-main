@@ -253,11 +253,11 @@ after it explode the bgf9000 will have  final effect on anvil crawler (also call
 Blood pool steps.
 after a monster die - if player step on its blood pool, and walk away it will spread the blood on the ground for 2 seconds, like blood trails steps
 
+
+
+
+
 hanging corpses decorations - create bloody,bleeding and moviments alive like to immersion horror on the decorations.
-
-
-
-
 animated corpses:
 idea brainstorming : Create more horror alive experience for Decorations on doom.
 

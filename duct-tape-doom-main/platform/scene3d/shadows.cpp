@@ -1,6 +1,7 @@
 /* Sprite shadows: things' shadows from the sun or a strong light, and
    silhouettes the flashlight throws on the wall behind. */
 #include "internal.h"
+#include "../decoration_ambience_rules.h"
 #include "../monster_profile.h"
 #include "../sprite_frustum.h"
 
@@ -92,7 +93,7 @@ static std::vector<WallPoint> clipWallPolygon(const std::vector<WallPoint> &poly
     }
     return out;
 }
-void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card) {
+void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool flip,float x,float y,float z,const Uniforms &camera,const Flash &beam,const RagdollCard *card,float roll,float pivot,float pivotDown) {
     if(card&&(card->u1<=card->u0||card->v1<=card->v0))return;
     const float *lamp=beam.position;
     float cz=card?card->top-(card->v0+card->v1)*0.5f:z+units(thing.height)*0.5f;
@@ -115,9 +116,11 @@ void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool f
     float top=card?card->top-v0:z+image.top,bottom=top-(v1-v0);
     constexpr int columns=6,rows=8;
     std::array<WallPoint,(columns+1)*(rows+1)> grid;std::array<bool,(columns+1)*(rows+1)> valid;
+    const doom_decor::SpriteRoll rotation{pivot,pivotDown,std::sin(roll),std::cos(roll)};
     for(int j=0;j<=rows;++j)for(int i=0;i<=columns;++i) {
-        float across=left+(right-left)*i/columns,height=top-(top-bottom)*j/rows;
-        float px=x+rx*across-lamp[0],py=y+ry*across-lamp[1],pz=height-lamp[2];
+        float across=left+(right-left)*i/columns,down=(top-bottom)*j/rows;
+        if(roll!=0)rotation.apply(across,down);
+        float px=x+rx*across-lamp[0],py=y+ry*across-lamp[1],pz=top-down-lamp[2];
         float toward=px*nx+py*ny,scale=toward<-1e-3f?planeDistance/toward:-1;
         int k=j*(columns+1)+i;valid[k]=scale>=1;
         float qx=lamp[0]+px*scale,qy=lamp[1]+py*scale;

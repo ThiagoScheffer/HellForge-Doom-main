@@ -2,6 +2,7 @@
 /* The visible world each frame: leaf visibility, walls, flats and things
    batched per texture. */
 #include "internal.h"
+#include "../decoration_ambience_rules.h"
 #include "frame_workers.h"
 #include "../sprite_frustum.h"
 #include "../sprite_visibility.h"
@@ -490,6 +491,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         bool flip;
         float x, y, z, distance;
         RagdollCard card{};
+        float roll=0,pivot=0,pivotDown=0;
     };
     // The rotation of a sprite seen from (dx,dy) away, for a thing facing angle.
     static unsigned spriteRotation(float dx, float dy, angle_t facing)
@@ -789,6 +791,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         bool ragdoll = false;
         float strongest = 0;
         ShadowLight shadowLight{};
+        const size_t casterIndex=casters.size();
         if (!self)
             addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera);
         if (!self && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
@@ -901,7 +904,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 (thing->type==MT_SERGEANT)?2:
                 (thing->type==MT_FATSO||thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?3:
                 (thing->type==MT_HEAD)?4:0;
-            Image &image=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) : skinImage;
+            const DecorationArt *art=!self&&!directed&&!sf.rotate?decorationArt(*thing,lump):nullptr;
+            Image &image=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
+                art ? decorationStain(*art,skinImage,spriteKey) : skinImage;
             // A traceable renderer hand-off is essential: isolated rule tests
             // cannot prove that the real game selects the new GPU texture.
             if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {
@@ -942,6 +947,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 sink = -floorOverhang(thing, i, image); // fallback for other sprite types
             top -= sink;
             bottom -= sink;
+
+            float pivotDown=0;
+            const float roll=art?decorationRoll(*thing,*art,fraction,rx,ry,top,ceilZ(&sectors[i]),pivotDown):0;
+            const float pivot=art?decorationPivot(*art,image,flipped(seen)):0;
 
             float u0 = flipped(seen) ? image.width : 0, u1 = flipped(seen) ? 0 : image.width;
             unsigned m = mode | ((mode & MODE_RELIT) && flipped(seen) ? MODE_FLIPPED : 0);
@@ -1008,6 +1017,28 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             else
                 quad(vertices, {x + rx * left, y + ry * left, top, u0, 0, light, m}, {x + rx * right, y + ry * right, top, u1, 0, light, m},
                      {x + rx * right, y + ry * right, bottom, u1, (float)image.height, light, m}, {x + rx * left, y + ry * left, bottom, u0, (float)image.height, light, m});
+            if(roll!=0)
+            {
+                const doom_decor::SpriteRoll rotation{pivot,pivotDown,std::sin(roll),std::cos(roll)};
+                for(size_t n=first;n<vertices.size();++n)
+                {
+                    Vertex &v=vertices[n];
+                    const float across=(v.x-x)*rx+(v.y-y)*ry;
+                    float rotated=across,down=top-v.z;
+                    rotation.apply(rotated,down);
+                    v.x+=rx*(rotated-across);
+                    v.y+=ry*(rotated-across);
+                    v.z=top-down;
+                }
+                if(collar&&casterIndex<casters.size())
+                {
+                    auto &caster=casters[casterIndex];
+                    caster.z=top-image.top;
+                    caster.roll=roll;caster.pivot=pivot;caster.pivotDown=pivotDown;
+                }
+            }
+            if(art&&collar)
+                queueDecorationCritter(*thing,*art,baseImage,x,y,top,rx,ry,roll,pivotDown,flipped(seen));
             finish(vertices, first);
         };
         if (!self)
@@ -1029,6 +1060,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         if ((size_t)i < sectorMist.size() && sectorMist[i].liquid)
             return 0;
         return std::min(16.0f, (float)(image.height - image.top));
+    }
+
+    float decorationSpriteTop(const mobj_t &thing,const Image &image)
+    {
+        const int i=int(thing.subsector->sector-sectors);
+        const float sink=sinkInLiquid(&thing,i,image,0,0,Uniforms{},false);
+        return units(thing.z)+image.top+(sink==0?floorOverhang(&thing,i,image):-sink);
     }
 
     // The player's own shadow: the player sprite as seen from the strongest
@@ -1246,6 +1284,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     decorationAmbienceThing(item.thing, camera);
             }
         }
+        drawDecorationCritters(camera);
         // addThing queues enhanced monster shots; draw them only after the
         // actor pass, and after buildImpacts has cleared the FX batches.
         drawMonsterProjectileEffects(camera);
@@ -1293,7 +1332,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         for (size_t n = 0; n < std::min(size_t(6), casters.size()); ++n)
         {
             const Caster &c = casters[n];
-            flashlightSilhouette(*c.thing, *c.image, c.lump, c.flip, c.x, c.y, c.z, camera, *beam, c.card.key ? &c.card : nullptr);
+            flashlightSilhouette(*c.thing, *c.image, c.lump, c.flip, c.x, c.y, c.z, camera, *beam,
+                                 c.card.key ? &c.card : nullptr, c.roll, c.pivot, c.pivotDown);
         }
         playerShadow(camera, fraction);
         timing(8);

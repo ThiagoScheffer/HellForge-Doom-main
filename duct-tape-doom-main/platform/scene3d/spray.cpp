@@ -3,6 +3,7 @@
    sliding across the floor smear it, bodies thrown into walls splash them.
    Drawing only: own random numbers, nothing the game sees. */
 #include "internal.h"
+#include "../decoration_ambience_rules.h"
 extern "C" {
 #include "../audio/impact_synth.h"
 #include "p_solid.h"
@@ -15,7 +16,7 @@ namespace doom3d {
 // when. Its splat is laid then, shown from that moment, and the speck flies
 // until it gets there, moving at the tic rate like the debris.
 constexpr float sprayGravity=1225; // Doom's: a unit a tic, each tic.
-struct Drop { float x,y,z,vx,vy,vz,born,end,size;std::array<float,3> color; };
+struct Drop { float x,y,z,vx,vy,vz,born,end,size;std::array<float,3> color;bool decoration=false; };
 static std::vector<Drop> drops;
 constexpr size_t maxDrops=768;
 // Dying and dead bodies watched for sliding (smears) and stopping short (a wall).
@@ -36,8 +37,9 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 
 // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
 // a second; splat: the size of what it leaves (0 none).
-static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr) {
-    float now=gameSeconds();
+static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
+                      const uint32_t *decorationSeed=nullptr) {
+    float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
     const sector_t *start=sectorAt(x,y);
     z=std::clamp(z,floorZ(start)+0.5f,ceilZ(start)-0.5f);
     auto fallTime=[&](float floor) {
@@ -92,14 +94,35 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
             if(where==CEILING||!liquid) {
                 // Drops coming in low stretch along their way.
                 float stretch=where==CEILING?1:1+std::clamp(h/std::max(60.0f,std::abs(fall))*0.6f,0.0f,1.2f);
-                bloodFloorSplat(lx,ly,(int)index,splat,std::atan2(vy,vx),stretch,where==CEILING,now+t,kind);
+                const float angle=decorationSeed?doom_decor::unit(*decorationSeed)*float(2*doomPi):std::atan2(vy,vx);
+                bloodFloorSplat(lx,ly,(int)index,splat,angle,stretch,where==CEILING,now+t,kind,decorationSeed);
                 floorSplat=where==FLOOR&&s->floorpic!=skyflatnum;
             }
         }
     }
+    if(decorationSeed&&!settings.bloodSpray)return floorSplat;
     if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
-    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(randomRange(0.35f,0.7f))});
+    const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):randomRange(.35f,.7f);
+    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr});
     return floorSplat;
+}
+
+void decorationBloodDrop(const mobj_t &source,float x,float y,float z,uint32_t seed) {
+    checkSprayLevel();
+    const sector_t *sector=sectorAt(x,y);
+    if(z<=floorZ(sector)+.5f||z>=ceilZ(sector)-.5f)return;
+    // Check the offset from the actor to the visible flesh. Once detached,
+    // gravity moves the speck vertically through that point's sector.
+    const float dx=x-units(source.x),dy=y-units(source.y),reach=std::hypot(dx,dy);
+    WallHit hit;
+    if(reach>.01f&&firstSolidWall(x-dx,y-dy,z,dx/reach,dy/reach,0,reach,hit))return;
+    if(settings.bloodSpray) {
+        const float now=leveltime/float(TICRATE);
+        size_t active=std::count_if(drops.begin(),drops.end(),[&](const Drop &d){return d.decoration&&d.end>now;});
+        if(active>=doom_decor::maxDecorationDrops||drops.size()>=maxDrops)return;
+    }
+    BloodSourceScope tint(&source);
+    throwDrop(x,y,z,0,0,-6,.72f,3.f+2.f*doom_decor::unit(seed^0x129du),BLOOD_SPECK,nullptr,&seed);
 }
 // A spray of count drops from (x,y,z) around the heading (dx,dy), spread
 // that far across it, speeds and rises in those ranges; the first big ones
@@ -358,7 +381,10 @@ void watchSpray() {
 void buildSpray(const Uniforms &camera) {
     checkSprayLevel();
     float now=gameSeconds();
-    drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){return now>=d.end||now<d.born-0.1f;}),drops.end());
+    const bool showDecor=horrorDecorEnabled()&&settings.blood&&settings.bloodSpray;
+    drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){
+        return now>=d.end||now<d.born-0.1f||(d.decoration&&!showDecor);
+    }),drops.end());
     for(const Drop &d:drops) {
         float t=std::clamp(std::floor((now-d.born)*TICRATE)/TICRATE,0.0f,d.end-d.born);
         float x=d.x+d.vx*t,y=d.y+d.vy*t,z=d.z+d.vz*t-0.5f*sprayGravity*t*t;

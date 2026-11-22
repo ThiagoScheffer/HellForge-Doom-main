@@ -169,11 +169,11 @@ static Image &bloodImage(int variant) {
     }
     return images.emplace(key,upload(width,height,pixels.data())).first->second;
 }
-static int variantOf(int kind) {
-    int pick=int(randomRange(0,4));
+static int variantOf(int kind,const uint32_t *seed=nullptr) {
+    int pick=seed?int(hash32(*seed)&3u):int(randomRange(0,4));
     return kind==BLOOD_SPECK?bloodSpeckFirst+pick%bloodSpecks:kind==BLOOD_SMEAR?bloodSmear:1+pick%bloodSplats;
 }
-struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling; };
+struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling;bool decoration=false; };
 struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; };
 struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
@@ -425,11 +425,13 @@ static void checkBloodLevel() {
     bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();
     bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
-void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind) {
+void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed) {
     if(!bloodOn()||sector<0||sector>=numsectors)return;
     checkBloodLevel();
     if(bloodFloors.size()>=maxFloorBlood)bloodFloors.erase(bloodFloors.begin());
-    bloodFloors.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variantOf(kind)+32*bloodSourceTint,kind!=BLOOD_SMEAR&&randomRange(0,1)<0.5f,ceiling});
+    const int variant=variantOf(kind,decorationSeed)+32*bloodSourceTint;
+    const bool flip=kind!=BLOOD_SMEAR&&(decorationSeed?((hash32(*decorationSeed)&4u)!=0):randomRange(0,1)<.5f);
+    bloodFloors.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr});
 }
 void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips) {
     if(!bloodOn())return;
@@ -625,9 +627,13 @@ void tickBloodFootsteps() {
 }
 void buildBlood(const Uniforms &camera) {
     buildSevereBlood(camera);
+    float now=gameSeconds();
+    if(!settings.blood||!horrorDecorEnabled())
+        bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){
+            return d.decoration&&now<d.born;
+        }),bloodFloors.end());
     if(!settings.blood||bloodPalette().empty())return;
     checkBloodLevel();
-    float now=gameSeconds();
     // Pools: corpses that came to rest, once each, sized to the body.
     for(auto &entry:pooledCorpses)entry.second=false;
     // Only remove the pool actually created for the same live corpse.

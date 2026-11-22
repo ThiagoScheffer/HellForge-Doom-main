@@ -9,6 +9,7 @@ extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
    (prepareFrame), plus the backend-independent I_Render3D calls. */
 #include "internal.h"
+#include "../decoration_ambience_rules.h"
 #include "../episode_atmosphere.h"
 #include "../shaders/feature_flags.h"
 #include "../shaders/living_surfaces.h"
@@ -128,8 +129,14 @@ static void beforeTic() {
     oldThings.clear();
     oldHeights.resize(numsectors);
     for(int i=0;i<numsectors;++i) oldHeights[i]={units(sectors[i].floorheight),units(sectors[i].ceilingheight)};
-    for(int i=0;i<numsectors;++i) for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext)
-        {oldThings.emplace(thing,std::array<float,3>{units(thing->x),units(thing->y),units(thing->z)});fluidProjectileFlight(*thing);}
+    unsigned dripBudget=doom_decor::maxDripsPerTic;
+    const bool decorBlood=levelSerial==r_levelserial&&horrorDecorEnabled()&&bloodOn();
+    const float rx=std::sin(oldYaw),ry=-std::cos(oldYaw);
+    for(int i=0;i<numsectors;++i) for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
+        oldThings.emplace(thing,std::array<float,3>{units(thing->x),units(thing->y),units(thing->z)});
+        fluidProjectileFlight(*thing);
+        if(decorBlood&&dripBudget)decorationBloodTick(*thing,oldEye[0],oldEye[1],rx,ry,dripBudget);
+    }
     tickImpactParticles();
     tickEnvironment();
     tickFluidEffects();

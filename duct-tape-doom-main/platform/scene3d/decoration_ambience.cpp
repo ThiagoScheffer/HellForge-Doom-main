@@ -1,8 +1,7 @@
 /* Cosmetic scavenger ambience: independent of gameplay actors and combat RNG.
    The manager remembers at most 256 nearby eligible bodies, picks the closest
    12 active emitters, and draws particles ONLY from the current live thing
-   iteration (no dereference of cached pointers after removal or resurrection).
-   Future decoration effects should extend BodyKind and the two renderers below. */
+   iteration (no dereference of cached pointers after removal or resurrection). */
 #include "internal.h"
 #include "../decoration_ambience_rules.h"
 #include "../corpse_decomposition.h"
@@ -10,8 +9,76 @@
 #include <unordered_set>
 
 namespace doom3d {
+struct DecorationArt {
+    int sprite,frame;
+    uint32_t signature;
+    float anchorX;
+    int detailX,detailY;
+};
+
 namespace {
 using doom_decor::BodyKind;
+enum class HorrorDecor : uint8_t {
+    None,Twitching,DryHanging,BloodyHanging,DeadImpaled,LivingImpaled,SkullStake,HeartPillar
+};
+HorrorDecor horrorDecor(int type) {
+    switch(type) {
+    case MT_MISC51:case MT_MISC60:return HorrorDecor::Twitching;
+    case MT_MISC52:case MT_MISC53:case MT_MISC54:case MT_MISC55:
+    case MT_MISC56:case MT_MISC57:case MT_MISC58:case MT_MISC59:return HorrorDecor::DryHanging;
+    case MT_MISC78:case MT_MISC79:case MT_MISC80:case MT_MISC81:
+    case MT_MISC82:case MT_MISC83:return HorrorDecor::BloodyHanging;
+    case MT_MISC74:return HorrorDecor::DeadImpaled;
+    case MT_MISC75:return HorrorDecor::LivingImpaled;
+    case MT_MISC70:case MT_MISC72:return HorrorDecor::SkullStake;
+    case MT_MISC37:return HorrorDecor::HeartPillar;
+    default:return HorrorDecor::None;
+    }
+}
+bool matchesSprite(HorrorDecor kind,int sprite) {
+    switch(kind) {
+    case HorrorDecor::Twitching:return sprite==SPR_GOR1;
+    case HorrorDecor::DryHanging:return sprite>=SPR_GOR2&&sprite<=SPR_GOR5;
+    case HorrorDecor::BloodyHanging:return sprite>=SPR_HDB1&&sprite<=SPR_HDB6;
+    case HorrorDecor::DeadImpaled:return sprite==SPR_POL1;
+    case HorrorDecor::LivingImpaled:return sprite==SPR_POL6;
+    case HorrorDecor::SkullStake:return sprite==SPR_POL2||sprite==SPR_POL4;
+    case HorrorDecor::HeartPillar:return sprite==SPR_COL5;
+    default:return false;
+    }
+}
+bool hangs(int sprite) {
+    return (sprite>=SPR_GOR1&&sprite<=SPR_GOR5)||(sprite>=SPR_HDB1&&sprite<=SPR_HDB6);
+}
+// Stock Doom and Doom II patch fingerprints. Coordinates identify the chain
+// and an opaque flesh/edge pixel in each frame, independent of collision size.
+constexpr DecorationArt artwork[]={
+    {SPR_GOR1,0,0x06854e3c, 9.5f,14,65},
+    {SPR_GOR1,1,0x7d88d796,10.5f,16,65},
+    {SPR_GOR1,2,0x1d9c4818, 9.5f,13,65},
+    {SPR_GOR2,0,0xa6dec738,19.5f,31,79},
+    {SPR_GOR3,0,0x0880c6bb,16.5f,10,73},
+    {SPR_GOR4,0,0xc7552c58, 7.5f,10,63},
+    {SPR_GOR5,0,0xfec6683a, 4.5f, 8,49},
+    {SPR_HDB1,0,0x550f80af,11.0f,15,72},
+    {SPR_HDB2,0,0x497879a9,11.0f,14,65},
+    {SPR_HDB3,0,0x2e6a2ce6,11.0f,10,61},
+    {SPR_HDB4,0,0xa635ded7,11.0f,10,60},
+    {SPR_HDB5,0,0x75c93d55,11.0f, 7,51},
+    {SPR_HDB6,0,0xde8a01a4,11.0f, 6,58},
+    {SPR_POL1,0,0x6cd3eac9, 0.0f,11,29},
+    {SPR_POL2,0,0xcc102c87, 0.0f,24,21},
+    {SPR_POL4,0,0x0beef910, 0.0f,22,10},
+    {SPR_POL6,0,0x3964768b, 0.0f,23,57},
+    {SPR_POL6,1,0x2e8d07dc, 0.0f,25,57},
+    {SPR_COL5,1,0xd3c0fc3f, 0.0f,22, 5}
+};
+struct ArtCheck { int lump=-1;bool valid=false; };
+std::array<ArtCheck,std::size(artwork)> checkedArt;
+struct DecorationCritter { float x,y,z,reach,age,light;bool spider,detaches; };
+std::array<DecorationCritter,doom_decor::emitterLimit> decorationCritters;
+size_t decorationCritterCount=0;
+
 struct Emitter {
     BodyKind kind=BodyKind::None;
     int firstTic=0,type=-1;
@@ -91,11 +158,23 @@ doom_decor::CorpseProfile corpseProfile(const Emitter &e) {
     default:return CorpseProfile::Generic;
     }
 }
-uint32_t thingSeed(const mobj_t &thing) {
+uint32_t thingSeed(const mobj_t &thing,bool stableHeight=false) {
     // Stable cosmetic seed for the map object position and class; never P_Random.
-    uint32_t x=uint32_t(thing.x),y=uint32_t(thing.y),z=uint32_t(thing.z);
+    uint32_t x=uint32_t(thing.x),y=uint32_t(thing.y),z=stableHeight?0u:uint32_t(thing.z);
     return doom_decor::hash(uint32_t(thing.type)*0x9e3779b9u ^
         doom_decor::hash(x)^doom_decor::hash(y+0x715177u)^doom_decor::hash(z+0x614d22u));
+}
+bool detailAge(const Emitter &e,int preset,float fraction,float &age,int &event) {
+    const auto kind=horrorDecor(e.type);
+    if(kind!=HorrorDecor::DryHanging&&kind!=HorrorDecor::SkullStake)return false;
+    const bool spider=kind==HorrorDecor::SkullStake;
+    const int period=int((spider?30:22)+doom_decor::hash(e.seed^0x76dbu)%20);
+    const int tics=int(period*TICRATE*doom_decor::delayScale(preset));
+    const int offset=int(doom_decor::hash(e.seed^0x7227u)%unsigned(tics));
+    const int shifted=leveltime%tics+offset;
+    event=leveltime/tics+shifted/tics;
+    age=(shifted%tics+fraction)/TICRATE;
+    return age<(spider?5.4f:3.4f);
 }
 bool settled(const mobj_t &thing, BodyKind kind) {
     if(kind!=BodyKind::Corpse)return true;
@@ -154,6 +233,139 @@ bool crittersReady(const Emitter &e,int preset) {
     return selected && leveltime-e.firstTic>=doom_decor::wormDelayTics(e.seed,preset,TICRATE);
 }
 } // namespace
+
+bool horrorDecorEnabled() {
+    return settings.accelerated&&gamestate==GS_LEVEL&&
+        doom_decor::horrorActive(unsigned(std::max(0,totalkills)),settings.decorationAmbience);
+}
+
+const DecorationArt *decorationArt(const mobj_t &thing,int lump) {
+    if(!horrorDecorEnabled()||!matchesSprite(horrorDecor(thing.type),thing.sprite))return nullptr;
+    const int frame=thing.frame&FF_FRAMEMASK;
+    for(size_t n=0;n<std::size(artwork);++n) {
+        const auto &art=artwork[n];
+        if(art.sprite!=thing.sprite||art.frame!=frame)continue;
+        ArtCheck &check=checkedArt[n];
+        if(check.lump!=lump) {
+            check={lump,false};
+            const int size=W_LumpLength(lump);
+            if(size<8||size>2048)return nullptr;
+            const auto *bytes=static_cast<const byte*>(W_CacheLumpNum(lump,PU_CACHE));
+            uint32_t signature=2166136261u;
+            for(int i=0;i<size;++i)signature=(signature^bytes[i])*16777619u;
+            check.valid=signature==art.signature;
+        }
+        return check.valid?&art:nullptr;
+    }
+    return nullptr;
+}
+
+float decorationPivot(const DecorationArt &art,const Image &image,bool flip) {
+    return (flip?image.width-art.anchorX:art.anchorX)-image.left;
+}
+
+float decorationRoll(const mobj_t &thing,const DecorationArt &art,float fraction,
+                     float rx,float ry,float top,float ceiling,float &pivotDown) {
+    if(!hangs(art.sprite)||!(thing.flags&MF_SPAWNCEILING))return 0;
+    // Some pass-through variants already extend into the ceiling. Keep the
+    // pivot at the visible intersection so the chain doesn't slide across it.
+    pivotDown=std::max(0.f,top-ceiling);
+    const uint32_t seed=thingSeed(thing,true);
+    const int duration=(5+doom_decor::hash(seed^0x246u)%4)*TICRATE;
+    const int cycle=duration+(3+doom_decor::hash(seed^0x622u)%8)*TICRATE;
+    const float phase=doom_decor::unit(seed^0x7bb4u)*2*doomPi;
+    auto ageAt=[&](uint32_t salt,int period) {
+        const float age=doom_decor::eventAge(leveltime,seed^salt,period)+fraction;
+        return age<0?age+period:age;
+    };
+    const float age=ageAt(0x551u,cycle);
+    float degrees=0;
+    if(age<duration) {
+        const float u=age/duration,envelope=std::sin(float(doomPi)*u);
+        const float amplitude=.65f+1.25f*doom_decor::unit(seed^0x2443u);
+        degrees=amplitude*envelope*envelope*std::sin(float(2*doomPi)*u+phase);
+    }
+    if(art.sprite==SPR_GOR1||(art.sprite>=SPR_HDB1&&art.sprite<=SPR_HDB6)) {
+        const int twitchPeriod=(12+doom_decor::hash(seed^0x54f3u)%14)*TICRATE;
+        const float twitch=ageAt(0x2871u,twitchPeriod);
+        if(twitch<21) {
+            const float u=twitch/21.f,envelope=std::sin(float(doomPi)*u);
+            degrees+=1.25f*envelope*envelope*std::sin(float(4*doomPi)*u+phase);
+        }
+    }
+    // Project one world-space sway direction into each billboard's basis.
+    return std::clamp(degrees,-3.f,3.f)*float(doomPi/180)*
+        (rx*std::cos(phase)+ry*std::sin(phase));
+}
+
+Image &decorationStain(const DecorationArt &art,Image &image,int &key) {
+    if(art.sprite<SPR_HDB1||art.sprite>SPR_HDB6||!bloodOn())return image;
+    // One shared variant per verified HDB patch, released with the map images.
+    const int stainKey=-1600000010-(art.sprite-SPR_HDB1);
+    auto found=images.find(stainKey);
+    if(found!=images.end()) {key=stainKey;return found->second;}
+    auto pixels=image.pixels;
+    for(int n=0;n<3;++n) {
+        const int length=5+2*n;
+        for(int row=0;row<length;++row) {
+            int x=art.detailX+(n-1)*3+(row>4&&n==2),y=art.detailY-length+row+n;
+            if(x<0||y<0||x>=image.width||y>=image.height)continue;
+            size_t offset=2*(y*image.width+x);
+            if(pixels[offset+1])
+                pixels[offset]=monsterSkinBloodIndex(MT_MISC78,.10f+.13f*(1.f-float(row)/length));
+        }
+    }
+    auto normals=spriteNormals(image.width,image.height,image.pixels.data());
+    key=stainKey;
+    return images.emplace(key,upload(image.width,image.height,pixels.data(),image.left,image.top,
+                                     nullptr,normals.data())).first->second;
+}
+
+void decorationBloodTick(const mobj_t &thing,float eyeX,float eyeY,float rx,float ry,unsigned &budget) {
+    int min=0,range=0;
+    const auto kind=horrorDecor(thing.type);
+    switch(kind) {
+    case HorrorDecor::Twitching:min=3;range=4;break;
+    case HorrorDecor::BloodyHanging:min=2;range=4;break;
+    case HorrorDecor::DeadImpaled:min=5;range=6;break;
+    case HorrorDecor::LivingImpaled:min=2;range=3;break;
+    case HorrorDecor::HeartPillar:
+        if(thing.state!=&states[S_HEARTCOL2]||thing.tics!=states[S_HEARTCOL2].tics)return;
+        break;
+    default:return;
+    }
+    if(!thing.subsector||!matchesSprite(kind,thing.sprite)||
+       thing.sprite<0||thing.sprite>=numsprites||thing.health<=0)return;
+    const float x=units(thing.x),y=units(thing.y);
+    const float dx=x-eyeX,dy=y-eyeY;
+    if(dx*dx+dy*dy>doom_decor::effectRadius*doom_decor::effectRadius)return;
+    const uint32_t seed=thingSeed(thing,true);
+    if(kind==HorrorDecor::HeartPillar) {
+        const int pulse=states[S_HEARTCOL].tics+states[S_HEARTCOL2].tics;
+        if(pulse<=0||doom_decor::eventAge(leveltime/pulse,seed^0x227au,5+doom_decor::hash(seed)%5))return;
+    } else {
+        const int period=(min+doom_decor::hash(seed^0x6366u)%range)*TICRATE;
+        if(doom_decor::eventAge(leveltime,seed^0xe512u,period))return;
+    }
+    const auto &sprite=sprites[thing.sprite];
+    const int frame=thing.frame&FF_FRAMEMASK;
+    if(frame>=sprite.numframes||sprite.spriteframes[frame].rotate||voxelMonster(thing))return;
+    const auto &sf=sprite.spriteframes[frame];
+    const int lump=firstspritelump+sf.lump[0];
+    const DecorationArt *art=decorationArt(thing,lump);
+    if(!art)return;
+    const Image &image=lumpImage(lump,false);
+    const float top=decorationSpriteTop(thing,image);
+    float down=art->detailY+.5f;
+    float across=(sf.flip[0]?image.width-art->detailX-.5f:art->detailX+.5f)-image.left;
+    float pivotDown=0;
+    const float roll=decorationRoll(thing,*art,0,rx,ry,top,units(thing.ceilingz),pivotDown);
+    const float pivot=decorationPivot(*art,image,sf.flip[0]);
+    doom_decor::SpriteRoll{pivot,pivotDown,std::sin(roll),std::cos(roll)}.apply(across,down);
+    --budget;
+    decorationBloodDrop(thing,x+rx*across+ry*.45f,y+ry*across-rx*.45f,
+                        top-down,doom_decor::hash(seed^uint32_t(leveltime)));
+}
 
 // Separate map-wide cosmetic age registry: unlike local fly emitters, its
 // timestamps do not reset when the player moves more than 768 units away.
@@ -271,13 +483,13 @@ int corpseDecayStage(const mobj_t *thing) {
 
 void decorationAmbienceReset() {
     known.clear();selected.clear();lastScan=-1;currentLevel=~0u;
+    checkedArt={};decorationCritterCount=0;
 }
 
 void decorationAmbienceBegin(const Uniforms &camera) {
-    selected.clear();fliesDrawn=wormsDrawn=critterBlocksDrawn=0;
+    selected.clear();fliesDrawn=wormsDrawn=critterBlocksDrawn=0;decorationCritterCount=0;
     if(currentLevel!=r_levelserial) {decorationAmbienceReset();currentLevel=r_levelserial;}
-    if(camera.effects[2]!=0||
-       !doom_decor::active(unsigned(std::max(0,totalkills)),settings.decorationAmbience,settings.decorationInsects)) {
+    if(camera.effects[2]!=0||!horrorDecorEnabled()||settings.decorationInsects<=0) {
         if(totalkills>=int(doom_decor::monsterLimit))known.clear();
         return;
     }
@@ -286,17 +498,98 @@ void decorationAmbienceBegin(const Uniforms &camera) {
     }
     std::vector<std::pair<float,const mobj_t*>> closest;
     closest.reserve(known.size());
+    std::vector<std::pair<float,const mobj_t*>> detailOnly;
     float radius2=doom_decor::effectRadius*doom_decor::effectRadius;
     for(const auto &entry:known) {
         const Emitter &e=entry.second;
         float d2=distance2(e,camera);
-        if(d2>radius2||(!fliesReady(e,settings.decorationDelay)&&
-          !(settings.decorationInsects>=2&&crittersReady(e,settings.decorationDelay))))continue;
-        closest.push_back({d2,entry.first});
+        if(d2>radius2)continue;
+        if(fliesReady(e,settings.decorationDelay)||
+           (settings.decorationInsects>=2&&crittersReady(e,settings.decorationDelay)))
+            closest.push_back({d2,entry.first});
+        else if(settings.decorationInsects>=2) {
+            float age;int event;
+            if(detailAge(e,settings.decorationDelay,renderFraction,age,event))
+                detailOnly.push_back({d2,entry.first});
+        }
     }
-    std::sort(closest.begin(),closest.end(),[](const auto &a,const auto &b){return a.first<b.first;});
-    for(size_t i=0;i<std::min(size_t(doom_decor::emitterLimit),closest.size());++i)
-        selected.push_back(closest[i].second);
+    auto selectClosest=[&](auto &candidates) {
+        std::sort(candidates.begin(),candidates.end(),[](const auto &a,const auto &b){return a.first<b.first;});
+        for(size_t i=0;i<candidates.size()&&selected.size()<doom_decor::emitterLimit;++i)
+            selected.push_back(candidates[i].second);
+    };
+    selectClosest(closest);
+    if(selected.size()<doom_decor::emitterLimit)selectClosest(detailOnly);
+}
+
+void queueDecorationCritter(const mobj_t &thing,const DecorationArt &art,const Image &image,
+                            float x,float y,float top,float rx,float ry,float roll,float pivotDown,bool flip) {
+    if(settings.decorationInsects<2||!thing.subsector||decorationCritterCount>=decorationCritters.size()||
+       std::find(selected.begin(),selected.end(),&thing)==selected.end())return;
+    const auto found=known.find(&thing);
+    if(found==known.end()||found->second.type!=thing.type)return;
+    float age;int event;
+    if(!detailAge(found->second,settings.decorationDelay,renderFraction,age,event))return;
+    const bool spider=horrorDecor(thing.type)==HorrorDecor::SkullStake;
+    const bool detaches=!spider&&doom_decor::hash(found->second.seed^uint32_t(event)^0x1fd9u)%3u==0;
+    if(detaches&&age>3.f)
+        roll=decorationRoll(thing,art,renderFraction-(age-3.f)*TICRATE,rx,ry,top,units(thing.ceilingz),pivotDown);
+    float across=(flip?image.width-art.detailX-.5f:art.detailX+.5f)-image.left;
+    float down=art.detailY+.5f;
+    const float pivot=decorationPivot(art,image,flip);
+    doom_decor::SpriteRoll{pivot,pivotDown,std::sin(roll),std::cos(roll)}.apply(across,down);
+    const float z=top-down;
+    const float reach=std::min(spider?13.f:23.f,z-units(thing.floorz)-1.f);
+    if(reach<2||z>units(thing.ceilingz))return;
+    const float light=std::clamp(lighting(thing.subsector->sector),.12f,1.f);
+    decorationCritters[decorationCritterCount++]={x+rx*across+ry*.6f,y+ry*across-rx*.6f,z,reach,age,light,spider,detaches};
+}
+
+void drawDecorationCritters(const Uniforms &camera) {
+    unsigned larvae=0,spiders=0;
+    auto block=[&](float x,float y,float z,float w,float h,const std::array<float,3> &color,float alpha) {
+        pixelBlock(particleVertices,camera,x,y,z,w,h/w,color,false,nullptr,true,nullptr,alpha);
+    };
+    for(size_t i=0;i<decorationCritterCount;++i) {
+        const auto &c=decorationCritters[i];
+        if(c.spider) {
+            if(spiders>=doom_decor::maxSpiders||!reserveCritter(9))continue;
+            ++spiders;
+            const float descent=c.reach*std::clamp(std::min(c.age/2.f,(5.4f-c.age)/2.4f),0.f,1.f);
+            const float z=c.z-descent;
+            const std::array<float,3> body={.08f+.10f*c.light,.047f+.06f*c.light,.035f+.046f*c.light};
+            if(descent>.15f) {
+                const float sx=camera.right[0]*.13f,sy=camera.right[1]*.13f;
+                Vertex a={c.x-sx,c.y-sy,c.z,0,0,.62f,0};
+                a.red=.32f*c.light;a.green=.28f*c.light;a.blue=.24f*c.light;
+                Vertex b=a,d=a,e=a;
+                b.x+=2*sx;b.y+=2*sy;d=b;d.z=z;e.z=z;
+                quad(particleVertices,a,b,d,e);
+            }
+            block(c.x,c.y,z,1.1f,.85f,body,.95f);
+            for(int side:{-1,1})for(int leg=0;leg<3;++leg) {
+                const float offset=side*(.66f+.2f*leg);
+                const float step=.12f*std::sin(c.age*8.f+leg+side);
+                block(c.x+camera.right[0]*offset,c.y+camera.right[1]*offset,
+                      z+.24f-.24f*leg+step,.44f,.25f,body,.9f);
+            }
+            block(c.x,c.y,z-.43f,.66f,.48f,body,.95f);
+        } else {
+            const float fall=c.detaches?std::max(0.f,c.age-3.f):0.f;
+            const float drop=260.f*fall*fall;
+            if(drop>=c.reach||larvae>=doom_decor::maxLarvae||!reserveCritter(3*wormBlocksPerSegment))continue;
+            ++larvae;
+            const std::array<float,3> pale={.53f+.31f*c.light,.44f+.28f*c.light,.28f+.22f*c.light};
+            const float alpha=.92f*std::clamp(std::min(c.age*5.f,(3.4f-c.age)*5.f),0.f,1.f);
+            for(int segment=0;segment<3;++segment) {
+                const float phase=c.age*4.f-segment*.9f;
+                const float offset=.42f*std::sin(phase)+.28f*std::sin(c.age*1.15f);
+                const float z=c.z-drop-segment*.45f+.15f*std::sin(phase);
+                roundedWormSegment(camera,c.x+camera.right[0]*offset,c.y+camera.right[1]*offset,
+                                   z,.8f-.09f*segment,.64f,pale,alpha);
+            }
+        }
+    }
 }
 
 void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera) {
