@@ -115,6 +115,8 @@ extern int p_critical_trace;
 extern int (*P_CriticalBegin)(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
 extern int (*P_CriticalThing)(mobj_t*,critical_hit_t*);
 void P_BulletAttack(mobj_t*,angle_t,fixed_t,fixed_t,int);
+void P_SawLineAttack(mobj_t*,angle_t,fixed_t,fixed_t,int);
+int P_IsSawLineAttack(void);
 // Where each hitscan shot went: from the shooter to where it stopped, and
 // what it hit (NULL for walls, floors, the sky or the end of its range).
 // For sounds that follow the bullet, such as a near miss whizzing past.

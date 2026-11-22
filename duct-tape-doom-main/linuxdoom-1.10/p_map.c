@@ -1174,6 +1174,15 @@ int p_critical_trace = 0;
 int (*P_CriticalBegin)(mobj_t *, fixed_t, fixed_t, fixed_t, fixed_t, fixed_t, fixed_t, fixed_t) = NULL;
 int (*P_CriticalThing)(mobj_t *, critical_hit_t *) = NULL;
 static int criticalBullet = 0;
+static int sawLineAttack = 0;
+int P_IsSawLineAttack(void) { return sawLineAttack; }
+void P_SawLineAttack(mobj_t *actor, angle_t angle, fixed_t range, fixed_t slope, int damage)
+{
+    int previous = sawLineAttack;
+    sawLineAttack = 1;
+    P_LineAttack(actor, angle, range, slope, damage);
+    sawLineAttack = previous;
+}
 boolean PTR_ShootTraverse(intercept_t *in)
 {
     fixed_t x;
@@ -1348,7 +1357,7 @@ boolean PTR_ShootTraverse(intercept_t *in)
         frac = in->frac;
         event.target = th;
         event.source = event.inflictor = shootthing;
-        event.kind = criticalBullet ? P_WeakpointBulletKind() : WP_OTHER;
+        event.kind = sawLineAttack ? WP_CHAINSAW : criticalBullet ? P_WeakpointBulletKind() : WP_OTHER;
         event.impact = critical.impact;
         event.baseDamage = la_damage;
         event.regionPercent = critical.percent;
@@ -1359,11 +1368,12 @@ boolean PTR_ShootTraverse(intercept_t *in)
     {
         event.target = th;
         event.source = event.inflictor = shootthing;
-        event.kind = criticalBullet ? P_WeakpointBulletKind() : WP_OTHER;
+        event.kind = sawLineAttack ? WP_CHAINSAW : criticalBullet ? P_WeakpointBulletKind() : WP_OTHER;
         event.baseDamage = la_damage;
         if (criticalBullet && P_WeakpointBulletLocate && shootthing->player)
             P_WeakpointBulletLocate(th, shootthing, trace.x, trace.y, shootz, trace.dx, trace.dy, aimslope, &event.impact);
         P_WeakpointResolve(&event);
+        hitDamage = event.finalDamage;
     }
     P_WeakpointNotify(&event);
     la_hit = th;

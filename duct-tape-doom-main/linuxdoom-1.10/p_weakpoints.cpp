@@ -227,6 +227,7 @@ void P_WeakpointResolve(wp_damage_event_t *e) {
     else if(e->kind==WP_PLASMA_DIRECT){e->weapon=wp_plasma;e->projectileType=MT_PLASMA;}
     else if(e->kind==WP_ROCKET_DIRECT||e->kind==WP_ROCKET_SPLASH){e->weapon=wp_missile;e->projectileType=MT_ROCKET;}
     else if(e->kind==WP_BFG_DIRECT||e->kind==WP_BFG_TRACER){e->weapon=wp_bfg;e->projectileType=MT_BFG;}
+    else if(e->kind==WP_CHAINSAW)e->weapon=wp_chainsaw;
     e->eligible=e->source&&e->source->player&&allowed(e->target);
     // The original human multiplier remains independent of the new switches.
     int region=std::max(100,e->regionPercent),weapon=100;bool fatal=false;
@@ -234,6 +235,7 @@ void P_WeakpointResolve(wp_damage_event_t *e) {
         region=std::max(region,P_WeakpointRegionPercent(e->target->type,e->kind,e->impact.region,e->impact.confidence));
         if(p_wp_vulnerabilities) {
             int type=e->target->type;
+            if(e->kind==WP_CHAINSAW&&(type==MT_SERGEANT||type==MT_SHADOWS))weapon=200;
             if(e->kind==WP_PLASMA_DIRECT) {
                 if(type==MT_FATSO)weapon=p_wp_balance.heavyPlasma;
                 else if(type==MT_CYBORG)weapon=p_wp_balance.cyberPlasma;

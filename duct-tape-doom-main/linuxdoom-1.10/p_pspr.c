@@ -548,7 +548,7 @@ A_Saw
     
     // use meleerange + 1 se the puff doesn't skip the flash
     slope = P_AimLineAttack (player->mo, angle, MELEERANGE+1);
-    P_LineAttack (player->mo, angle, MELEERANGE+1, slope, damage);
+    P_SawLineAttack (player->mo, angle, MELEERANGE+1, slope, damage);
 
     if (!linetarget)
     {

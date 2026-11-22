@@ -5,6 +5,7 @@
 #include "../wound_attachment.h"
 #include "../death_joints.h"
 #include "../monster_regions.h"
+#include <limits>
 extern "C" {
 #include "../../linuxdoom-1.10/p_local.h"
 }
@@ -22,6 +23,8 @@ struct Wound {
     uint32_t seed;
     std::unordered_map<const Image*,doom_wounds::Point> frames;
     int tic=0;
+    enum class Kind { Bullet, Saw } kind=Kind::Bullet;
+    unsigned char stage=0,contacts=0;
 };
 static std::unordered_map<const mobj_t*,std::vector<Wound>> wounds;
 static std::unordered_map<int,float> standing;
@@ -363,6 +366,47 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
     }
     list.push_back(wound);
 }
+void sawWoundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,const mobj_t *shooter) {
+    if(!settings.wounds||!settings.accelerated||!target||!shooter||!shooter->player||
+       !P_WeakpointActive()||!p_wp_vulnerabilities||
+       (target->type!=MT_SERGEANT&&target->type!=MT_SHADOWS)||
+       (criticalVoxelModel&&criticalVoxelModel(*target)))return;
+    if(prepareCriticalSurface)prepareCriticalSurface(target,const_cast<mobj_t*>(shooter));
+    SpriteImpact impact;
+    if(!captureSpriteHit(target,fx,fy,fz,fdx,fdy,slope,shooter,impact))return;
+    const Image &image=*impact.image;
+    const auto &anatomy=weakpointRegions(target->type,image);
+    if(!anatomy.stock)return;
+    const auto &regions=anatomy.pixels;
+    // Anchor one wound at the center of the actual torso region. Custom or
+    // malformed sprites without a verified opaque torso simply get no mark.
+    float centerU=image.width*0.5f,centerV=image.height*0.5f;
+    int best=-1;float bestScore=std::numeric_limits<float>::max();
+    for(int y=0;y<image.height;++y)for(int x=0;x<image.width;++x) {
+        size_t i=(size_t)y*image.width+x;
+        if(!image.pixels[i*2+1]||regions[i]!=WP_BODY)continue;
+        float score=std::hypot((x+0.5f-centerU)*1.25f,y+0.5f-centerV);
+        if(score<bestScore){bestScore=score;best=(int)i;}
+    }
+    if(best<0)return;
+    doom_wounds::Point point={(best%image.width)+0.5f,(best/image.width)+0.5f};
+    bool flipped=impact.flipped;
+    float height=image.top-point.v;
+    float across=flipped?image.width-image.left-point.u:point.u-image.left;
+    auto &list=wounds[target];
+    auto existing=std::find_if(list.begin(),list.end(),[](const Wound &w){return w.kind==Wound::Kind::Saw;});
+    if(existing!=list.end()) {
+        existing->contacts=std::min<unsigned char>(5,existing->contacts+1);
+        existing->stage=existing->contacts>=5?3:existing->contacts>=3?2:1;
+        existing->tic=leveltime;
+        return;
+    }
+    if(list.size()>=maxWounds)return;
+    Wound wound={height,across,0.8f,impact.viewYaw-impact.sourceYaw,&image,point,flipped,
+        hash32((uint32_t)(uintptr_t)target^(uint32_t)target->type*2654435761u),{},leveltime};
+    wound.kind=Wound::Kind::Saw;wound.stage=1;wound.contacts=1;
+    list.push_back(std::move(wound));
+}
 void forgetWounds(const mobj_t *thing) {wounds.erase(thing);surfaces.erase(thing);bulletImpacts.erase(thing);bulletResults.erase(thing);}
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
     auto found=wounds.find(thing);
@@ -434,6 +478,19 @@ static byte woundMark(float x,float y,float radius,uint32_t seed) {
     }
     return stain;
 }
+static byte sawMark(float x,float y,unsigned char stage,uint32_t seed) {
+    float length=stage==1?5.0f:stage==2?10.0f:16.0f;
+    float phase=(seed&1023u)*(2*doomPi/1024);
+    float t=y+length*0.5f;
+    if(t<0||t>length)return 0;
+    float center=std::sin(t*0.72f+phase)*1.0f+std::sin(t*1.73f+phase*0.7f)*0.4f;
+    uint32_t grain=hash32(seed^(uint32_t)(int)std::lround(x)*374761393u^(uint32_t)(int)std::lround(y)*668265263u);
+    float width=stage==1?0.85f:stage==2?1.05f:1.2f;
+    float edge=std::abs(x-center);
+    if(edge<width)return edge>width*0.68f?2:((grain&7u)==0?4:3);
+    if(t>length*0.58f&&edge<width+0.8f&&(grain&3u)==0)return 5;
+    return 0;
+}
 
 bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask) {
     auto found=wounds.find(&thing);
@@ -449,6 +506,7 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
     mask.assign((size_t)w*h,0);
     bool any=false;
     for(Wound &wound:found->second) {
+        if(wound.kind==Wound::Kind::Saw&&(!p_wp_vulnerabilities||!P_WeakpointActive()))continue;
         float facing=std::sin(a+wound.yaw)*rx-std::cos(a+wound.yaw)*ry;
         if(!dead&&std::abs(facing)<0.4f)continue;
         // Procedural bends then carry these source texels through the same
@@ -464,13 +522,23 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
         }
         int c0=(int)std::floor(cu),r0=(int)std::floor(cv);
         if(c0<0||r0<0||c0>=w||r0>=h||!image.pixels[((size_t)r0*w+c0)*2+1])continue;   // missed the body here
-        int reach=(int)std::ceil(wound.radius+2.5f),down=(int)std::ceil(wound.radius+4);
+        const doom_regions::Mask *sawAnatomy=nullptr;
+        if(wound.kind==Wound::Kind::Saw) {
+            sawAnatomy=&weakpointRegions(thing.type,image);
+            if(!sawAnatomy->stock)continue;
+        }
+        int reach=wound.kind==Wound::Kind::Saw?3:(int)std::ceil(wound.radius+2.5f);
+        int up=wound.kind==Wound::Kind::Saw?(wound.stage==1?4:wound.stage==2?7:11):reach;
+        int down=wound.kind==Wound::Kind::Saw?up:(int)std::ceil(wound.radius+4);
         float direction=dead?1.0f:((wound.flipped!=flipped)?-1.0f:1.0f)*(facing<0?-1.0f:1.0f);
-        for(int r=std::max(0,r0-reach);r<=std::min(h-1,r0+down);++r)
+        for(int r=std::max(0,r0-up);r<=std::min(h-1,r0+down);++r)
             for(int c=std::max(0,c0-reach);c<=std::min(w-1,c0+reach);++c) {
                 size_t i=(size_t)r*w+c;
                 if(!image.pixels[i*2+1]||mask[i]==1)continue;
-                byte mark=woundMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.radius,wound.seed);
+                if(sawAnatomy&&(sawAnatomy->pixels[i]!=WP_BODY||c<w*3/10||c>w*7/10||r<h/4||r>h*4/5))continue;
+                byte mark=wound.kind==Wound::Kind::Saw?
+                    sawMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.stage,wound.seed):
+                    woundMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.radius,wound.seed);
                 // Nearby stains combine, but never paint over a hole or its
                 // recessed edge. Highlights win over the red lip and stain.
                 static const byte priority[6]={0,5,4,2,3,1};

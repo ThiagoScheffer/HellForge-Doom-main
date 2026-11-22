@@ -47,6 +47,9 @@ static void matrix() {
         {MT_FATSO,WP_ROCKET_DIRECT,WP_UNKNOWN,150},{MT_CYBORG,WP_ROCKET_DIRECT,WP_UNKNOWN,150},
         {MT_SERGEANT,WP_SHOTGUN_PELLET,WP_FACE,150},{MT_SHADOWS,WP_SHOTGUN_PELLET,WP_FACE,150},
         {MT_SERGEANT,WP_BULLET,WP_FACE,100},{MT_SERGEANT,WP_SHOTGUN_PELLET,WP_BODY,100},
+        {MT_SERGEANT,WP_CHAINSAW,WP_BODY,200},{MT_SHADOWS,WP_CHAINSAW,WP_BODY,200},
+        {MT_POSSESSED,WP_CHAINSAW,WP_BODY,100},{MT_SHOTGUY,WP_CHAINSAW,WP_BODY,100},
+        {MT_CHAINGUY,WP_CHAINSAW,WP_BODY,100},{MT_TROOP,WP_CHAINSAW,WP_BODY,100},
         {MT_HEAD,WP_BULLET,WP_EYE,150},{MT_PAIN,WP_BULLET,WP_EYE,150},
         {MT_HEAD,WP_PLASMA_DIRECT,WP_EYE,200},{MT_PAIN,WP_PLASMA_DIRECT,WP_UNKNOWN,200},
         {MT_BABY,WP_PLASMA_DIRECT,WP_BRAIN,300},{MT_SPIDER,WP_PLASMA_DIRECT,WP_UNKNOWN,300},
@@ -69,6 +72,10 @@ static void matrix() {
     check(target.health==995,"uncertain head regions fail safely");
     reset(MT_HEAD);e=event(WP_PLASMA_DIRECT,WP_UNKNOWN,20,0);P_WeakpointApply(&e);
     check(target.health==960,"location-independent vulnerability survives unknown anatomy");
+    reset(MT_SERGEANT);e=event(WP_CHAINSAW,WP_BODY);P_WeakpointResolve(&e);
+    check(e.finalDamage==40&&e.weapon==wp_chainsaw,"chainsaw Pinky damage resolves to 200 percent");
+    reset(MT_SHADOWS);P_WeakpointConfigure(1,0,1);e=event(WP_CHAINSAW,WP_BODY);P_WeakpointResolve(&e);
+    check(e.finalDamage==20,"disabled vulnerability preserves ordinary Spectre chainsaw damage");
 }
 static void eligibility() {
     for(int mode=0;mode<4;++mode) {

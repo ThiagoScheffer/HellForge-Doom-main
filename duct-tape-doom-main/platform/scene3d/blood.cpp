@@ -5,6 +5,7 @@ extern "C" {
 }
 
 namespace doom3d {
+extern "C" int P_IsSawLineAttack(void);
 // Blood: decals drawn in the world pass and lit like the surface under them.
 // Their artwork is generated per WAD from the BLUD sprite's own palette
 // indices, ordered dark to bright by how often each is used: one pool shape,
@@ -437,17 +438,25 @@ static void placeSplats(float x,float y,float z,float dx,float dy,int damage) {
     bloodWallSplat(hit,x+dx*hit.t,y+dy*hit.t,sz,randomRange(16,26),1,now+hit.t/400,BLOOD_SPLAT,false);
 }
 void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage) {
+    bool sawTrace=P_IsSawLineAttack()!=0;
+    bool sawTarget=target&&(target->type==MT_SERGEANT||target->type==MT_SHADOWS||target->type==MT_POSSESSED||target->type==MT_SHOTGUY||target->type==MT_CHAINGUY);
+    bool boostedSaw=sawTrace&&sawTarget&&shooter&&shooter->player&&!(target->flags&MF_NOBLOOD)&&
+        p_wp_vulnerabilities&&P_WeakpointActive();
+    int visualDamage=boostedSaw?std::max(damage,35):damage;
     BloodSourceScope bloodSource(target);
-    shotThrough(target,fx,fy,fz,fdx,fdy,damage);
-    bodyHit(target,fx,fy,fz,fdx,fdy,damage);
-    woundHit(target,fx,fy,fz,fdx,fdy,slope,damage,shooter);
+    shotThrough(target,fx,fy,fz,fdx,fdy,visualDamage);
+    bodyHit(target,fx,fy,fz,fdx,fdy,visualDamage);
+    if(boostedSaw) {
+        if(target->type==MT_SERGEANT||target->type==MT_SHADOWS)
+            sawWoundHit(target,fx,fy,fz,fdx,fdy,slope,shooter);
+    } else woundHit(target,fx,fy,fz,fdx,fdy,slope,visualDamage,shooter);
     if(!bloodOn()||(settings.bloodSpray&&combatHeadSprayHandled(target,shooter)))return;
     checkBloodLevel();
     float x=units(fx),y=units(fy),z=units(fz),dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
     if(length<0.001f)return;
     dx/=length;dy/=length;
-    if(settings.bloodSpray)sprayHit(target,x,y,z,dx,dy,units(slope),damage);
-    else placeSplats(x,y,z,dx,dy,damage);
+    if(settings.bloodSpray)sprayHit(target,x,y,z,dx,dy,units(slope),visualDamage);
+    else placeSplats(x,y,z,dx,dy,visualDamage);
 }
 // A rotated rectangle of blood clipped to its sector's floor (or ceiling)
 // polygons: size across, stretched along angle.

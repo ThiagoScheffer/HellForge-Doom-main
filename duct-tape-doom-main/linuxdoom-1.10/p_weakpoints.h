@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 typedef enum { WP_OTHER,WP_BULLET,WP_SHOTGUN_PELLET,WP_ROCKET_DIRECT,WP_ROCKET_SPLASH,
-    WP_PLASMA_DIRECT,WP_BFG_DIRECT,WP_BFG_TRACER } wp_damage_kind_t;
+    WP_PLASMA_DIRECT,WP_BFG_DIRECT,WP_BFG_TRACER,WP_CHAINSAW } wp_damage_kind_t;
 typedef enum { WP_UNKNOWN,WP_BODY,WP_HEAD,WP_FACE,WP_EYE,WP_BRAIN,WP_LEGS,WP_CHASSIS } wp_region_t;
 typedef struct {
     wp_region_t region;
