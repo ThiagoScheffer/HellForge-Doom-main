@@ -33,6 +33,7 @@ typedef struct {
     wp_impact_t impact;
     float directionX,directionY;
     int tint;
+    int targetType;
     uint64_t seed;
 } wp_severe_burst_t;
 extern int (*P_SevereBloodTint)(const mobj_t*);

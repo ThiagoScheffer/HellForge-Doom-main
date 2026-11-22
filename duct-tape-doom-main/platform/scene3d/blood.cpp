@@ -167,7 +167,7 @@ namespace {
 // Five bounded effects can coexist, each with just six tiny ballistic drops.
 constexpr size_t severeBurstLimit=5;
 constexpr float severeLifetime=.55f,fallGravity=650.f,criticalImpactTime=.22f;
-constexpr int severeFragments=6;
+constexpr int severeFragments=20,regularSevereFragments=6,mancubusSevereFragments=20;
 struct SevereFragment {
     float x=0,y=0,z=0,vx=0,vy=0,vz=0;
     float release=0,end=0,size=0;
@@ -182,8 +182,8 @@ struct SevereBurst {
     wp_severe_burst_t event{};
     float born=-1,heading=0;
     uint32_t seed=0;
-    int fragments=0;
-    bool wallMarked=false;
+    int fragments=0,wallMarks=0;
+    float lifetime=severeLifetime;
     std::array<SevereFragment,severeFragments> fallout{};
 };
 std::array<SevereBurst,severeBurstLimit> severeBursts{};
@@ -191,8 +191,8 @@ unsigned severeLevel=~0u;
 const sector_t *severeSectorAt(float x,float y) {
     return R_PointInSubsector(fixed_t(x*FRACUNIT),fixed_t(y*FRACUNIT))->sector;
 }
-void planSevereFall(SevereFragment &drop) {
-    drop.end=severeLifetime-drop.release;
+void planSevereFall(SevereFragment &drop,float lifetime) {
+	drop.end=lifetime-drop.release;
     const auto finish=drop.position(drop.end);
     const float distance=std::hypot(finish[0]-drop.x,finish[1]-drop.y);
     // Trace the ballistic arc in short chords. A blocked fragment cannot
@@ -258,16 +258,18 @@ void markSevereWall(const SevereBurst &burst,const SevereFragment &drop,int inde
     constexpr size_t markLimit=32;
     if(severeWallMarks.size()>=markLimit)severeWallMarks.erase(severeWallMarks.begin());
     const uint32_t hash=hash32(burst.seed+uint32_t(index));
+    const bool mancubus=burst.event.targetType==MT_FATSO;
     severeWallMarks.push_back({hit.line,hit.side,hit.section,along,p[2]-span.anchor,
-        burst.born+drop.release+drop.end,9.f+5.f*hashUnit(index,26,burst.seed),1.f,
+        burst.born+drop.release+drop.end,mancubus?14.f+10.f*hashUnit(index,26,burst.seed):9.f+5.f*hashUnit(index,26,burst.seed),1.f,
         1+int(hash%bloodSplats)+32*burst.event.tint,(hash&4u)!=0,0,{},{}});
 }
 void finishSevereDrop(SevereBurst &burst,SevereFragment &drop,int index) {
     if(drop.deposited)return;
     if(drop.wall.line>=0) {
-        if(!burst.wallMarked) {
+        const int wallMarkLimit=burst.event.targetType==MT_FATSO?5:1;
+        if(burst.wallMarks<wallMarkLimit) {
             markSevereWall(burst,drop,index);
-            burst.wallMarked=true; // At most one localized wall mark per injury.
+            ++burst.wallMarks;
         }
     } else collectSevereFall(burst,drop);
     drop.deposited=true;
@@ -287,7 +289,7 @@ void expireSevereBlood(float now) {
     for(auto &burst:severeBursts) {
         if(burst.born<0)continue;
         if(now<burst.born)burst={};
-        else if(now-burst.born>=severeLifetime) {
+        else if(now-burst.born>=burst.lifetime) {
             for(int i=0;i<burst.fragments;++i)
                 finishSevereDrop(burst,burst.fallout[i],i);
             burst={};
@@ -303,23 +305,24 @@ void severeBloodBurst(const wp_severe_burst_t *event) {
                            [](const SevereBurst &burst){return burst.born<0;});
     if(slot==severeBursts.end())return;
     const uint32_t seed=hash32(uint32_t(event->seed)^uint32_t(event->seed>>32));
-    // One impact spot plus a few low-energy drops, no ribbons or spray fans.
-    // The simulation is cosmetic and uses a stable event seed, not gameplay RNG.
-    const int fragments=severeFragments;
+    // Severe hits use deterministic cosmetic drops, never gameplay RNG.
+    const bool mancubus=event->targetType==MT_FATSO;
+    const int fragments=mancubus?mancubusSevereFragments:regularSevereFragments;
+    const float lifetime=mancubus?.8f:severeLifetime;
     const float heading=std::atan2(-event->directionY,-event->directionX);
-    *slot={*event,now,heading,seed,fragments};
+    *slot={*event,now,heading,seed,fragments,0,lifetime};
     const auto &origin=event->impact;
     for(int i=0;i<fragments;++i) {
         auto &drop=slot->fallout[i];
-        drop.release=.01f+.055f*hashUnit(i,9,seed);
+	 drop.release=.01f+(mancubus?.09f:.055f)*hashUnit(i,9,seed);
         drop.x=origin.x;drop.y=origin.y;drop.z=origin.z;
-        const float direction=heading+(hashUnit(i,11,seed)-.5f)*1.65f;
-        const float speed=26.f+42.f*hashUnit(i,12,seed);
+	 const float direction=mancubus?2*doomPi*hashUnit(i,11,seed):heading+(hashUnit(i,11,seed)-.5f)*1.65f;
+	 const float speed=mancubus?75.f+105.f*hashUnit(i,12,seed):26.f+42.f*hashUnit(i,12,seed);
         drop.vx=std::cos(direction)*speed;
         drop.vy=std::sin(direction)*speed;
-        drop.vz=12.f+48.f*hashUnit(i,13,seed);
-        drop.size=.65f+.60f*hashUnit(i,14,seed);
-        planSevereFall(drop);
+	 drop.vz=mancubus?45.f+120.f*hashUnit(i,13,seed):12.f+48.f*hashUnit(i,13,seed);
+	 drop.size=mancubus?.9f+.8f*hashUnit(i,14,seed):.65f+.60f*hashUnit(i,14,seed);
+	 planSevereFall(drop,lifetime);
     }
 }
 
@@ -349,15 +352,15 @@ static void buildSevereBlood(const Uniforms &camera) {
             const auto &impactMask=bloodImage(variant);
             auto &impactVertices=effectBatches[-1-(bloodKeyBase+variant)];
             const float phase=age/criticalImpactTime;
-            const float radius=6.0f+2.0f*phase;
-            const float opacity=.84f*(1.f-phase)*(1.f-phase);
+            const float radius=burst.event.targetType==MT_FATSO?11.f+5.f*phase:6.0f+2.0f*phase;
+            const float opacity=(burst.event.targetType==MT_FATSO?.9f:.84f)*(1.f-phase)*(1.f-phase);
             const std::array<float,3> right={camera.right[0],camera.right[1],camera.right[2]};
             auto corner=[&](float x,float y,float u,float v) {
                 std::array<float,3> point={origin.x,origin.y,origin.z};
                 for(int axis=0;axis<3;++axis)point[axis]+=camera.up[axis]*y*radius;
                 return vertex(point,right,x*radius,u,v,opacity);
             };
-            quad(impactVertices,
+		    quad(impactVertices,
                  corner(-1,1,0,0),corner(1,1,float(impactMask.width),0),
                  corner(1,-1,float(impactMask.width),float(impactMask.height)),
                  corner(-1,-1,0,float(impactMask.height)));
@@ -376,7 +379,7 @@ static void buildSevereBlood(const Uniforms &camera) {
             auto corner=[&](float x,float y,float u,float v) {
                 auto point=p;
                 for(int axis=0;axis<3;++axis)point[axis]+=camera.up[axis]*y*size*elongation;
-                return vertex(point,right,x*size,u,v,.78f*std::clamp((severeLifetime-age)/.14f,0.f,1.f));
+			    return vertex(point,right,x*size,u,v,.78f*std::clamp((burst.lifetime-age)/.14f,0.f,1.f));
             };
             quad(speckVertices,corner(-1,1,0,0),corner(1,1,float(speckMask.width),0),
                  corner(1,-1,float(speckMask.width),float(speckMask.height)),

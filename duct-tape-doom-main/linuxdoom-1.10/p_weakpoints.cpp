@@ -133,6 +133,7 @@ void P_WeakpointRecordHealthLoss(const mobj_t *target,const mobj_t *source,int b
     }
     burst.directionX=dx;burst.directionY=dy;
     burst.tint=P_SevereBloodTint?P_SevereBloodTint(target):0;
+    burst.targetType=target->type;
     burst.seed=++severeSerial;
     if(!shotId)emitSevereHit(burst);
     else if(severeCount<severeHits.size())severeHits[severeCount++]={id,after,burst};

@@ -238,5 +238,10 @@ Inferno,Hell sky moon - change the sun on Hell skies maps like environment to a 
 Check if Foggy deimous like atmosphere can also hide the decorations to affect and make it more immersion - need img ref-
 
 
+Improved Chainsaw : 
+part of our - monster_weapon_vulnerabilities - add High damage on Pinkdemons and spectre
+Very bloody improvement when it used on Pinkdemons and spectre - it will create a deep and bloody cut on middle to visual improve immersion of a serrating weapon on the monster.
+for small monster : zombieman,shotgunguy,heavy duke - it will be only much more blood splash and spread around.
+
 
 https://doom.fandom.com/wiki/Thing_types
