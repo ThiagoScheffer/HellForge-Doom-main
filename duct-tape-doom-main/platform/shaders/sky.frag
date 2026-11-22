@@ -9,6 +9,7 @@ layout(set=2,binding=0) uniform sampler2D image;
 layout(set=2,binding=1) uniform sampler2D palette;
 // Milestone A: share the existing deterministic cloud noise texture with mist.
 layout(set=2,binding=2) uniform sampler2D skyCloudPattern;
+layout(set=2,binding=3) uniform sampler2D skyDepthArt;
 layout(std140,set=3,binding=0) uniform Camera CAMERA_BLOCK c;
 layout(std140,set=3,binding=1) uniform Lights FLASH_BLOCK;
 layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
@@ -26,6 +27,11 @@ layout(location=0) out vec4 outColor;
 #include "sky_horizon.glsl"
 #include "sky_immersion.glsl"
 #include "sky_eclipse.glsl"
+#include "sky_depth.glsl"
+vec3 skyAir(vec3 color,vec3 low,float amount) {
+    float luma=dot(color,vec3(0.299,0.587,0.114));
+    return mix(color,mix(vec3(luma),low,0.6),amount);
+}
 void main() {
     vec2 size=vec2(textureSize(image,0));
 #ifdef SURFACE
@@ -53,7 +59,11 @@ void main() {
         soft+=indexed(image,palette,vec2(uv.x+o.x,clamp(uv.y+o.y,0.5,size.y-0.5)),filtered,true).rgb;
     }
     color.rgb=mix(color.rgb,soft/4.0,0.6);
-    color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
+    float depthMode=skyEnvironment.w;
+    float foregroundMask=0.0;
+    vec3 foreground=color.rgb;
+    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,foregroundMask);
+    else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
     // The sky's own low-row color, the tint of air at the horizon.
     vec3 low=vec3(0);
     for(int i=0;i<8;++i)
@@ -62,8 +72,7 @@ void main() {
     // Aerial perspective: contrast and saturation fall toward the horizon,
     // pulled toward a grey-tinted mix of that low color. Restrained overall.
     float air=0.12+0.33*(1.0-smoothstep(0.0,0.6,rise));
-    float luma=dot(color.rgb,vec3(0.299,0.587,0.114));
-    color.rgb=mix(color.rgb,mix(vec3(luma),low,0.6),air);
+    color.rgb=skyAir(color.rgb,low,air);
     // High-altitude haze in the sky's own upper-row color hides the clamped,
     // stretched top rows. It begins just above the frame top when looking
     // level and is opaque a little past the painted edge.
@@ -82,6 +91,12 @@ void main() {
     // silhouettes meet a soft band rather than a hard painted edge.
     if(c.materials.z>0.0&&c.effects.z==0.0)
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
+    if(foregroundMask>0.0) {
+        foreground=skyAir(foreground,low,air);
+        foreground=mix(foreground,low,smoothstep(0.88,1.02,v));
+        if(c.materials.z>0.0&&c.effects.z==0.0)
+            foreground=mix(foreground,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
+    }
     // D1/2: negative style.w encodes episode/profile and themed-lightning
     // switch without adding a Camera field. Inferno [-3,-1], Deimos [-5,-3].
     // E1+: non-overlapping 2-wide ranges, reserved through Doom II SKY3.
@@ -122,13 +137,13 @@ void main() {
     int hfMode=int(skyEnvironment.x+0.5);
     bool eclipse=skyEnvironment.z>0.0;
     // The eclipse sits behind the existing skyline and cloud decks.
-    if(eclipse)color.rgb=hellBloodEclipse(ray,color.rgb);
-    bool citySmoke=city||hfMode==5||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
+    if(eclipse)color.rgb=hellBloodEclipse(ray,color.rgb,depthMode==4.0);
+    bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
-    if(hfMode>=2 && hfMode<=5) {
-        color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
-        if(hfMode!=5)color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
+    if(hfMode>=2 && hfMode<=5 && foregroundMask<1.0) {
+        if(depthMode==0.0)color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
+        if(hfMode!=5&&depthMode!=3.0)color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
         // E1 Starport: existing clouds become slightly heavier at sundown.
         // No new layers or extra texture lookups are required.
         if(starport)color.rgb=mix(color.rgb,vec3(.23,.185,.14),
@@ -145,7 +160,7 @@ void main() {
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
     }
-    if(citySmoke) {
+    if(citySmoke&&foregroundMask<1.0) {
         float smokeCover;
         color.rgb=burningCitySmoke(ray,angle,color.rgb,smokeCover);
         cloudCover=1.0-(1.0-cloudCover)*(1.0-smokeCover);
@@ -154,7 +169,7 @@ void main() {
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
     // disc and a wide glow in its tint. Smooth, like the softened sky around
     // it; a dither here shimmers over a large part of the sky.
-    if(!eclipse&&c.fx2.w>0.0) {
+    if(!eclipse&&c.fx2.w>0.0&&foregroundMask<1.0) {
         vec3 toward=vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
         float a=acos(clamp(dot(ray,toward),-1.0,1.0));
         float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;
@@ -164,6 +179,9 @@ void main() {
         float amount=saturate(disc*0.75+glow)*c.fx2.w*transmission;
         color.rgb=mix(color.rgb,max(color.rgb,c.sun.rgb),saturate(disc*c.fx2.w*transmission))+c.sun.rgb*amount*(1.0-disc*0.5);
     }
+    // Restore the fixed, painted foreground after both celestial and cloud
+    // layers. Weather in front of the artwork still uses the original path.
+    if(foregroundMask>0.0)color.rgb=mix(color.rgb,foreground,foregroundMask);
     // Far rain: weather.cpp drops rain only in the map's open sectors near
     // the eye, and the sky (ceilings and the band over lower neighbors
     // included) hides everything past it, so the rain would end at the

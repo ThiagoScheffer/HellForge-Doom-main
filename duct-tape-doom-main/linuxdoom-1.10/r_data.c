@@ -184,6 +184,21 @@ boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4])
     return true;
 }
 
+boolean R_TextureFromBaseWad(int texture)
+{
+    if (texture < 0 || texture >= numtextures) return false;
+    int handle = lumpinfo[0].handle;
+    int second = W_CheckNumForName("TEXTURE2");
+    if (handle < 0 || lumpinfo[W_GetNumForName("TEXTURE1")].handle != handle ||
+        lumpinfo[W_GetNumForName("PNAMES")].handle != handle ||
+        (second >= 0 && lumpinfo[second].handle != handle))
+        return false;
+    const texture_t *tex = textures[texture];
+    for (int i = 0; i < tex->patchcount; ++i)
+        if (lumpinfo[tex->patches[i].patch].handle != handle) return false;
+    return true;
+}
+
 void R_CopyIndexedTexture(int texture, byte *pixels)
 {
     texture_t *tex = textures[texture];

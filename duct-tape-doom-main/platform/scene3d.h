@@ -153,6 +153,7 @@ struct Settings {
     int infernoTreeStrikes=1; // D3: cosmetic, sky-exposed burnt-tree strikes in Inferno; no damage.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int hellBloodEclipse=0;
+    int artworkSkyDepth=0;
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.
     int decorationDelay=1; // 0 Short, 1 Normal, 2 Long.
@@ -258,7 +259,8 @@ struct Settings {
 // glassFrame: on textures with monitor screens, where each glass pixel sits
 // on its screen (see screen_glass.h); null otherwise. relief: on walls and
 // flats, the bump slope and grain the shader shades them with (withRelief).
-struct Image { bool opaque=true,stockHellSky=false; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
+enum class SkyArtwork { Unknown, ColdMountains, RedMountains, Inferno, OrangeClouds, BrownClouds, BurningCity, BloodHell, Count };
+struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
 
 // Frame profiling for the performance smoke test (I_Render3DProfile).
 struct Profile { bool enabled=false; unsigned skip=0; const char *screenshotPath=nullptr; I_Render3DFrameProfile frame={}; };
@@ -356,6 +358,8 @@ void applySettings();
 void settingsChanged();
 void buildCloudTexture();
 Image &wallImage(int index);
+bool skyDepthCloudOnly(SkyArtwork artwork);
+const GpuTextureRef &skyDepthTexture(const Image &sky);
 Image &lumpImage(int lump,bool flat);
 // Builds the camera, layout and (when the world is visible) all geometry and lights.
 FrameView prepareFrame(int width,int height);

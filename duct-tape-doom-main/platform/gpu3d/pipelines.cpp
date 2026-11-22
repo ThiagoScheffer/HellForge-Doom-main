@@ -103,7 +103,7 @@ bool createPipelines() {
     screenVertexShader=VERTEX_SHADER(screen_vert,0);skyVertexShader=VERTEX_SHADER(sky_vert,0);
     SDL_GPUShader *world=FRAGMENT_SHADER(world_frag,16,2,4),*opaque=FRAGMENT_SHADER(opaque_frag,16,2,4);
     SDL_GPUShader *cutout=FRAGMENT_SHADER(cutout_frag,16,2,4),*coverage=FRAGMENT_SHADER(coverage_frag,16,2,4);
-    SDL_GPUShader *sky=FRAGMENT_SHADER(sky_frag,3,0,4),*skySurface=FRAGMENT_SHADER(sky_surface_frag,3,0,4),*shadow=FRAGMENT_SHADER(shadow_frag,1,0,0),*decal=FRAGMENT_SHADER(decal_frag,1,0,0);
+    SDL_GPUShader *sky=FRAGMENT_SHADER(sky_frag,4,0,4),*skySurface=FRAGMENT_SHADER(sky_surface_frag,4,0,4),*shadow=FRAGMENT_SHADER(shadow_frag,1,0,0),*decal=FRAGMENT_SHADER(decal_frag,1,0,0);
     SDL_GPUShader *particle=FRAGMENT_SHADER(particle_frag,0,0,0),*solid=FRAGMENT_SHADER(solid_frag,0,0,0),*hud=FRAGMENT_SHADER(hud_frag,1,0,0);
     SDL_GPUShader *heat=FRAGMENT_SHADER(heat_frag,0,0,0),*glass=FRAGMENT_SHADER(glass_frag,4,1,4);
     SDL_GPUShader *emission=FRAGMENT_SHADER(emission_frag,5,1,2),*blur=FRAGMENT_SHADER(blur_frag,1,0,1);

@@ -49,6 +49,7 @@ void R_TextureDimensions(int texture, int *width, int *height);
 void R_TextureName(int texture, char name[9]);
 // Returns the named patch and its clipped texture-space bounds (left, top, right, bottom).
 boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4]);
+boolean R_TextureFromBaseWad(int texture);
 void R_CopyIndexedTexture(int texture, byte *index_and_alpha);
 
 

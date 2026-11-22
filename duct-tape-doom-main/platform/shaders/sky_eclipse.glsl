@@ -1,7 +1,9 @@
-vec3 hellBloodEclipse(vec3 ray,vec3 sky) {
-    // Fixed celestial direction: east, 29 degrees above the horizon.
-    const vec3 center=vec3(0.874620,0.0,0.484810);
-    const vec3 up=vec3(-0.484810,0.0,0.874620);
+vec3 hellBloodEclipse(vec3 ray,vec3 sky,bool bloodHellRidge) {
+    // M1 uses east at 29 degrees. On layered Blood Hell artwork, use a
+    // fixed heading over the painted central ridge to show the depth.
+    vec3 center=bloodHellRidge?vec3(0.566719,-0.725368,0.390731):vec3(0.874620,0.0,0.484810);
+    vec3 up=bloodHellRidge?vec3(-0.240558,0.307900,0.920505):vec3(-0.484810,0.0,0.874620);
+    vec3 right=bloodHellRidge?vec3(0.788011,0.615661,0.0):vec3(0.0,1.0,0.0);
     const float radius=0.131; // Chord radius, approximately 15 degrees across.
     float distanceSquared=2.0-2.0*dot(ray,center);
     // Evaluate derivatives before the spatial cutoff.
@@ -17,7 +19,7 @@ vec3 hellBloodEclipse(vec3 ray,vec3 sky) {
 
     // Integer angular frequencies meet across the angle wrap. Independent,
     // slow phase changes give the rim motion without rotating the disc.
-    float angle=atan(dot(ray,up),ray.y);
+    float angle=atan(dot(ray,up),dot(ray,right));
     float time=c.fog.w;
     float uneven=sin(5.0*angle+0.35*sin(time*0.21))+0.45*sin(13.0*angle-time*0.18);
     float filament=pow(max(0.0,sin(9.0*angle+0.8*sin(4.0*angle)+time*0.15)),5.0);
