@@ -14,7 +14,10 @@ layout(std140,set=3,binding=0) uniform Camera CAMERA_BLOCK c;
 layout(std140,set=3,binding=1) uniform Lights FLASH_BLOCK;
 layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // Runtime F4 mode, passed on sky fragment uniform slot 3 for all sky passes.
-layout(std140,set=3,binding=3) uniform HellforgeSky { vec4 skyEnvironment; };
+layout(std140,set=3,binding=3) uniform HellforgeSky {
+    vec4 skyEnvironment;
+    float atmosphericArtwork;
+};
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
 // The flashlight beam ends at geometry; through the sky it would gather its
@@ -31,6 +34,9 @@ layout(location=0) out vec4 outColor;
 vec3 skyAir(vec3 color,vec3 low,float amount) {
     float luma=dot(color,vec3(0.299,0.587,0.114));
     return mix(color,mix(vec3(luma),low,0.6),amount);
+}
+vec3 skySunDirection() {
+    return vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
 }
 void main() {
     vec2 size=vec2(textureSize(image,0));
@@ -60,10 +66,12 @@ void main() {
     }
     color.rgb=mix(color.rgb,soft/4.0,0.6);
     float depthMode=skyEnvironment.w;
+    int cloudProfile=int(atmosphericArtwork);
     float foregroundMask=0.0;
     vec3 foreground=color.rgb;
-    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,foregroundMask);
+    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,foregroundMask);
     else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
+    vec3 cloudArt=color.rgb;
     // The sky's own low-row color, the tint of air at the horizon.
     vec3 low=vec3(0);
     for(int i=0;i<8;++i)
@@ -82,7 +90,9 @@ void main() {
         for(int i=0;i<8;++i)
             for(int j=0;j<2;++j)
                 cap+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*(0.03+0.08*float(j))),false,true).rgb;
-        color.rgb=mix(color.rgb,cap/16.0,high);
+        cap/=16.0;
+        color.rgb=mix(color.rgb,cap,high);
+        if(cloudProfile>0)cloudArt=mix(cloudArt,cap,high);
     }
     // Past the painted bottom edge, fade into the low color the same way so
     // the clamped bottom row doesn't streak when looking down from a ledge.
@@ -141,7 +151,21 @@ void main() {
     bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
-    if(hfMode>=2 && hfMode<=5 && foregroundMask<1.0) {
+    if(cloudProfile>0&&foregroundMask<1.0) {
+        vec3 eclipseCenter=eclipse?bloodEclipseCenter(depthMode==4.0):vec3(0.0);
+        vec3 key=eclipse?eclipseCenter:c.sun.w>0.0?skySunDirection():vec3(0.56,-0.45,0.69);
+        vec3 stormLight=vec3(0.0);
+        if(c.weather.w>0.0) {
+            // Scatter near the active strike. The existing broad flash
+            // later in the shader still handles diffuse sky illumination.
+            float halo=hellforgeBoltHalo(angle,rise,c.style.y);
+            vec3 scatter=crimson?vec3(.37,.065,.075):
+                         coldElectrical?vec3(.20,.33,.41):vec3(.18,.23,.34);
+            stormLight=scatter*(c.weather.w*halo*0.70);
+        }
+        color.rgb=atmosphericCloudDecks(ray,angle/6.2831853,color.rgb,cloudArt,cloudProfile,
+                                        key,eclipseCenter,stormLight,cloudCover);
+    } else if(hfMode>=2 && hfMode<=5 && foregroundMask<1.0) {
         if(depthMode==0.0)color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
         if(hfMode!=5&&depthMode!=3.0)color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
         // E1 Starport: existing clouds become slightly heavier at sundown.
@@ -160,7 +184,7 @@ void main() {
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
     }
-    if(citySmoke&&foregroundMask<1.0) {
+    if(cloudProfile==0&&citySmoke&&foregroundMask<1.0) {
         float smokeCover;
         color.rgb=burningCitySmoke(ray,angle,color.rgb,smokeCover);
         cloudCover=1.0-(1.0-cloudCover)*(1.0-smokeCover);
@@ -170,7 +194,7 @@ void main() {
     // disc and a wide glow in its tint. Smooth, like the softened sky around
     // it; a dither here shimmers over a large part of the sky.
     if(!eclipse&&c.fx2.w>0.0&&foregroundMask<1.0) {
-        vec3 toward=vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
+        vec3 toward=skySunDirection();
         float a=acos(clamp(dot(ray,toward),-1.0,1.0));
         float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;
         // The visible sun sits behind moving cloud layers, while baked

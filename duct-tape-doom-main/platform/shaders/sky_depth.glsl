@@ -12,7 +12,7 @@ vec3 depthCloudColor(vec2 uv,ivec2 size) {
     return mix(depthColorAt(at,size),depthColorAt(at+ivec2(1,0),size),fract(x));
 }
 
-vec3 artworkSkyLayers(vec3 painted,vec2 uv,vec2 size,float mode,out float foreground) {
+vec3 artworkSkyLayers(vec3 painted,vec2 uv,vec2 size,float mode,bool atmospheric,out float foreground) {
     foreground=0.0;
     float roomToMove=1.0;
     if(mode>=2.0) {
@@ -28,9 +28,17 @@ vec3 artworkSkyLayers(vec3 painted,vec2 uv,vec2 size,float mode,out float foregr
     }
     float altitude=1.0-uv.y/size.y;
     float t=c.fog.w;
-    float slow=0.72*sin(t*0.17);
-    float mid=1.16*sin(t*0.31+(altitude-0.5)*2.1)-1.16*sin((altitude-0.5)*2.1);
-    float drift=(slow+mid*(1.0-smoothstep(0.20,0.90,altitude)))*roomToMove;
+    float drift;
+    if(atmospheric) {
+        // Ease the painted forms independently of the advected noise decks.
+        // The integer longitude repeat wraps with the original panorama.
+        float phase=uv.x/size.x*6.2831853+altitude*2.7;
+        drift=roomToMove*(0.65*sin(t*0.10)+0.72*sin(phase+t*0.15));
+    } else {
+        float slow=0.72*sin(t*0.17);
+        float mid=1.16*sin(t*0.31+(altitude-0.5)*2.1)-1.16*sin((altitude-0.5)*2.1);
+        drift=(slow+mid*(1.0-smoothstep(0.20,0.90,altitude)))*roomToMove;
+    }
     // Apply only the difference between the two samples. With zero drift
     // the sky retains its existing palette and filtering exactly.
     vec3 still=depthCloudColor(uv,ivec2(size));

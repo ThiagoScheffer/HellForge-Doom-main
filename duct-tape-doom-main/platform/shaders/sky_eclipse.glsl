@@ -1,7 +1,10 @@
+vec3 bloodEclipseCenter(bool bloodHellRidge) {
+    return bloodHellRidge?vec3(0.566719,-0.725368,0.390731):vec3(0.874620,0.0,0.484810);
+}
 vec3 hellBloodEclipse(vec3 ray,vec3 sky,bool bloodHellRidge) {
     // M1 uses east at 29 degrees. On layered Blood Hell artwork, use a
     // fixed heading over the painted central ridge to show the depth.
-    vec3 center=bloodHellRidge?vec3(0.566719,-0.725368,0.390731):vec3(0.874620,0.0,0.484810);
+    vec3 center=bloodEclipseCenter(bloodHellRidge);
     vec3 up=bloodHellRidge?vec3(-0.240558,0.307900,0.920505):vec3(-0.484810,0.0,0.874620);
     vec3 right=bloodHellRidge?vec3(0.788011,0.615661,0.0):vec3(0.0,1.0,0.0);
     const float radius=0.131; // Chord radius, approximately 15 degrees across.

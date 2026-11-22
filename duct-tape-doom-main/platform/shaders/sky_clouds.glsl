@@ -3,6 +3,8 @@
 // samples in two planes and a sparse third puff scale. Clouds are cosmetic and
 // inherit sky colors; there is no new sun lighting or lighting-cache change.
 
+#include "sky_artwork.h"
+
 float hellforgeCloudPattern(vec2 uv) {
     float broad=texture(skyCloudPattern,uv).r;
     float detail=texture(skyCloudPattern,uv*2.37+vec2(0.37,0.19)).r;
@@ -78,4 +80,110 @@ vec3 hellforgeCloudDecks(vec3 ray,vec3 skyColor,vec3 horizonColor,
     result=mix(result,mix(highTint,shadedTint,0.45),small*(1.0-low));
     cloudCover=1.0-(1.0-high)*(1.0-low)*(1.0-small);
     return result;
+}
+// Extend the existing decks with the same periodic noise texture. The
+// painted sky seeds both density and tint before celestial effects go in.
+vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profile,
+                           vec3 key,vec3 eclipseCenter,vec3 stormLight,out float cover) {
+    cover=0.0;
+    bool city=profile==SKY_ART_BURNING_CITY;
+    float height=ray.z;
+    float visible=smoothstep(-0.06,city?0.12:0.24,height)*(1.0-smoothstep(0.73,0.91,height));
+    if(visible<=0.0)return sky;
+
+    float t=c.fog.w;
+    vec2 wind=abs(c.weather.y)+abs(c.weather.z)>0.001?normalize(c.weather.yz):vec2(0.95,0.31);
+    float along=dot(wind,vec2(0.95,0.31));
+    vec2 farUV=vec2(longitude*3.0-along*t*0.004,height*1.8+t*0.001);
+    vec2 midUV=vec2(longitude*5.0+along*t*0.007,height*2.8)+vec2(0.19,0.63);
+    vec2 nearUV=vec2(longitude*8.0-along*t*0.010,height*4.2)+vec2(0.61,0.09);
+    if(city) {
+        // Sampling downward advects the smoke upward. The near bank rises
+        // a little faster and thins above the painted fires.
+        midUV.y-=t*0.016;
+        nearUV.y-=t*0.026;
+    } else if(profile==SKY_ART_INFERNO||profile==SKY_ART_BLOOD_HELL) {
+        midUV.y+=sin(longitude*12.566371+t*0.19)*0.065;
+        nearUV.y+=sin(longitude*18.849556-t*0.14)*0.085;
+    } else if(profile==SKY_ART_BROWN_CLOUDS) {
+        midUV.y+=sin(longitude*18.849556+t*0.14)*0.075;
+    }
+
+    float farField=textureLod(skyCloudPattern,farUV,0.0).r;
+    float middle=textureLod(skyCloudPattern,midUV,0.0).r;
+    float detail=textureLod(skyCloudPattern,nearUV,0.0).r;
+    float fine=smoothstep(0.08,0.30,height)*smoothstep(0.8,1.5,c.fx2.x);
+    float luma=dot(art,vec3(0.299,0.587,0.114));
+    float warm=max(0.0,art.r-art.b);
+    float painted=smoothstep(0.14,0.58,luma);
+    vec3 tint=vec3(0.37,0.42,0.51);
+    vec3 illumination=vec3(0.76,0.80,0.89);
+    float thickness=0.92;
+    switch(profile) {
+        case SKY_ART_RED_MOUNTAINS:
+            tint=vec3(.35,.11,.13); illumination=vec3(.81,.34,.30); thickness=1.16;
+            painted=smoothstep(.10,.57,luma*.55+warm*.65);
+            break;
+        case SKY_ART_INFERNO:
+        case SKY_ART_BLOOD_HELL:
+            tint=vec3(.29,.063,.080); illumination=vec3(.71,.21,.19); thickness=1.12;
+            painted=smoothstep(.10,.56,luma*.50+warm*.65);
+            break;
+        case SKY_ART_ORANGE_CLOUDS:
+            tint=vec3(.44,.24,.12); illumination=vec3(.92,.58,.30); thickness=1.14;
+            break;
+        case SKY_ART_BROWN_CLOUDS:
+            tint=vec3(.36,.30,.26); illumination=vec3(.78,.67,.53); thickness=1.06;
+            break;
+        case SKY_ART_BURNING_CITY:
+            tint=vec3(.31,.26,.24); illumination=vec3(.91,.40,.14);
+            painted=smoothstep(.11,.60,luma*.65+warm*.60);
+            break;
+    }
+
+    // Artwork carries the large shapes. Broad fields overlap their centers
+    // softly, while the weaker upper and near banks may drift independently.
+    float density=0.59*middle+0.27*farField+0.14*mix(0.5,detail,fine);
+    float bias=mix(-0.074,0.10,painted);
+    float core=smoothstep(0.38,0.76,density+bias);
+    float far=0.25*smoothstep(0.44,0.80,farField+bias*0.72);
+    float mid=0.71*core;
+    float near=0.19*smoothstep(0.51,0.83,detail*0.64+middle*0.36+bias)*fine;
+    if(city) {
+        float smokeBand=1.0-smoothstep(0.25,0.65,height);
+        far*=0.32*smokeBand;
+        mid*=0.58*smokeBand;
+        near*=0.70*smokeBand;
+    }
+    far*=visible;
+    mid=clamp(mid*visible*thickness,0.0,1.0);
+    near*=visible;
+    cover=1.0-(1.0-far)*(1.0-mid)*(1.0-near);
+    if(cover<0.002)return sky;
+
+    // Project the light onto the panorama and probe the middle field
+    // twice toward it. The soft shadow is stronger where both probes
+    // encounter dense cloud, with a highlight on a locally exposed edge.
+    vec3 across=vec3(-ray.y,ray.x,0.0)/max(length(ray.xy),0.0001);
+    vec2 toward=vec2(dot(key,across),key.z-height*dot(key,ray));
+    vec2 offset=vec2(0.20,0.18)*toward;
+    float front=textureLod(skyCloudPattern,midUV+offset,0.0).r;
+    float deeper=textureLod(skyCloudPattern,midUV+offset*2.0,0.0).r;
+    float shadow=smoothstep(0.37,0.78,0.50*front+0.32*deeper+0.18*middle+bias);
+    float exposed=smoothstep(0.015,0.22,middle-front)*(1.0-shadow);
+    float sun=max(c.sun.w,0.0)*(0.18+0.82*smoothstep(-0.12,0.82,dot(ray,key)));
+    float heat=city?painted*(1.0-smoothstep(0.14,0.62,height)):0.0;
+    float corona=smoothstep(0.961,0.995,dot(ray,eclipseCenter));
+    vec3 pigment=mix(art,tint,city?0.56:0.34);
+    // Thin red vapor crossing the disc should read as a cloud, without
+    // projecting the detailed painted skulls onto the eclipse itself.
+    pigment=mix(pigment,tint,0.63*corona);
+    vec3 lit=pigment*(1.02-0.37*shadow)+illumination*(0.032+exposed*(0.13+0.10*sun));
+    lit+=illumination*heat*(0.05+0.12*exposed)
+        +c.sun.rgb*(sun*0.12*exposed)
+        +stormLight*(0.46+0.54*exposed)
+        +vec3(.19,.023,.017)*(corona*(.11+.15*exposed));
+    sky=mix(sky,mix(pigment,lit,0.44),far);
+    sky=mix(sky,lit,mid);
+    return mix(sky,lit*0.83,near);
 }
