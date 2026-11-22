@@ -247,6 +247,7 @@ bool monsterProjectileImpact(mobj_t *mo){
     return monsterProjectileSurfaceImpact(mo->type,x,y,z,n.x,n.y,n.z,mo);
 }
 void tickMonsterProjectileEffects(){
+    tickGreenImpactFires();
     resetMonsterProjectileEffects();
     for(auto &p:monsterProjectileMotes){++p.age;p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;p.vz+=p.az;p.size+=p.growth;}
     monsterProjectileMotes.erase(std::remove_if(monsterProjectileMotes.begin(),monsterProjectileMotes.end(),[](const auto &p){
@@ -254,6 +255,7 @@ void tickMonsterProjectileEffects(){
     }),monsterProjectileMotes.end());
 }
 void drawMonsterProjectileEffects(const Uniforms &camera){
+    drawGreenImpactFires(camera);
     resetMonsterProjectileEffects();float now=gameSeconds();
     // Written after drawFluidEffects clears the shared batches, not from the
     // actor loop. Per-frame requests contain values, never actor/image pointers.

@@ -221,6 +221,7 @@ struct Settings {
     int spriteFiltering=0;
     int ambushSightReuse=0;
     int fluidWeapons=1,fluidSounds=1,fluidMonsters=1;
+    int greenImpactFire=0;
     int revenantSoulRelease=0;
     int fluidRocketFire=1;
     int fluidFiringSmoke=1,fluidReloadSmoke=1,fluidHotSmoke=1,fluidSmokeBio=0,fluidIndoorSmoke=0;

@@ -667,6 +667,8 @@ void tickImpactParticles();
 void fluidProjectileFlight(const mobj_t &thing);
 void fluidRocketLaunch(mobj_t *source);
 void fluidProjectileImpact(mobj_t *thing);
+void collectGreenImpactFireLights(const Uniforms &camera);
+void resetGreenImpactFire();
 void beginMonsterProjectileFrame();
 bool monsterProjectileVisual(const mobj_t &thing,const Uniforms &camera,float fraction);
 bool monsterProjectileFxManaged(int type);

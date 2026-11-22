@@ -153,6 +153,7 @@ static void acceleratedView(player_t *player) {
     }
 }
 void applySettings() {
+    if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
     R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();

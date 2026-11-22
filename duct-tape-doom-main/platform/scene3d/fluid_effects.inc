@@ -304,6 +304,7 @@ static void rocketRoomSmoke(mobj_t *mo){
     }
 }
 void fluidProjectileImpact(mobj_t *mo) {
+    tryGreenImpactFire(mo);
     // Suppress every enhanced impact path (including liquid splashes) for
     // distant monster shots and monster-vs-monster infighting.
     if(mo&&monsterProjectileFxManaged(mo->type)&&!monsterProjectileFxEligible(*mo)){

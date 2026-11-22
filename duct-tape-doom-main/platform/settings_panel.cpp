@@ -426,6 +426,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("texel_lighting","Texel-aligned baked light",&s.texelLight,
                     "Baked lights, sun patches and bounce blend smoothly but step per texture pixel, instead of in hard 4-5 unit map cells.")}},
             {"Live light",{
+                check("green_impact_fire","Infernal green fire impacts",&s.greenImpactFire,
+                    "Hell Knight and Baron fireballs leave temporary green flames on walls and floors. Active only on maps with fewer than 200 monsters."),
                 check("soft_light","Light seams and contact shading",&s.softLight,"Blend sector light across openings and darken floors along walls."),
                 check("light_flow","Sector light flow",&s.lightFlow,
                     "Brighter rooms light the floors and walls beyond their openings; flickering rooms flicker faintly next door."),

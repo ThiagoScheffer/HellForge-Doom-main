@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="8e734ab76a999c68a1f8177aaf35535033f989bfbf557aeb0c6997eb69a3b8ca">
+<settings source="platform/settings_panel.cpp" source_sha256="a23929f222d82bdde7afdfab03044f612ab3d3d30a010485045ebd45191940db">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -150,6 +150,7 @@
   <option key="baked_occlusion" title="Ambient occlusion" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="decoration_shadows" title="Decoration shadows" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="texel_lighting" title="Texel-aligned baked light" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="green_impact_fire" title="Infernal green fire impacts" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="soft_light" title="Light seams and contact shading" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="light_flow" title="Sector light flow" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="door_light" title="Door light spill" category="Lighting" kind="check" choices="0=Off|1=On" />

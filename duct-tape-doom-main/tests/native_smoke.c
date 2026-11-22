@@ -1565,6 +1565,10 @@ void I_TestFrame(void)
         if(frame==8)I_Render3DScreenshotTo("destruction-menu.png");
         if(frame==10){puts("PASS environment and destruction menu render");I_Quit();}return;
     }
+    if(getenv("DOOM_TEST_GREEN_FIRE")){
+        if(gamestate!=GS_LEVEL||gametic<25)return;
+        extern void I_TestGreenImpactFire(void);I_TestGreenImpactFire();I_Quit();return;
+    }
     if(getenv("DOOM_TEST_SOLID_PUFF")){
         if(gamestate!=GS_LEVEL||gametic<25)return;
         extern void I_TestElectricalFaults(void);I_TestElectricalFaults();

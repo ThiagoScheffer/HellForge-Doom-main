@@ -9,6 +9,7 @@ extern "C" {
 extern "C" {
 #include "p_solid.h"
 #include "p_arena.h"
+extern int p_missile_hit_actor;
 }
 #include "../../../map_world.h"
 extern const lab::MapWorld *SV_MapWorld();
@@ -85,11 +86,162 @@ bool wallSpan(const line_t &line,int side,int section,WallSpan &span) {
 }
 #include "impact_particles.inc"
 #include "surface_glow.inc"
+static void tryGreenImpactFire(const mobj_t *mo);
+static void clearGreenImpactFires();
+static void tickGreenImpactFires();
+static void drawGreenImpactFires(const Uniforms &camera);
 #include "fluid_effects.inc"
 #include "monster_projectiles.inc"
 #include "vile_effects.inc"
 #include "revenant_soul.inc"
 #include "environment_reactions.inc"
+
+// Surface fire is independent of the Fluid Monsters projectile effects.
+constexpr float greenFireLife=2.5f, greenFireRange=640.f, greenFloorRadius=20.f;
+constexpr size_t greenFireLimit=16;
+enum class GreenSurface { Floor, Wall };
+struct GreenFire {
+    GreenSurface surface; float x,y,z,nx,ny,born,along,relativeZ;
+    int sector,line,side,section; uint32_t seed; unsigned revision;
+};
+static std::vector<GreenFire> greenFires;
+static unsigned greenFireLevel=~0u,greenFireSerial=0;
+static bool greenFireEnabled() {
+    return settings.accelerated&&settings.greenImpactFire&&gamestate==GS_LEVEL&&
+           totalkills<200&&!netgame&&!demoplayback&&!demorecording;
+}
+static void clearGreenImpactFires() {greenFires.clear();greenFireLevel=r_levelserial;}
+void resetGreenImpactFire() {clearGreenImpactFires();}
+static float greenFireFade(float age) {
+    float t=std::clamp((age/greenFireLife-.6f)/.4f,0.f,1.f);
+    return 1-t*t*(3-2*t);
+}
+static bool greenFireSupport(GreenFire &f) {
+    if(f.sector<0||f.sector>=numsectors)return false;
+    const auto *world=SV_MapWorld();unsigned revision=world?world->revision():0;
+    if(f.surface==GreenSurface::Floor) {
+        const sector_t *sector=&sectors[f.sector];
+        if(sector->floorpic==skyflatnum||sectorMist.size()!=size_t(numsectors)||sectorMist[f.sector].liquid||
+           std::abs(floorZ(sector)-f.z)>.1f)return false;
+        if(revision!=f.revision&&!moltenFloorSupported(f.x,f.y,f.z,greenFloorRadius,sector))return false;
+    } else {
+        if(f.line<0||f.line>=numlines)return false;
+        WallSpan span;if(!wallSpan(lines[f.line],f.side,f.section,span)||span.texture<=0||span.texture==skytexture)return false;
+        float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy),z=span.anchor+f.relativeZ;
+        if(len<1||f.along<0||f.along>len||z<span.bottom+1||z>span.top-1)return false;
+        f.x=span.a.x+dx/len*f.along;f.y=span.a.y+dy/len*f.along;f.z=z;f.nx=dy/len;f.ny=-dx/len;
+        if(revision!=f.revision&&(SV_Edited(f.x,f.y,z)||SV_Edited(f.x,f.y,z+2)))return false;
+    }
+    f.revision=revision;return true;
+}
+static void tickGreenImpactFires() {
+    if(greenFireLevel!=r_levelserial||!greenFireEnabled()){clearGreenImpactFires();return;}
+    float now=gameSeconds();
+    greenFires.erase(std::remove_if(greenFires.begin(),greenFires.end(),[&](GreenFire &f){
+        return now<f.born||now-f.born>=greenFireLife||!greenFireSupport(f);
+    }),greenFires.end());
+}
+static void addGreenFire(GreenFire f,float now) {
+    for(auto &old:greenFires)if(old.surface==f.surface&&old.sector==f.sector&&
+        (f.surface==GreenSurface::Floor||(old.line==f.line&&old.side==f.side&&old.section==f.section))&&
+        std::hypot(old.x-f.x,old.y-f.y)<12&&std::abs(old.z-f.z)<12){old.born=now;return;}
+    if(greenFires.size()>=greenFireLimit)greenFires.erase(greenFires.begin());
+    f.born=now;f.seed=hash32(++greenFireSerial^uint32_t(leveltime)*2654435761u^r_levelserial);
+    greenFires.push_back(f);
+}
+static void tryGreenImpactFire(const mobj_t *mo) {
+    if(greenFireLevel!=r_levelserial)clearGreenImpactFires();
+    if(!mo||mo->type!=MT_BRUISERSHOT||!(mo->flags&MF_MISSILE)||!greenFireEnabled()||!mo->subsector)return;
+    float x=units(mo->x),y=units(mo->y),z=units(mo->z),oldX,oldY,oldZ;
+    if(!monsterProjectileNearPlayer(x,y,z))return;
+    interpolatedPosition(*mo,0,oldX,oldY,oldZ);
+    GreenFire f{};f.line=-1;f.sector=int(mo->subsector->sector-sectors);
+    if(f.sector<0||f.sector>=numsectors||sectorMist.size()!=size_t(numsectors))return;
+    // Ambiguous contacts are skipped, even near a floor or wall.
+    if(p_missile_hit_actor)return;
+    const auto *world=SV_MapWorld();f.revision=world?world->revision():0;
+    if(mo->z==mo->floorz&&mo->momz==0&&oldZ>units(mo->floorz)+.5f) {
+        const sector_t *sector=&sectors[f.sector];float floor=floorZ(sector);
+        if(sector->floorpic==skyflatnum||sectorMist[f.sector].liquid||std::abs(z-floor)>2||
+           !moltenFloorSupported(x,y,floor,greenFloorRadius,sector))return;
+        f.surface=GreenSurface::Floor;f.x=x;f.y=y;f.z=floor;
+    } else {
+        // The engine records actor collisions during the failed XY move.
+        // Never infer a wall solely from a projectile's velocity.
+        if(mo->z+mo->height>=mo->ceilingz-FRACUNIT)return;
+        float dx=units(mo->momx),dy=units(mo->momy),length=std::hypot(dx,dy);
+        if(length<.01f)return;dx/=length;dy/=length;
+        float center=z+units(mo->height)*.5f;WallHit hit;
+        if(!firstSolidWall(x,y,center,dx,dy,0,length+units(mo->radius)+2,hit)||hit.line<0||hit.line>=numlines)return;
+        WallSpan span;if(!wallSpan(lines[hit.line],hit.side,hit.section,span)||span.texture<=0||span.texture==skytexture)return;
+        float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
+        if(len<2||center<span.bottom+1||center>span.top-1)return;
+        f.surface=GreenSurface::Wall;f.line=hit.line;f.side=hit.side;f.section=hit.section;
+        f.x=x+dx*hit.t;f.y=y+dy*hit.t;f.z=center;f.nx=ey/len;f.ny=-ex/len;
+        f.along=std::clamp(((f.x-span.a.x)*ex+(f.y-span.a.y)*ey)/len,0.f,len);
+        f.relativeZ=center-span.anchor;if(SV_Edited(f.x,f.y,center))return;
+    }
+    addGreenFire(f,gameSeconds());
+}
+void collectGreenImpactFireLights(const Uniforms &camera) {
+    if(!greenFireEnabled()||!settings.emissive||greenFireLevel!=r_levelserial)return;
+    std::vector<std::pair<float,const GreenFire*>> nearest;
+    for(const auto &f:greenFires){float age=gameSeconds()-f.born;if(age<0||age>=greenFireLife)continue;
+        float d=std::hypot(std::hypot(f.x-camera.eye[0],f.y-camera.eye[1]),f.z-camera.eye[2]);
+        if(d<=greenFireRange)nearest.push_back({d,&f});}
+    std::sort(nearest.begin(),nearest.end(),[](const auto &a,const auto &b){return a.first<b.first;});
+    for(size_t i=0;i<std::min(size_t(4),nearest.size());++i){const auto &f=*nearest[i].second;
+        float flicker=.65f+.35f*hashUnit(leveltime/2,0,f.seed);
+        appendLight(f.x+f.nx*4,f.y+f.ny*4,f.z+5,96,.65f*flicker*greenFireFade(gameSeconds()-f.born),
+                    projectileColor(monsterProjectileProfiles[4].palette[2]),nullptr,.5f);}
+}
+static void drawGreenImpactFires(const Uniforms &camera) {
+    if(!greenFireEnabled()||greenFireLevel!=r_levelserial)return;
+    float now=gameSeconds();const auto &palette=monsterProjectileProfiles[4].palette;
+    for(const auto &f:greenFires) {
+        float age=now-f.born;if(age<0||age>=greenFireLife||!monsterProjectileNearPlayer(f.x,f.y,f.z))continue;
+        float fade=greenFireFade(age),heightScale=.55f+.45f*fade,t=age*7+hashUnit(0,0,f.seed)*6;
+        if(f.surface==GreenSurface::Floor) {
+            projectileQuad(camera,{f.x,f.y,f.z+.15f},greenFloorRadius,greenFloorRadius,0,projectileColor(palette[0]),.7f*fade,false,false,true);
+            for(int i=0;i<6;++i) {
+                float a=i*(2.f*float(doomPi)/6),r=4+6*hashUnit(i,1,f.seed);
+                float h=(8+7*hashUnit(i,2,f.seed))*(.8f+.2f*std::sin(t+i*1.7f))*heightScale;
+                lab::Vec at{f.x+std::cos(a)*r,f.y+std::sin(a)*r,f.z+h*.5f};
+                projectileQuad(camera,at,3.5f,h*.6f,0,projectileColor(palette[1]),.65f*fade,false);
+                projectileQuad(camera,at,1.8f,h*.4f,0,projectileColor(palette[3+(i%3==0&&std::sin(t+i)>.5f)]),.7f*fade,true);
+            }
+        } else {
+            WallSpan span;if(!wallSpan(lines[f.line],f.side,f.section,span))continue;
+            float tx=-f.ny,ty=f.nx;int image=monsterSquareFireImage();
+            auto rect=[&](float cx,float bottom,float width,float height,const std::array<float,3> &color,float alpha,bool additive){
+                float left=std::max(-f.along,cx-width),right=std::min(std::hypot(span.b.x-span.a.x,span.b.y-span.a.y)-f.along,cx+width);
+                float low=std::max(span.bottom,bottom),high=std::min(span.top,bottom+height);if(left>=right||low>=high)return;
+                auto vertex=[&](float across,float z,float u,float v){Vertex out={f.x+tx*across+f.nx*.35f,f.y+ty*across+f.ny*.35f,z,u,v,alpha,0};out.red=color[0];out.green=color[1];out.blue=color[2];return out;};
+                auto &batch=additive?effectAddBatches[image]:decalBatches[image];
+                float u0=(left-(cx-width))/(2*width)*64,u1=(right-(cx-width))/(2*width)*64;
+                float v0=(bottom+height-high)/height*64,v1=(bottom+height-low)/height*64;
+                quad(batch,vertex(left,high,u0,v0),vertex(right,high,u1,v0),vertex(right,low,u1,v1),vertex(left,low,u0,v1));
+            };
+            // One layered impression, using the same rounded-square mask and
+            // colors as the monster projectile instead of separate flames.
+            float radius=14.f*(.96f+.04f*std::sin(t))*heightScale;
+            rect(0,f.z-radius,radius,2*radius,projectileColor(palette[0]),.8f*fade,false);
+            rect(0,f.z-radius*.76f,radius*.76f,2*radius*.76f,projectileColor(palette[2]),.75f*fade,false);
+            rect(0,f.z-radius*.42f,radius*.42f,2*radius*.42f,projectileColor(palette[3+(std::sin(t)>.5f)]),.65f*fade,true);
+        }
+        // Eight deterministic embers appear once each, using existing batches.
+        for(int i=0;i<8;++i) {
+            float part=(age-(.16f+i*.24f))/.35f;if(part<0||part>=1)continue;
+            float a=hashUnit(i,4,f.seed)*2.f*float(doomPi),r=3+hashUnit(i,5,f.seed)*7;
+            lab::Vec at{f.x+std::cos(a)*r+f.nx*2,f.y+std::sin(a)*r+f.ny*2,f.z+3+part*12};
+            if(f.surface==GreenSurface::Wall) {
+                at.x=f.x-f.ny*std::cos(a)*r+f.nx*2;
+                at.y=f.y+f.nx*std::cos(a)*r+f.ny*2;
+            }
+            projectileQuad(camera,at,.7f,.7f,0,projectileColor(palette[3]),(1-part)*fade,true);
+        }
+    }
+}
 
 void wallImpact(line_t *line,int side,fixed_t fx,fixed_t fy,fixed_t fz) {
     if(!line||gamestate!=GS_LEVEL)return;
@@ -559,13 +711,46 @@ float valueNoise(float x,float y,float cell,uint32_t seed) {
     float top=a+(b-a)*fx,bottom=c+(d-c)*fx;
     return top+(bottom-top)*fy;
 }
-void impactsShutdown() {clearMonsterProjectileEffects();resetEnvironment();fluidParticles.clear();fluidBursts.clear();fluidMarks.clear();wallDecals.clear();flatDecals.clear();debris.clear();scorches.clear();impactParticles.clear();gunPuffs.clear();}
+void impactsShutdown() {clearGreenImpactFires();clearMonsterProjectileEffects();resetEnvironment();fluidParticles.clear();fluidBursts.clear();fluidMarks.clear();wallDecals.clear();flatDecals.clear();debris.clear();scorches.clear();impactParticles.clear();gunPuffs.clear();}
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER
 #include "../settings_panel.h"
+extern "C" void I_TestGreenImpactFire() {
+    using namespace doom3d;
+    {
+        auto savedSettings=settings;auto savedFires=greenFires;auto savedLevel=greenFireLevel;
+        auto savedSerial=greenFireSerial;int savedKills=totalkills;
+        auto savedState=gamestate;auto savedNet=netgame,savedPlayback=demoplayback,savedRecording=demorecording;
+        settings.accelerated=1;settings.greenImpactFire=1;settings.fluidMonsters=0;
+        gamestate=GS_LEVEL;netgame=demoplayback=demorecording=false;
+        totalkills=199;if(!greenFireEnabled())I_Error("Green fire eligibility at 199 failed");
+        totalkills=200;if(greenFireEnabled())I_Error("Green fire eligibility at 200 failed");
+        totalkills=201;if(greenFireEnabled())I_Error("Green fire eligibility at 201 failed");
+        totalkills=0;settings.greenImpactFire=0;if(greenFireEnabled())I_Error("Green fire toggle failed");
+        settings.greenImpactFire=1;settings.accelerated=0;if(greenFireEnabled())I_Error("Green fire renderer gate failed");
+        settings.accelerated=1;netgame=true;if(greenFireEnabled())I_Error("Green fire multiplayer gate failed");netgame=false;
+        demoplayback=true;if(greenFireEnabled())I_Error("Green fire playback gate failed");demoplayback=false;
+        demorecording=true;if(greenFireEnabled())I_Error("Green fire recording gate failed");demorecording=false;
+        if(greenFireFade(0)!=1||greenFireFade(1)!=1||greenFireFade(2)>=1||greenFireFade(2.5f)!=0)
+            I_Error("Green fire fade timing failed");
+        greenFires.clear();GreenFire f{};f.surface=GreenSurface::Floor;
+        greenFireLevel=r_levelserial;
+        for(int type:{MT_TROOPSHOT,MT_HEADSHOT,MT_FATSHOT,MT_ARACHPLAZ,MT_ROCKET,MT_BFG}) {
+            mobj_t other{};other.type=static_cast<mobjtype_t>(type);other.flags=MF_MISSILE;tryGreenImpactFire(&other);
+            if(!greenFires.empty())I_Error("Green fire accepted another projectile");
+        }
+        for(int i=0;i<24;++i){f.x=float(i*32);addGreenFire(f,1);}
+        if(greenFires.size()!=greenFireLimit)I_Error("Green fire cap failed");
+        addGreenFire(f,2);if(greenFires.size()!=greenFireLimit||greenFires.back().born!=2)I_Error("Green fire merge failed");
+        settings=savedSettings;greenFires=std::move(savedFires);greenFireLevel=savedLevel;greenFireSerial=savedSerial;
+        totalkills=savedKills;gamestate=savedState;netgame=savedNet;demoplayback=savedPlayback;demorecording=savedRecording;
+        puts("PASS green fire activation, timing, merge and cap");
+    }
+}
 extern "C" void I_TestImpactOptions() {
     using namespace doom3d;
+    I_TestGreenImpactFire();
     // A solid boundary must reflect debris; an open doorway must admit it.
     {sector_t fixture[2]={};sector_t *original=sectors;
      vertex_t a={},b={};a.x=b.x=FRACUNIT;a.y=-10*FRACUNIT;b.y=10*FRACUNIT;
