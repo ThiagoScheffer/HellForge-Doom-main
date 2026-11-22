@@ -100,6 +100,7 @@ struct DamageContext {const wp_damage_event_t *event;bool consumed;DamageContext
 DamageContext *damageContext=nullptr;
 }
 void P_WeakpointRecordHealthLoss(const mobj_t *target,const mobj_t *source,int before,int after) {
+    if(!source||!source->player)return;
     if(!P_WeakpointActive()||totalkills>=200||!target->info||target->player||
        (target->flags&MF_NOBLOOD)||!severeMonster(target->type)||before<=after)return;
     const uintptr_t id=reinterpret_cast<uintptr_t>(target);

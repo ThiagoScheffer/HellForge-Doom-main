@@ -329,6 +329,14 @@ static void severeCriticalRules() {
     P_SevereBloodBurst=nullptr;
     P_DamageMobj(&target,&source,&source,1);
     check(P_HudNotices(notices)==1,"HUD warning works with the effect disabled");
+    // Focused attribution: only player damage may trigger the severe critical.
+    observe(MT_TROOP);
+    target.health=251;
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==1,"player damage triggers the severe critical");
+    source.player=nullptr;target.health=251;
+    P_DamageMobj(&target,&source,&source,1);
+    check(bursts==1,"monster infighting does not trigger the severe critical");
     P_SevereBloodTint=nullptr;totalkills=0;
 }
 int main() {
