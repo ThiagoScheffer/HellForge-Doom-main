@@ -227,8 +227,15 @@ Add a new compatible monster on the same place of archvile for normal Doom.wad a
 fix: Sever critical - should be only displayed when player hit - not by in monster fighting
 
 
-improver map: refine details and give doors key colors and secrete sectors colors
+improve map: refine details and give doors key colors lines so player can see where the doors is, add secrete sectors dif color. when found.
+if user gets a Fullautomap - key icon locations shows on the maps ,as square color match keys so player can see where the keys are easly.
 
+
+
+Inferno,Hell sky moon - change the sun on Hell skies maps like environment to a Huge Ecplise moon red - similiar to Berserker Bloodmoon - check reference for the correct idea to give  dark immersion on hell enviroment
+
+
+Check if Foggy deimous like atmosphere can also hide the decorations to affect and make it more immersion - need img ref-
 
 
 

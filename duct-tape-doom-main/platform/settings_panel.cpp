@@ -135,6 +135,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("retro","Retro scanlines",&s.retro,"Dark lines between the rows of the picture, like an old CRT monitor."),
                 check("palette","Doom palette colors",&s.palette,"Quantize the final lighting and fog to the current WAD palette.")}}}},
         {"Gameplay",{
+            {"Automap / Gameplay",{
+                check("enhanced_automap","Enhanced Automap",&s.enhancedAutomap,
+                    "Color mapped key doors, mark discovered secret boundaries, and show active key pickups after collecting the Computer Area Map.")}},
             {"Monster performance (experimental)",{
                 check("monster_hibernation","Idle monster hibernation",&s.monsterHibernation,"Reuse unchanged negative idle searches while keeping full physics, collision and state timing. Classic geometry only; disabled in digging/solid modes, patched gameplay, respawn, demos, multiplayer and Arcade."),
                 check("swarm_debug","Swarm diagnostics",&s.swarmDebug,"Print an aggregate monster summary once per second: dormant, awake, reused idle searches, sound wakes and spawns.")}},

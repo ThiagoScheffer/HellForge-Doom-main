@@ -111,6 +111,7 @@ typedef	struct
     short	special;
     short	tag;
     unsigned char rocketdoorhits; // 3 means permanently breached; saved in extension.
+    unsigned char secretfound; // Persisted discovery credit for enhanced automap.
 
     // 0 = untraversed, 1,2 = sndlines -1
     int		soundtraversed;

@@ -65,6 +65,7 @@ bool voxelDetected();
 struct Settings {
     encounter_config_t encounter=ED_DefaultConfig();
     int nearMissSounds=1;
+    int enhancedAutomap=0;
     int fullscreen=0;
     int hudStyle=0,hudFace=1,hudLayout=0;
     float hudScale=100,hudBackgroundOpacity=75,speedrunBackgroundOpacity=80;

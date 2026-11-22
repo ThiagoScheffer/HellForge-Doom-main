@@ -1040,7 +1040,7 @@ void P_PlayerInSpecialSector (player_t* player)
 
     if((unsigned short)sector->special>=32){
         unsigned flags=(unsigned short)sector->special;
-        if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);sector->special&=~128;}
+if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);sector->secretfound=1;sector->special&=~128;}
         int damage=(flags>>5)&3;
         if(damage&&!(leveltime&31)&&(!player->powers[pw_ironfeet]||(damage==3&&P_Random()<5)))
             P_DamageMobj(player->mo,NULL,NULL,damage==1?5:damage==2?10:20);
@@ -1079,6 +1079,7 @@ void P_PlayerInSpecialSector (player_t* player)
 	// SECRET SECTOR
 	player->secretcount++;
         P_Notice((int)(player-players),N_SECRET,0);
+	sector->secretfound = 1;
 	sector->special = 0;
 	break;
 			

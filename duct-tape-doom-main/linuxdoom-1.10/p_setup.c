@@ -47,6 +47,7 @@ rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #include "doomdef.h"
 #include "p_local.h"
+#include "am_map.h"
 #include "p_encounter.h"
 #include "p_digwall.h"
 #include "p_fluid.h"
@@ -923,6 +924,7 @@ P_SetupLevel
     P_LoadSideDefs (lumpnum+ML_SIDEDEFS);
 
     P_LoadLineDefs (lumpnum+ML_LINEDEFS);
+    AM_InitLevelState();
     // After the lines, so a missing blockmap can be rebuilt from them.
     P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
     if (P_CheckNodeFormat(lumpnum)) P_LoadXNodes(lumpnum+ML_NODES);

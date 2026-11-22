@@ -509,6 +509,7 @@ P_TouchSpecialThing
 	// cards
 	// leave cards for everyone
       case SPR_BKEY:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_bluecard])
 	    player->message = DEH_String (GOTBLUECARD);
 	P_GiveCard (player, it_bluecard);
@@ -517,6 +518,7 @@ P_TouchSpecialThing
 	return;
 	
       case SPR_YKEY:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_yellowcard])
 	    player->message = DEH_String (GOTYELWCARD);
 	P_GiveCard (player, it_yellowcard);
@@ -525,6 +527,7 @@ P_TouchSpecialThing
 	return;
 	
       case SPR_RKEY:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_redcard])
 	    player->message = DEH_String (GOTREDCARD);
 	P_GiveCard (player, it_redcard);
@@ -533,6 +536,7 @@ P_TouchSpecialThing
 	return;
 	
       case SPR_BSKU:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_blueskull])
 	    player->message = DEH_String (GOTBLUESKUL);
 	P_GiveCard (player, it_blueskull);
@@ -541,6 +545,7 @@ P_TouchSpecialThing
 	return;
 	
       case SPR_YSKU:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_yellowskull])
 	    player->message = DEH_String (GOTYELWSKUL);
 	P_GiveCard (player, it_yellowskull);
@@ -549,6 +554,7 @@ P_TouchSpecialThing
 	return;
 	
       case SPR_RSKU:
+	AM_KeyCollected(special, (int)(player-players));
 	if (!player->cards[it_redskull])
 	    player->message = DEH_String (GOTREDSKULL);
 	P_GiveCard (player, it_redskull);

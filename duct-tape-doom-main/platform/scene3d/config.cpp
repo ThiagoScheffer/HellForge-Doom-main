@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 extern "C" { extern int screenblocks,detailLevel; }
+extern "C" void AM_SetEnhancedAutomap(int enabled);
 
 namespace doom3d {
 const char *graphicsConfig="graphics.cfg";
@@ -22,6 +23,7 @@ void loadSettings() {
         readOption(settings,key.c_str(),value);
     }
     finishReading(settings);
+    AM_SetEnhancedAutomap(settings.enhancedAutomap);
 }
 #ifdef DOOM_TEST_DRIVER
 static bool quietSaveError=false;
@@ -49,7 +51,7 @@ static bool saveSettings() {
     SDL_RemovePath(temporary.c_str());
     return saveFailure(reason);
 }
-void settingsChanged() {applySettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;}
+void settingsChanged() {AM_SetEnhancedAutomap(settings.enhancedAutomap);applySettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;}
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER

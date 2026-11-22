@@ -917,21 +917,21 @@ int P_RocketDoorImpact(mobj_t *rocket, line_t *line)
     return 1;
 }
 
-/* Append-only save extension; old saves leave the zero-initialized health alone. */
+/* DOR v2 packs sector secret discovery into a spare bit; v1 saves still load. */
 int P_SaveDoorDamage(unsigned char *data)
 {
     int i;
-    data[0]='D';data[1]='O';data[2]='R';data[3]=1;
+    data[0]='D';data[1]='O';data[2]='R';data[3]=2;
     for(i=0;i<4;++i)data[4+i]=(unsigned int)numsectors>>(8*i);
-    for(i=0;i<numsectors;++i)data[8+i]=sectors[i].rocketdoorhits;
+    for(i=0;i<numsectors;++i)data[8+i]=(sectors[i].rocketdoorhits&3)|(sectors[i].secretfound?0x80:0);
     return 8+numsectors;
 }
 void P_LoadDoorDamage(const unsigned char *data, int length)
 {
     unsigned int count=0;int i;
-    if(length<8 || data[0]!='D' || data[1]!='O' || data[2]!='R' || data[3]!=1)return;
+    if(length<8 || data[0]!='D' || data[1]!='O' || data[2]!='R' || (data[3]!=1&&data[3]!=2))return;
     for(i=0;i<4;++i)count|=(unsigned int)data[4+i]<<(8*i);
     if(count!=(unsigned int)numsectors || length-8<numsectors)return;
-    for(i=0;i<numsectors;++i)if(data[8+i]>3)return;
-    for(i=0;i<numsectors;++i)sectors[i].rocketdoorhits=data[8+i];
+    for(i=0;i<numsectors;++i)if((data[3]==1&&data[8+i]>3)||(data[3]==2&&(data[8+i]&0x7c)))return;
+    for(i=0;i<numsectors;++i){sectors[i].rocketdoorhits=data[8+i]&3;sectors[i].secretfound=data[3]==2&&(data[8+i]&0x80);}
 }

@@ -29,6 +29,7 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "i_system.h"
 #include "z_zone.h"
 #include "p_local.h"
+#include "am_map.h"
 #include "p_boom.h"
 
 // State.
@@ -369,6 +370,7 @@ void P_UnArchiveThinkers (void)
             objects[i]->tracer=tracer&&tracer<=count?objects[tracer-1]:NULL;
         }
         free(objects);
+	AM_RebuildKeyRegistry();
 	    return; 	// end of list
 			
 	  case tc_mobj:

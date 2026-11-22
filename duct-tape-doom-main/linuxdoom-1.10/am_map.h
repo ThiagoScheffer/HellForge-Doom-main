@@ -23,6 +23,8 @@
 #ifndef __AMMAP_H__
 #define __AMMAP_H__
 
+typedef struct mobj_s mobj_t;
+
 // Used by ST StatusBar stuff.
 #define AM_MSGHEADER (('a'<<24)+('m'<<16))
 #define AM_MSGENTERED (AM_MSGHEADER | ('e'<<8))
@@ -42,6 +44,14 @@ void AM_Drawer (void);
 // Called to force the automap to quit
 // if the level is completed while it is up.
 void AM_Stop (void);
+
+/* HELLFORGE enhanced automap support. */
+void AM_SetEnhancedAutomap (int enabled);
+void AM_InitLevelState (void);
+void AM_RegisterKeyMobj (mobj_t *thing);
+void AM_UnregisterKeyMobj (mobj_t *thing);
+void AM_KeyCollected (mobj_t *thing, int playernum);
+void AM_RebuildKeyRegistry (void);
 
 
 

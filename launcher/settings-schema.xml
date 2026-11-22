@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="f4f267dd19a3db6eb3229aa024026b1a9804978ca439c5c4ad86a5b929f60a4d">
+<settings source="platform/settings_panel.cpp" source_sha256="8e734ab76a999c68a1f8177aaf35535033f989bfbf557aeb0c6997eb69a3b8ca">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -23,6 +23,7 @@
   <option key="ps2_style" title="PS2-style filter" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="retro" title="Retro scanlines" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="palette" title="Doom palette colors" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="enhanced_automap" title="Enhanced Automap" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="monster_hibernation" title="Idle monster hibernation" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="swarm_debug" title="Swarm diagnostics" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="death_load_last_save" title="Load last save on death" category="Gameplay" kind="check" choices="0=Off|1=On" />

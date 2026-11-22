@@ -65,6 +65,9 @@ static const char rcsid[] = "$Id: am_map.c,v 1.4 1997/02/03 21:24:33 b1 Exp $";
 #define YELLOWRANGE	1
 #define BLACK		0
 #define WHITE		(256-47)
+#define AM_KEY_BLUE_COLOR (BLUES+7)
+#define AM_KEY_YELLOW_COLOR YELLOWS
+#define AM_KEY_RED_COLOR (REDS+12)
 
 // Automap colors
 #define BACKGROUND	BLACK
@@ -290,6 +293,135 @@ static unsigned char cheat_amap_seq[] = { 0xb2, 0x26, 0x26, 0x2e, 0xff };
 cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
 
 static boolean stopped = true;
+static int enhancedAutomap = 0;
+static int amSecretColor = 176;
+static int amDoorBlueColor = BLUES+7;
+static int amDoorRedColor = REDS+12;
+static int amWallRedColor = REDS;
+static int amMapYellowColor = YELLOWS;
+static byte *amDoorColors;
+typedef struct { mobj_t *thing; unsigned int collected; } am_keyentry_t;
+static am_keyentry_t *amKeys;
+static int amKeyCount, amKeyCapacity;
+
+static int AM_KeyColorForSpecial(int special)
+{
+    switch (special)
+    {
+      case 26: case 32: case 99: case 133: return 1;
+      case 27: case 34: case 136: case 137: return 2;
+      case 28: case 33: case 134: case 135: return 3;
+      default: return 0;
+    }
+}
+
+static int AM_KeySpriteColor(int sprite)
+{
+    switch (sprite)
+    {
+      case SPR_BKEY: case SPR_BSKU: return 1;
+      case SPR_YKEY: case SPR_YSKU: return 2;
+      case SPR_RKEY: case SPR_RSKU: return 3;
+      default: return 0;
+    }
+}
+
+static int AM_NearestPaletteColor(const byte *palette, int red, int green, int blue)
+{
+    int i, best = 0;
+    unsigned int bestDistance = 0xffffffffu;
+    for (i = 0; i < 256; ++i)
+    {
+	 int r = (int)palette[i*3] - red;
+	 int g = (int)palette[i*3+1] - green;
+	 int b = (int)palette[i*3+2] - blue;
+	 unsigned int distance = (unsigned int)(r*r + g*g + b*b);
+	 if (distance < bestDistance) { bestDistance = distance; best = i; }
+    }
+    return best;
+}
+
+static void AM_FindColors(void)
+{
+    const byte *palette = W_CacheLumpName("PLAYPAL", PU_CACHE);
+    amDoorBlueColor = AM_NearestPaletteColor(palette, 0, 158, 219);
+    amDoorRedColor = AM_NearestPaletteColor(palette, 255, 0, 0);
+    amWallRedColor = AM_NearestPaletteColor(palette, 138, 7, 7);
+    amMapYellowColor = AM_NearestPaletteColor(palette, 207, 181, 59);
+    amSecretColor = AM_NearestPaletteColor(palette, 138, 0, 196);
+}
+
+void AM_SetEnhancedAutomap(int enabled) { enhancedAutomap = enabled != 0; }
+
+void AM_InitLevelState(void)
+{
+    int i;
+    AM_FindColors();
+    amDoorColors = numlines ? Z_Malloc(numlines, PU_LEVEL, 0) : NULL;
+    if (amDoorColors)
+        for (i = 0; i < numlines; ++i)
+            amDoorColors[i] = (byte)AM_KeyColorForSpecial(lines[i].special);
+    amKeyCount = 0;
+    amKeyCapacity = numlines > 256 ? numlines : 256;
+    if (amKeyCapacity > MAXINT/(int)sizeof(*amKeys))
+	I_Error("Automap key registry is too large");
+    amKeys = Z_Malloc(amKeyCapacity * (int)sizeof(*amKeys), PU_LEVEL, 0);
+}
+
+void AM_RegisterKeyMobj(mobj_t *thing)
+{
+    if (thing && AM_KeySpriteColor(thing->sprite))
+    {
+	 if (amKeyCount == amKeyCapacity)
+	 {
+	     int limit = MAXINT/(int)sizeof(*amKeys);
+	     int nextCapacity = amKeyCapacity <= limit/2 ? amKeyCapacity*2 : limit;
+	     am_keyentry_t *grown;
+	     if (nextCapacity <= amKeyCapacity) I_Error("Too many automap key markers");
+	     grown = Z_Malloc(nextCapacity * (int)sizeof(*amKeys), PU_LEVEL, 0);
+	     memcpy(grown, amKeys, amKeyCount * sizeof(*amKeys));
+	     amKeys = grown;
+	     amKeyCapacity = nextCapacity;
+	 }
+	 amKeys[amKeyCount].thing = thing;
+	 amKeys[amKeyCount++].collected = 0;
+    }
+}
+
+void AM_UnregisterKeyMobj(mobj_t *thing)
+{
+    int i;
+    for (i = 0; i < amKeyCount; ++i)
+        if (amKeys[i].thing == thing)
+        {
+            amKeys[i] = amKeys[--amKeyCount];
+            return;
+        }
+}
+
+void AM_KeyCollected(mobj_t *thing, int playernum)
+{
+    int i;
+    if (playernum < 0 || playernum >= MAXPLAYERS) return;
+    for (i = 0; i < amKeyCount; ++i)
+	if (amKeys[i].thing == thing)
+	{
+	    amKeys[i].collected |= 1u << playernum;
+	    return;
+	}
+}
+
+void AM_RebuildKeyRegistry(void)
+{
+    int i;
+    amKeyCount = 0;
+    for (i = 0; i < numsectors; ++i)
+    {
+	 mobj_t *thing;
+	 for (thing = sectors[i].thinglist; thing; thing = thing->snext)
+	     AM_RegisterKeyMobj(thing);
+    }
+}
 
 extern boolean viewactive;
 //extern byte screens[][SCREENWIDTH*SCREENHEIGHT];
@@ -1120,6 +1252,8 @@ void AM_drawWalls(void)
 {
     int i;
     static mline_t l;
+    int color;
+    int draw;
 
     for (i=0;i<numlines;i++)
     {
@@ -1131,38 +1265,88 @@ void AM_drawWalls(void)
 	{
 	    if ((lines[i].flags & LINE_NEVERSEE) && !cheating)
 		continue;
+	    draw = 1;
+	    color = amWallRedColor;
 	    if (!lines[i].backsector)
 	    {
-		AM_drawMline(&l, WALLCOLORS+lightlev);
+		/* one-sided wall */
 	    }
 	    else
 	    {
 		if (lines[i].special == 39)
 		{ // teleporters
-		    AM_drawMline(&l, WALLCOLORS+WALLRANGE/2);
+		    color = amWallRedColor;
 		}
 		else if (lines[i].flags & ML_SECRET) // secret door
 		{
-		    if (cheating) AM_drawMline(&l, SECRETWALLCOLORS + lightlev);
-		    else AM_drawMline(&l, WALLCOLORS+lightlev);
+		    color = amWallRedColor;
 		}
 		else if (lines[i].backsector->floorheight
 			   != lines[i].frontsector->floorheight) {
-		    AM_drawMline(&l, FDWALLCOLORS + lightlev); // floor level change
+		    color = FDWALLCOLORS + lightlev; // floor level change
 		}
 		else if (lines[i].backsector->ceilingheight
 			   != lines[i].frontsector->ceilingheight) {
-		    AM_drawMline(&l, CDWALLCOLORS+lightlev); // ceiling level change
+		    color = amMapYellowColor; // ceiling level change
 		}
 		else if (cheating) {
-		    AM_drawMline(&l, TSWALLCOLORS+lightlev);
+		    color = TSWALLCOLORS+lightlev;
 		}
+		else draw = 0;
 	    }
+	    if (enhancedAutomap && amDoorColors && amDoorColors[i])
+	    {
+		color = amDoorColors[i] == 1 ? amDoorBlueColor :
+		        amDoorColors[i] == 2 ? AM_KEY_YELLOW_COLOR : amDoorRedColor;
+		draw = 1;
+	    }
+	    else if (enhancedAutomap && lines[i].backsector &&
+	             (lines[i].frontsector->secretfound || lines[i].backsector->secretfound))
+		color = amSecretColor;
+	    if (draw) AM_drawMline(&l, color);
 	}
 	else if (plr->powers[pw_allmap])
 	{
-	    if (!(lines[i].flags & LINE_NEVERSEE)) AM_drawMline(&l, GRAYS+3);
+	    if (!(lines[i].flags & LINE_NEVERSEE))
+	    {
+		int color = GRAYS+3;
+		if (enhancedAutomap && amDoorColors && amDoorColors[i])
+		    color = amDoorColors[i] == 1 ? amDoorBlueColor :
+		            amDoorColors[i] == 2 ? AM_KEY_YELLOW_COLOR : amDoorRedColor;
+		else if (enhancedAutomap && lines[i].backsector &&
+		         (lines[i].frontsector->secretfound || lines[i].backsector->secretfound))
+		    color = amSecretColor;
+		AM_drawMline(&l, color);
+	    }
 	}
+    }
+}
+
+static void AM_DrawKeyMarkers(void)
+{
+    int i, x, y, color, px, py;
+    if (!enhancedAutomap || !automapactive || !plr || !plr->powers[pw_allmap])
+        return;
+    for (i = 0; i < amKeyCount; ++i)
+    {
+	 mobj_t *thing = amKeys[i].thing;
+	 if (!thing) continue;
+	 if (amKeys[i].collected & (1u << displayplayer)) continue;
+	 color = AM_KeySpriteColor(thing->sprite);
+	 x = CXMTOF(thing->x) - 3;
+	 y = CYMTOF(thing->y) - 2;
+	 if (x + 5 < f_x || x >= f_x + f_w || y + 3 < f_y || y >= f_y + f_h)
+	     continue;
+	 color = color == 1 ? amDoorBlueColor :
+	          color == 2 ? AM_KEY_YELLOW_COLOR : amDoorRedColor;
+	 for (py = 0; py < 4; ++py)
+	     for (px = 0; px < 6; ++px)
+	     {
+		 int sx = x + px, sy = y + py;
+		 if (sx < f_x || sx >= f_x + f_w || sy < f_y || sy >= f_y + f_h)
+		     continue;
+		 fb[sy * f_w + sx] = color;
+	     }
     }
 }
 
@@ -1339,6 +1523,7 @@ void AM_Drawer (void)
     if (grid)
 	AM_drawGrid(GRIDCOLORS);
     AM_drawWalls();
+    AM_DrawKeyMarkers();
     AM_drawPlayers();
     if (cheating==2)
 	AM_drawThings(THINGCOLORS, THINGRANGE);

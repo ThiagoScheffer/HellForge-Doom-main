@@ -38,6 +38,7 @@ rcsid[] = "$Id: p_mobj.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #include "doomdef.h"
 #include "p_local.h"
+#include "am_map.h"
 #include "p_encounter.h"
 #include "p_solid.h"
 #include "p_fluid.h"
@@ -645,6 +646,7 @@ P_SpawnMobj
 	
     mobj->floorz = mobj->subsector->sector->floorheight;
     mobj->ceilingz = mobj->subsector->sector->ceilingheight;
+	AM_RegisterKeyMobj(mobj);
 
     if (z == ONFLOORZ)
 	mobj->z = mobj->floorz;
@@ -674,6 +676,7 @@ int		iquetail;
 
 void P_RemoveMobj (mobj_t* mobj)
 {
+	AM_UnregisterKeyMobj(mobj);
     ED_Forget(mobj);
     WA_Remove(mobj);
     P_SwarmForget(mobj);
