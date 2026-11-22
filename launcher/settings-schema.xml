@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="a23929f222d82bdde7afdfab03044f612ab3d3d30a010485045ebd45191940db">
+<settings source="platform/settings_panel.cpp" source_sha256="092513371b6a699d82db71b1e9f3a68be3345755265bd0cb46ebdf9bc1d45e66">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -165,6 +165,7 @@
   <option key="sun_shafts" title="Sunbeams" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_scatter" title="Sunbeam scattering" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="immersive_sky" title="Immersive sky environment" category="Atmosphere" kind="choice" choices="0=Off (original sky)|1=Auto (DOOM episodes)|2=Rocky mountains|3=Ice mountains|4=Inferno|5=Burning city" />
+  <option key="hell_blood_eclipse" title="Hell Blood Eclipse" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_disc" title="Sun in the sky" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="dust_motes" title="Dust motes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="embers" title="Embers" category="Atmosphere" kind="check" choices="0=Off|1=On" />

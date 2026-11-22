@@ -429,6 +429,14 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
     }
     image.livingProfile=material.profile;image.livingVariant=material.variant;
 }
+static bool stockHellSky(const char *name,int width,int height,const std::vector<byte> &pixels) {
+    if(SDL_strcasecmp(name,"SKY3")!=0||width!=256||height!=128)return false;
+    // Check the final indexed pixels and coverage. A PWAD can use the same
+    // texture and patch names while supplying entirely different artwork.
+    uint64_t hash=14695981039346656037ULL;
+    for(byte value:pixels)hash=(hash^value)*1099511628211ULL;
+    return hash==0x43e2c7f2a7d8837cULL||hash==0xe75fd27cf7bfebc8ULL; // Doom / Doom II
+}
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */
 Image &wallImage(int index) {
     auto found=images.find(index); if(found!=images.end()) return found->second;
@@ -446,6 +454,7 @@ Image &wallImage(int index) {
     Image &image=speckledPanel(images.emplace(index,upload(w,h,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
         glass.empty()?nullptr:glass.data(),true)).first->second,name,false);
     image.switchIndicator=doom_switch_texture(name);
+    image.stockHellSky=stockHellSky(name,w,h,pixels);
     setLivingWallProfile(image,index,name);
     if(image.leaded)return withLeadedRelief(withGlassFrame(image,frame));
     return withRelief(withGlassFrame(image,frame),image.opaque&&!animated?wallTiles:nullptr);

@@ -25,6 +25,7 @@ layout(location=0) out vec4 outColor;
 #include "sky_clouds.glsl"
 #include "sky_horizon.glsl"
 #include "sky_immersion.glsl"
+#include "sky_eclipse.glsl"
 void main() {
     vec2 size=vec2(textureSize(image,0));
 #ifdef SURFACE
@@ -119,6 +120,9 @@ void main() {
     // sky cloud decks. No map geometry or additional GPU drawing is created.
     // Shared with far-plane, sky surfaces, transferred skies and reflections.
     int hfMode=int(skyEnvironment.x+0.5);
+    bool eclipse=skyEnvironment.z>0.0;
+    // The eclipse sits behind the existing skyline and cloud decks.
+    if(eclipse)color.rgb=hellBloodEclipse(ray,color.rgb);
     bool citySmoke=city||hfMode==5||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
@@ -150,7 +154,7 @@ void main() {
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
     // disc and a wide glow in its tint. Smooth, like the softened sky around
     // it; a dither here shimmers over a large part of the sky.
-    if(c.fx2.w>0.0) {
+    if(!eclipse&&c.fx2.w>0.0) {
         vec3 toward=vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
         float a=acos(clamp(dot(ray,toward),-1.0,1.0));
         float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;

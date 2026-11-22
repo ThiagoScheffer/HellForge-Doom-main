@@ -259,7 +259,8 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
     }
     auto bindSky=[&](int texture) {
         const Image &skyArt=wallImage(texture);
-        float hfSkyUniform[4]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,0.0f,0.0f};
+        bool eclipse=settings.hellBloodEclipse&&skyMode==4&&skyArt.stockHellSky;
+        float hfSkyUniform[4]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,eclipse?1.0f:0.0f,0.0f};
         SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
         SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},
                                                {gpu(cloudTexture),linearRepeat}};

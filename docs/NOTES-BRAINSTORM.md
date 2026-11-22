@@ -258,5 +258,68 @@ hanging corpses decorations - create bloody,bleeding and moviments alive like to
 
 
 
+animated corpses:
+idea brainstorming : Create more horror alive experience for Decorations on doom.
+
+Example:
+
+{SPR_GOR1,0,10,{NULL},S_BLOODYTWITCH2,0,0},	// S_BLOODYTWITCH
+    {SPR_GOR1,1,15,{NULL},S_BLOODYTWITCH3,0,0},	// S_BLOODYTWITCH2
+    {SPR_GOR1,2,8,{NULL},S_BLOODYTWITCH4,0,0},	// S_BLOODYTWITCH3
+    {SPR_GOR1,1,6,{NULL},S_BLOODYTWITCH,0,0},	// S_BLOODYTWITCH4
+
+current animated Hanging victim, twitching decoration - it makes the game feels it still alive.
+
+most of other decorations are not animated or have blood effects.
+
+main file info.c contains all the refecences sprites
+
+
+pieces that should be balancing/moving around while hanging siliar to horror movies.
+also add dripping bloody
+
+//dry bodies and legs add flies and some larva drooping from it.
+{SPR_GOR2,0,-1,{NULL},S_NULL,0,0},	// S_MEAT2
+{SPR_GOR3,0,-1,{NULL},S_NULL,0,0},	// S_MEAT3
+{SPR_GOR4,0,-1,{NULL},S_NULL,0,0},	// S_MEAT4
+{SPR_GOR5,0,-1,{NULL},S_NULL,0,0},	// S_MEAT5
+
+//pieces of body chainned by the arms that are hanging - should be bleeding and similar to moster hits, blood on the sprite textures to give immersion.
+{SPR_HDB1,0,-1,{NULL},S_NULL,0,0},	// S_HANGNOGUTS
+{SPR_HDB2,0,-1,{NULL},S_NULL,0,0},	// S_HANGBNOBRAIN
+{SPR_HDB3,0,-1,{NULL},S_NULL,0,0},	// S_HANGTLOOKDN
+{SPR_HDB4,0,-1,{NULL},S_NULL,0,0},	// S_HANGTSKULL
+{SPR_HDB5,0,-1,{NULL},S_NULL,0,0},	// S_HANGTLOOKUP
+{SPR_HDB6,0,-1,{NULL},S_NULL,0,0},	// S_HANGTNOBRAIN
+
+//many cranes on a stick empaled - add smell spiders like sometimes dropping from it.
+{SPR_POL2,0,-1,{NULL},S_NULL,0,0},	// S_HEADSONSTICK
+//{SPR_POL4,0,-1,{NULL},S_NULL,0,0},	// S_HEADONASTICK
+
+//body empaled - can add blood dropping to match the image immersion
+{SPR_POL1,0,-1,{NULL},S_NULL,0,0},	// S_DEADSTICK
+{SPR_POL6,0,6,{NULL},S_LIVESTICK2,0,0},	// S_LIVESTICK
+{SPR_POL6,1,8,{NULL},S_LIVESTICK,0,0},	// S_LIVESTICK2
+
+// a small marble statue pillar with a bleeding heart on top, make it bleeding more realistic.
+{SPR_COL5,0,14,{NULL},S_HEARTCOL2,0,0},	// S_HEARTCOL
+{SPR_COL5,1,14,{NULL},S_HEARTCOL,0,0},	// S_HEARTCOL2
+	
+	
+	
+	
+	
+	
+	
+	
+//later rework living_surfaces: 
+ mwall4_1 mwall4_2 mwall5_1 - marble rock walls with demons simbols and engraved faces -  make like it is looking at the player.
+ improve the Eyes to be more realistic immersion, similar to the improved sw2_6 Eye effect, but matches with the demon marble wall.
+	
+	
+sw2_7 sw2_8	 sw2_1 sw2_2 sw2_4 - create realistc horror Eyes blinking to these demon skulls like switches.
+	
+	
 
 https://doom.fandom.com/wiki/Thing_types
+https://www.doomwiki.org/wiki/DeHackEd#Code_pointers
