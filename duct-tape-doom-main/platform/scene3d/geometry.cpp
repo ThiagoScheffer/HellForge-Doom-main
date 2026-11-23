@@ -878,7 +878,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             int lump = firstspritelump + sf.lump[seen], spriteKey = -1 - lump;
             int bloodTint = thing->type == MT_BLOOD ? (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT : 0;
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
-            Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) : thing->player ? playerColourImage(sourceImage, spriteKey, (thing->flags & MF_TRANSLATION) >> MF_TRANSSHIFT, spriteKey) : sourceImage;
+            const bool oilRupture=thing->type==MT_MISC77&&thing->sprite==SPR_BEXP&&thing->state==&states[S_BEXP5]&&
+                thing->health==0&&(thing->flags&MF_NOBLOOD);
+            Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) :
+                (thing->player||oilRupture) ? playerColourImage(sourceImage,spriteKey,(thing->flags&MF_TRANSLATION)>>MF_TRANSSHIFT,spriteKey) :
+                sourceImage;
             // Keep the unmodified art authoritative for silhouette, pose, wound attachment
             // and hole-mask matching; only the sampled GPU texture changes with health.
             // A lightning-ignited original dead tree is only recolored after

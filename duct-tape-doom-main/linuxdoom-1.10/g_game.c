@@ -1,5 +1,6 @@
 #include "p_weakpoints.h"
 #include "p_acid.h"
+#include "p_incendiary.h"
 #include "p_arena.h"
 #include "m_arcade.h"
 #include "p_notices.h"
@@ -480,10 +481,12 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 extern  gamestate_t     wipegamestate;
 
 static int sessionDemoLoad=0;
+int G_DemoLoading(void) { return sessionDemoLoad; }
 void G_DoLoadLevel (void)
 {
     int             i;
     P_AcidClear(); /* Acid pools and exposure never cross a map boundary. */
+    P_IncendiaryClear();
 
     // Set the sky map.
     // First thing, we have a dummy sky texture name,
@@ -1334,12 +1337,14 @@ void G_DoLoadGame (void)
     P_UnArchiveSpecials ();
     length-=(int)ED_Load(savebuffer,(size_t)length);
     length-=(int)P_BoomLoad(savebuffer,(size_t)length);
+    length-=(int)P_IncendiaryLoad(save_p,length>save_p-savebuffer?(size_t)(length-(save_p-savebuffer)):0);
     /* AC01 can consume only data after the archived vanilla game. */
     if(length>save_p-savebuffer)
         length-=(int)P_AcidLoad(save_p,(size_t)(length-(save_p-savebuffer)));
     else
         P_AcidClear();
     length-=(int)P_WeakpointLoad(savebuffer,(size_t)length);
+    P_IncendiaryRestoreActors();
 
     if (*save_p != 0x1d)
 	I_Error ("Bad savegame");
@@ -1392,7 +1397,7 @@ void G_DoSaveGame (void)
 	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot);
     description = savedescription;
 
-    size_t capacity = ED_Save(NULL)+P_BoomSave(NULL)+P_AcidSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
+    size_t capacity = ED_Save(NULL)+P_BoomSave(NULL)+P_IncendiarySave(NULL)+P_AcidSave(NULL)+P_WeakpointSave(NULL)+P_ArenaSave(NULL)+P_SaveGameBufferSize()+NOTICE_SAVE_BYTES+8+numsectors+P_GlobalDigSaveSize()+SV_SaveSize();
     save_p = savebuffer = calloc(1, capacity);
     if (!savebuffer) I_Error("Could not allocate savegame buffer");
 
@@ -1426,6 +1431,7 @@ void G_DoSaveGame (void)
     save_p += P_ArenaSave(save_p);
     save_p += P_WeakpointSave(save_p);
     save_p += P_AcidSave(save_p);
+    save_p += P_IncendiarySave(save_p);
     save_p += P_BoomSave(save_p);
     save_p += ED_Save(save_p);
     length = save_p - savebuffer;
@@ -1540,6 +1546,7 @@ G_InitNew
 {
     int             i;
     P_AcidClear();
+    P_IncendiaryClear();
     Arcade_NewGame();
     P_NoticeNewGame();
 
@@ -1738,6 +1745,7 @@ void G_RecordDemo (char* name)
     demoend = demobuffer + maxsize;
 
     demorecording = true;
+    P_IncendiarySync();
 }
 
 
@@ -1819,6 +1827,7 @@ void G_DoPlayDemo (void)
 
     usergame = false;
     demoplayback = true;
+    P_IncendiarySync();
 }
 
 //

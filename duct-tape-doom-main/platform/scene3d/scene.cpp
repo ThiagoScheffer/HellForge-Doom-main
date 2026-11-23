@@ -170,6 +170,7 @@ void applySettings() {
     fitGame(settings);
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
+    P_IncendiaryConfigure(settings.incendiaryBarrels);
     p_breakablewalls=settings.breakableWalls&&!netgame;
     p_throughwalls=settings.throughWalls;
     p_breachdoors=settings.breakableWalls&&settings.breachDoors;
@@ -274,6 +275,7 @@ static void earlyDirectorSettings(){
  static bool loaded=false;if(loaded)return;loaded=true;
  int arg=M_CheckParm((char*)"-graphics");if(arg&&arg+1<myargc)graphicsConfig=myargv[arg+1];
  loadSettings();P_AcidConfigure(settings.corrosiveBarrels);ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
+ P_IncendiaryConfigure(settings.incendiaryBarrels);
 }
 struct DirectorStartupSettings {DirectorStartupSettings(){ED_StartupSettings=earlyDirectorSettings;}};
 static DirectorStartupSettings directorStartupSettings;
@@ -284,6 +286,7 @@ void sceneInit(SDL_Window *window) {
     loadSettings();if(M_CheckParm((char*)"-classic"))settings.accelerated=0;
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
+    P_IncendiaryConfigure(settings.incendiaryBarrels);
     if(M_CheckParm((char*)"-ambushsightreuse"))settings.ambushSightReuse=1;
     P_SetAmbushSightReuse(settings.ambushSightReuse);
     if(M_CheckParm((char*)"-rendercheck"))settings.accelerated=1;
@@ -765,6 +768,7 @@ FrameView prepareFrame(int w,int h) {
                 std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
         buildMist(camera);
         buildAcid(camera); // Append to the depth-tested effect pass after its batches are cleared.
+        buildIncendiary(camera);
         buildShafts(camera);
         buildRings(camera);
         updateExposure(camera);

@@ -190,6 +190,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Combat",{
                 check("corrosive_barrels","Corrosive Barrels",&s.corrosiveBarrels,
                     "Damaged barrels seep green acid; ruptures splash nearby actors and leave persistent corrosive pools. Monsters and players take 5 HP every 17 tics, with two seconds of residual exposure; Radiation Suits protect the player. Single-player only; disabled in multiplayer and demos. Acid decals require the accelerated 3D renderer. Off preserves classic barrel behavior."),
+                check("incendiary_barrels","Incendiary Barrels",&s.incendiaryBarrels,
+                    "Burning barrels become destructible. Their explosions spill burning oil that hurts monsters and players until it burns out. Independent of Corrosive Barrels. Single-player only. Oil effects use the accelerated 3D renderer.",
+                    [](const Settings &){return !netgame&&!demoplayback&&!demorecording;}),
                 check("critical_parts","Critical parts",&s.criticalParts,
                     "Player bullets hit visible human enemy sprite pixels; headshots deal 2x damage. "
                     "Zombiemen, shotgun guys, chaingunners and Wolfenstein SS only. "

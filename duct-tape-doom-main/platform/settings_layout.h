@@ -41,7 +41,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
         if(!strcmp(section,"Destruction and doors"))return {"Destruction",settingIs(k,{"door_blowout","key_door_shield","switch_door_shield","breach_doors","door_sparks"})?"Doors":"Surfaces"};
         if(!strcmp(section,"Collapse gameplay"))return {"Destruction","Collapses"};
         if(!strcmp(k,"material_rubble"))return {"Destruction","Debris"};
-        if(!strcmp(k,"corrosive_barrels"))return {"Combat","Barrels"};
+        if(settingIs(k,{"corrosive_barrels","incendiary_barrels"}))return {"Combat","Barrels"};
         if(settingIs(k,{"critical_parts","enhanced_weak_points","monster_weapon_vulnerabilities","kill_shots_carry"}))return {"Combat","Hits"};
         if(settingIs(k,{"localized_injury_effects","elemental_damage_over_time","advanced_monster_reactions","eye_injuries","monster_bleeding","hit_flinch"}))return {"Combat","Injuries"};
         if(settingIs(k,{"blood","blood_spray","blood_shine","severe_critical_bloodspill","monster_skin_damage","wounds"}))return {"Combat","Blood"};

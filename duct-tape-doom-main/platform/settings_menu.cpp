@@ -753,6 +753,14 @@ extern "C" int I_TestSettingsControls(void) {
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
+    if(mode==12) {
+        const int active=settings.incendiaryBarrels;
+        if(!selectSetting("incendiary_barrels")||strcmp(panel.tabs[(size_t)panel.tab].title,"Combat"))return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        if(settings.incendiaryBarrels!=active||panel.draft.incendiaryBarrels==active)return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+        return !panel.open&&settings.incendiaryBarrels!=active;
+    }
     if(mode==11) {
         auto press=[&](const char *key,SDL_Scancode scancode) {
             if(!selectSetting(key))return false;

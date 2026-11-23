@@ -41,6 +41,7 @@ static const char
 #include "p_local.h"
 #include "p_solid.h"
 #include "p_digwall.h"
+#include "p_incendiary.h"
 
 #include "s_sound.h"
 
@@ -1608,6 +1609,7 @@ void P_UseLines(player_t *player)
 mobj_t *bombsource;
 mobj_t *bombspot;
 int bombdamage;
+static boolean bombfire;
 
 //
 // PIT_RadiusAttack
@@ -1642,6 +1644,10 @@ boolean PIT_RadiusAttack(mobj_t *thing)
 
     if (P_CheckSight(thing, bombspot))
     {
+        if(bombfire) {
+            P_DamageMobjFire(thing,bombspot,bombsource,bombdamage-dist);
+            return true;
+        }
         // must be in direct path
         {
             wp_damage_event_t event = {0};
@@ -1661,9 +1667,7 @@ boolean PIT_RadiusAttack(mobj_t *thing)
 // P_RadiusAttack
 // Source is the creature that caused the explosion at spot.
 //
-void P_RadiusAttack(mobj_t *spot,
-                    mobj_t *source,
-                    int damage)
+static void radiusAttack(mobj_t *spot,mobj_t *source,int damage,boolean fire)
 {
     int x;
     int y;
@@ -1683,11 +1687,22 @@ void P_RadiusAttack(mobj_t *spot,
     bombspot = spot;
     bombsource = source;
     bombdamage = damage;
+    bombfire = fire;
     SV_Blast(spot, damage);
 
     for (y = yl; y <= yh; y++)
         for (x = xl; x <= xh; x++)
             P_BlockThingsIterator(x, y, PIT_RadiusAttack);
+}
+
+void P_RadiusAttack(mobj_t *spot,mobj_t *source,int damage)
+{
+    radiusAttack(spot,source,damage,false);
+}
+
+void P_RadiusAttackFire(mobj_t *spot,mobj_t *source,int damage)
+{
+    radiusAttack(spot,source,damage,true);
 }
 
 //

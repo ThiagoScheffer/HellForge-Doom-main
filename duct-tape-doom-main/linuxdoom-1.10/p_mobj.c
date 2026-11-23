@@ -43,6 +43,7 @@ rcsid[] = "$Id: p_mobj.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 #include "p_solid.h"
 #include "p_fluid.h"
 #include "p_acid.h"
+#include "p_incendiary.h"
 #include "m_arcade.h"
 #include "p_digwall.h"
 #include "sounds.h"
@@ -537,6 +538,8 @@ void MP_BODY(P_MobjThinker) (mobj_t* mobj)
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
     P_AcidTick(mobj);
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
+    P_IncendiaryTick(mobj);
+    if(mobj->thinker.function.acv==(actionf_v)(-1))return;
     if(P_RomeroTick(mobj))return;
     if(SV_Active()){SV_Refresh(mobj);SV_Missile(mobj);}else P_GlobalDigRefreshHeights(mobj);
     if(mobj->type==MT_ROCKET&&mobj->threshold==ROMERO_STUCK)return;
@@ -658,6 +661,7 @@ P_SpawnMobj
     mobj->thinker.function.acp1 = (actionf_p1)P_MobjThinker;
 	
     P_AddThinker (&mobj->thinker);
+    P_IncendiarySpawn(mobj);
     P_SwarmSpawned(mobj);
     WA_Spawn(mobj);
 
@@ -684,6 +688,7 @@ void P_RemoveMobj (mobj_t* mobj)
     if(mp_enabled)MP_ForgetActor(mobj);
 #endif
     P_AcidForget(mobj);
+    P_IncendiaryForget(mobj);
     P_WeakpointForget(mobj);
     P_ArenaForgetMonster(mobj);
     Arcade_RemoveProjectile(mobj);

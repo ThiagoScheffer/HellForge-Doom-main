@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="8e13559026cd1608dcb5144920bfc811057fbc7caf7a63f241562ce116eac7c7">
+<settings source="platform/settings_panel.cpp" source_sha256="b8c19b070c46db5f2279bef1aa48a9c851f9aa12fbae850888d00c2d6dfb87d2">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -57,6 +57,7 @@
   <option key="hanging_fragments" title="Delay before fragments fall" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="collapse_size" title="Largest detached fragment" category="Destruction" kind="choice" choices="4=Small|12=Medium|24=Large" />
   <option key="corrosive_barrels" title="Corrosive Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="incendiary_barrels" title="Incendiary Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="critical_parts" title="Critical parts" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="enhanced_weak_points" title="Enhanced Monster Weak Points" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="monster_weapon_vulnerabilities" title="Monster Weapon Vulnerabilities" category="Destruction" kind="check" choices="0=Off|1=On" />

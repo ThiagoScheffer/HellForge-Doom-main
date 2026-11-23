@@ -24,6 +24,7 @@ static bool visualEnhanced=false;
 static bool visualSevere=false;
 static bool visualSawCut=false;
 static bool acidMode=false,visualAcid=false;
+static bool incendiaryMode=false,visualIncendiary=false,incendiaryLargeMode=false;
 static bool visualFeedback=false;
 static bool vileMode=false,visualVile=false;
 static bool soulMode=false,visualSoul=false;
@@ -244,6 +245,7 @@ static void visualFrame() {
 #include "eye_injury_visual.inc"
 #include "e1m8_regression.inc"
 #include "acid_smoke.inc"
+#include "incendiary_smoke.inc"
 #include "vile_fx_smoke.inc"
 #include "revenant_soul_smoke.inc"
 extern "C" int I_TestSevereWallMarks();
@@ -332,6 +334,7 @@ static void severeVisualFrame() {
 static void sawCutVisualFrame() {
     static int frame=0;
     static mobj_t *pinky=nullptr;
+    static const std::string stockPath=output+"/saw-stock.png",cutPath=output+"/saw-cut.png";
     auto *player=players[consoleplayer].mo;
     if(++frame==1) {
         check(P_TeleportMove(player,0,fx(-32))!=0,"chainsaw fixture player placement");
@@ -340,7 +343,7 @@ static void sawCutVisualFrame() {
         pinky=P_SpawnMobj(0,fx(23),ONFLOORZ,MT_SERGEANT);
         pinky->angle=ANG270;pinky->tics=-1;pinky->health=1000;
     }
-    if(frame==5)I_Render3DScreenshotTo((output+"/saw-stock.png").c_str());
+    if(frame==5)I_Render3DScreenshotTo(stockPath.c_str());
     if(frame>=12&&frame<=28&&frame%4==0) {
         const int health=pinky->health;
         P_SawLineAttack(player,ANG90,MELEERANGE+1,0,3);
@@ -348,7 +351,7 @@ static void sawCutVisualFrame() {
         pinky->tics=-1;
     }
     if(frame==29) {
-        I_Render3DScreenshotTo((output+"/saw-cut.png").c_str());
+        I_Render3DScreenshotTo(cutPath.c_str());
         WoundSpot wound;
         check(woundSpots(pinky,&wound,1)==1,"blood-enabled chainsaw leaves a torso cut with bullet holes off");
         const auto &sf=sprites[pinky->sprite].spriteframes[pinky->frame&FF_FRAMEMASK];
@@ -361,7 +364,11 @@ static void sawCutVisualFrame() {
         check(!woundMask(*pinky,image,sf.flip[0],1,0,mask),"Blood off hides the chainsaw trail");
         settings.blood=1;
     }
-    if(frame==38){std::puts("PASS Pinky chainsaw cut and damage");I_Quit();}
+    if(frame==38){
+        check(std::ifstream(stockPath).good()&&std::ifstream(cutPath).good(),"Pinky GPU captures saved");
+        std::puts("PASS Pinky chainsaw cut and damage");
+        I_Quit();
+    }
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
@@ -371,6 +378,9 @@ extern "C" void I_TestFrame() {
     if(visualVile){vileVisualFrame();return;}
     if(acidMode){acidIntegration();I_Quit();return;}
     if(visualAcid){acidVisualFrame();return;}
+    if(incendiaryMode){incendiaryIntegration();I_Quit();return;}
+    if(incendiaryLargeMode){incendiaryLargeMap();I_Quit();return;}
+    if(visualIncendiary){incendiaryVisualFrame();return;}
     if(e1m8Mode){e1m8Frame();return;}
     if(!settingsCase.empty()){settingsPersistenceFrame();return;}
     if(eyeMode){eyeIntegration();I_Quit();return;}
@@ -396,6 +406,9 @@ int main(int argc,char **argv) {
     acidMode=solidAcid||(argc==5&&!std::strcmp(argv[4],"--acid"));
     solidMode=solidMode||solidAcid;
     visualAcid=argc==5&&!std::strcmp(argv[4],"--visual-acid");
+    incendiaryMode=argc==5&&!std::strcmp(argv[4],"--incendiary");
+    incendiaryLargeMode=argc==5&&!std::strcmp(argv[4],"--incendiary-large");
+    visualIncendiary=argc==5&&!std::strcmp(argv[4],"--visual-incendiary");
     visualSurvival=argc==5&&!std::strcmp(argv[4],"--visual-survival");
     vileMode=argc==5&&!std::strcmp(argv[4],"--vile-fx");
     visualVile=argc==5&&!std::strcmp(argv[4],"--visual-vile-fx");
@@ -406,7 +419,7 @@ int main(int argc,char **argv) {
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualSawCut||visualAcid||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualSawCut||visualAcid||visualIncendiary||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -418,6 +431,8 @@ int main(int argc,char **argv) {
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);
     if(visualSoul)std::fputs("revenant_soul_release 1\nfps 0\n",f);
     if(visualSawCut)std::fputs("wounds 0\nfullscreen 0\nmonster_weapon_vulnerabilities 1\nblood 1\nblood_spray 1\n",f);
+    if(incendiaryMode||visualIncendiary||incendiaryLargeMode)
+        std::fputs("incendiary_barrels 1\nfullscreen 0\nblood 0\nblood_spray 0\nelemental_combat_fx 0\nelemental_damage_over_time 0\n",f);
     std::fclose(f);
     if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
     if(visualSevere) {
@@ -435,7 +450,12 @@ int main(int argc,char **argv) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
-        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode||vileMode||soulMode)?"1":"4"};
+        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode||incendiaryMode||vileMode||soulMode)?"1":"4"};
+    if(incendiaryLargeMode) {
+        args.erase(std::find(args.begin(),args.end(),"-nomonsters"));
+        args.back()="15";
+    }
+    if(visualIncendiary)args.erase(std::find(args.begin(),args.end(),"-nosound"));
     if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());

@@ -46,6 +46,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 
 #include "p_local.h"
 #include "p_acid.h"
+#include "p_incendiary.h"
 #include "p_encounter.h"
 #include "r_state.h"
 
@@ -878,7 +879,8 @@ damageMobj
   mobj_t*	inflictor,
   mobj_t*	source,
   int 		damage,
-  boolean acid )
+  boolean acid,
+  boolean oilFire )
 {
     unsigned	ang;
     int		saved;
@@ -891,6 +893,8 @@ damageMobj
 
     if ( !(target->flags & MF_SHOOTABLE) )
 	return;	// shouldn't happen...
+
+    if(target->type==MT_MISC77&&P_IncendiaryDamage(target,inflictor,source,damage))return;
 		
     if(!acid&&R_DamageHit&&!p_wp_bleed_damage&&!p_wp_dot_damage)R_DamageHit(target,inflictor,source,damage);
 
@@ -1003,7 +1007,7 @@ damageMobj
     if(!acid&&damage>0)Arcade_Impact(inflictor,source,target);
     Arcade_Damage(source,target,damage);
     if(damage>0)P_PhotoEvent(2,target);
-    elementKind=acid?0:P_CombatDamageKind(inflictor,source);
+    elementKind=acid?0:oilFire?5:P_CombatDamageKind(inflictor,source);
     previousBurn=acid?0:P_CombatVisualKind(target);
     healthBefore=target->health;
     target->health -= damage;	
@@ -1053,10 +1057,18 @@ damageMobj
 
 void P_DamageMobj(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage)
 {
-    damageMobj(target,inflictor,source,damage,false);
+    damageMobj(target,inflictor,source,damage,false,false);
 }
 
 void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage)
 {
-    damageMobj(target,NULL,source,damage,true);
+    damageMobj(target,NULL,source,damage,true,false);
+}
+
+void P_DamageMobjFire(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage)
+{
+    int previousDot=p_wp_dot_damage;
+    if(!inflictor)p_wp_dot_damage=5; /* Periodic oil damage suppresses pain and weakpoint reactions. */
+    damageMobj(target,inflictor,source,damage,false,true);
+    p_wp_dot_damage=previousDot;
 }

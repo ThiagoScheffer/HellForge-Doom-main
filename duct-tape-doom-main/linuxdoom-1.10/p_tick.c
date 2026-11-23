@@ -2,6 +2,7 @@
 #include "../platform/monster_profile.h"
 #include "p_swarm.h"
 #include "p_arena.h"
+#include "p_incendiary.h"
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -207,6 +208,7 @@ void MP_BODY(P_Ticker) (void)
     
 		
     if(!r_photoactive)P_SessionTick(players[consoleplayer].mo&&players[consoleplayer].mo->health>0);
+    P_IncendiarySync();
     ED_Tick();
     if (R_BeforeTic) R_BeforeTic();
     if(leveltime<3)MP_STAGE("initial_tic_begin");
@@ -221,6 +223,7 @@ void MP_BODY(P_Ticker) (void)
     if(leveltime<3)MP_STAGE("initial_thinkers_end");
     P_UpdateSpecials ();
     P_RespawnSpecials ();
+    P_IncendiaryEndTic();
     P_SwarmEndTic();
     if(leveltime<3)MP_STAGE("initial_tic_end");
 

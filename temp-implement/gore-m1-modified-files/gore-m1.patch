@@ -1,0 +1,605 @@
+diff --git a/GORE_M1_IMPLEMENTATION.md b/GORE_M1_IMPLEMENTATION.md
+new file mode 100644
+index 0000000..ee0e048
+--- /dev/null
++++ b/GORE_M1_IMPLEMENTATION.md
+@@ -0,0 +1,75 @@
++# HellForge — Advanced Gore M1 (source-only integration)
++
++## Integration
++
++This overlay is relative to the **Doom engine source directory** containing `platform/` and `linuxdoom-1.10/` (the directory where the Doom engine's `CMakeLists.txt` belongs). It is **not** relative to the parent geometry-tools CMake project.
++
++Copy the two folders from the `gore-m1-modified-files.zip` archive over your working tree, preserving paths, after backing up or committing your current files. Alternatively, apply `gore-m1.patch` from that same engine directory with `git apply --check gore-m1.patch` followed by `git apply gore-m1.patch` (once only). **Do not use both the overlay and the patch on the same tree.** Do not replace either CMakeLists.txt; this milestone only modifies existing compiled source units.
++
++## Implemented
++
++1. **Two enemies:** Zombieman (`MT_POSSESSED`) and Shotgun Guy (`MT_SHOTGUY`) only, limited to stock first-death-frame artwork by existing hashed rigs (`POSSH0`, `SPOSH0`). Replacement WADs fall back rather than applying untrusted anatomical cuts.
++2. **Two weapons:** shotgun and super-shotgun, from the existing `P_WeakpointBeginShot/EndShot` discharge identity. Only a *lethal hit* can produce M1 gore. It must be within **128 Doom units** of the shooter.
++3. **Unmodified gameplay:** sprite impact recorded in `R_BloodHit` **before** damage, confirmed through `R_GoreHit` **after** damage; no change to Doom's hit tracing, attack accuracy, gameplay RNG, health, AI, or vanilla gib-state selection. Critical Parts is **not required**.
++4. **Head destruction:** when at least one recorded pellet has a confirmed sprite-space head hit and head pellets account for **at least half** of captured hits, a validated stock death is flagged as headless. No intact head is spawned. Masks use `woundMask`/`maskedRow`/`bodyQuads`/`fallQuads` existing geometry and blood-rim palette. Frame masks are shared and cached per image, without allocating new GPU textures.
++5. **Heavy impacts:** directional, gravity-driven sprays and 2-lobed flesh pixel fragments (up to **6 head / 3 torso**), with wall/floor/ceiling collision through the existing blood projectile and decal routines. Up to **3 extra wall marks**, using existing decal budgets. Max **64 live flesh fragments** globally, shared 768 blood-particle budget.
++6. **F4 > Combat > Gore**: Advanced Gore (Classic / Enhanced), Head destruction, Flying flesh fragments, Enhanced wall blood. Values are saved to `graphics.cfg` by the existing F4 options registry.
++7. **Gate:** `totalkills < 200`, accelerated renderer, player in single-player, not demo playback/recording, visible blood enabled, source actor using supported sprite (not voxel). Only stock death artwork triggers the effect. The gate is for map kill population, **not** count currently alive.
++8. **Lifecycle:** gore state is renderer-local, wiped on level restart, forgotten when actors leave the watched set or are resurrected, and cleared on shutdown. Existing decomposition can still affect the corpse texture behind the missing geometry.
++
++## Important prototype limitations
++
++- **Runtime and visual quality have not been verified.** Exact masking of the lying/corpse artwork uses a conservative silhouette heuristic, not per-frame, manually approved masks; examine the full death sequence from front and side before shipping.
++- Head removal is **not enabled with Death Ragdoll** on in M1 (to avoid a detached-head appearance when the ragdoll is rendered as an independent card). Heavy-impact sprays still work. Procedural Falls and ordinary sprite deaths use the existing mask path.
++- For a *vanilla extreme-death / gib frame* the code does not force a secondary head removal; it preserves the vanilla gib state and adds controlled impact blood/fragments.
++- Headless status is **runtime only**: it is not serialized in savegames, and will not survive saving/reloading the corpse.
++- Flesh fragments are small colored pixel clusters, **not** independently persistent objects. Their landing impact persists as ordinary bounded blood decals; this is the intentional M1 asset-free approach.
++- Very unusual replacement sprite assets or DeHackEd-modified death animations fall back to normal death when the hashed stock first-death frame does not match.
++- No new sound or standalone severed-limb/organ artwork is included. Torso holes, legs and organs belong to later milestones.
++
++## F4 setup for first test
++
++- Renderer: Accelerated ON
++- Blood: ON
++- Advanced Gore: Enhanced
++- Head destruction: ON
++- Flying flesh fragments: ON
++- Enhanced wall blood: ON
++- Death Ragdoll: OFF for headless-corpse tests
++- Critical Parts: OFF first (to verify cosmetic independence), then ON to verify compatibility
++- Optional `-goredebug` startup argument prints qualifying deaths with the stock-art check, pellet counts and whether a headless state was assigned.
++
++## Test cases (run in your Windows build)
++
++1. Stock Doom II IWAD, Zombieman, shotgun from ~32–96 units: aim directly at head and land lethal pellets. Confirm at most one extra gore event per victim, directional pieces, blood behind the body and a correctly headless corpse across all states.
++2. Repeat with Shotgun Guy and super-shotgun. Walk around the corpse; ensure no frame unexpectedly restores the head and no neck region is absurdly wide.
++3. Hit head nonlethally, or shoot torso lethally, or move beyond 128 units: head should **not** disappear. Near lethal torso may still have a heavier spray.
++4. Disable Wound Holes, Critical Parts, regular Blood Spray individually: Gore should still work when Enhanced Gore and **Blood** are on, because masking and heavy sprays have independent capture and presentation paths.
++5. Classic gore or Blood OFF: only pre-existing blood/death systems should appear.
++6. Try monsters other than the two supported actors, voxel monsters, and a sprite-replacement PWAD: no headless cuts should be applied.
++7. Use a test map with `totalkills == 199` and `totalkills == 200`: gore eligible only under 200. Check gameplay speed on both maps.
++8. Try Procedural Falls ON, varied deaths ON, and corpse decomposition ON. Observe death-to-corpse handoff for head reappearance or silhouette artifacts.
++9. Try Death Ragdoll ON: no headless masking, but extra bounded blood spray. Test resurrection from an Arch-vile: old masks must not persist after resurrection.
++10. Test rapid repeat kills, reload, save/load and new map transitions. Note that headless state is not retained across save/reload in this milestone.
++11. Compare HP, pellet hit-registration and ammunition consumption between Classic and Enhanced Gore: values must be identical (with Critical Parts separately fixed to the same setting).
++12. Watch for unexpected wall decals on sky/untextured surfaces or fragments clipping through a wall. The existing blood collision code is authoritative.
++
++## Recommended test evidence to return
++
++A screenshot or short video of a Zombieman fatal head shot, the resulting fully settled corpse, one side-view of a Shotgun Guy corpse, and console output with `-goredebug`. Include the `graphics.cfg` entries and whether Procedural Falls / Death Ragdoll were on. This is enough to tune masks and burst sizes with minimal iteration.
++
++## Source integration points
++
++- `linuxdoom-1.10/p_map.c`, `r_state.h`, `r_main.c`: post-damage cosmetic callback.
++- `platform/scene3d/blood.cpp`: pre-damage sprite impact capture.
++- `platform/scene3d/wounds.cpp`: discharge accumulation, stock-art gate, death decisions, cached per-frame headless masks and lifecycle.
++- `platform/scene3d/spray.cpp`: bounded blood/chunk ballistics and rendering.
++- `platform/scene3d/body_motion.cpp`: corpse watcher remains active when Gore is enabled.
++- `platform/scene3d/scene.cpp`, `internal.h`: callback registration.
++- `platform/scene3d.h`, `settings_panel.cpp`, `settings_layout.h`: options and F4 integration.
++
++### Source verification status
++
++- Parsed the uploaded source tree and traced the existing damage/render flow.
++- C syntax checks for modified `p_map.c` and `r_main.c` passed (the existing `r_main.c` missing declaration warning for unrelated `I_GetTime` was ignored).
++- **Not** compiled/linked/tested on the complete SDL3/Vulkan Windows engine: the user requested source implementation only, and third-party/build/test directories were not uploaded.
+diff --git a/linuxdoom-1.10/p_map.c b/linuxdoom-1.10/p_map.c
+index 3e6becf..3dfb696 100644
+--- a/linuxdoom-1.10/p_map.c
++++ b/linuxdoom-1.10/p_map.c
+@@ -1401,6 +1401,10 @@ boolean PTR_ShootTraverse(intercept_t *in)
+     if (la_damage)
+         P_WeakpointDealDamage(&event);
+     P_WeakpointAfterDamage(&event);
++    // Cosmetic gore consumes only the already-resolved result; it never alters tracing or damage.
++    if (R_GoreHit && la_damage && event.kind == WP_SHOTGUN_PELLET)
++        R_GoreHit(th, shootthing, event.kind, th->health <= 0,
++                  th->health < -th->info->spawnhealth && th->info->xdeathstate != S_NULL);
+ 
+     // don't go any farther
+     return false;
+diff --git a/linuxdoom-1.10/r_main.c b/linuxdoom-1.10/r_main.c
+index 8b1261e..bddefd6 100644
+--- a/linuxdoom-1.10/r_main.c
++++ b/linuxdoom-1.10/r_main.c
+@@ -70,6 +70,7 @@ void (*R_SolidBulletImpact)(float x,float y,float z,float nx,float ny,float nz);
+ void (*R_DoorDamage)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z, int broken);
+ void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z);
+ void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
++void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
+ void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
+ void (*R_VileHurt)(const mobj_t *vile);
+ void (*R_RevenantDeath)(const mobj_t *revenant);
+diff --git a/linuxdoom-1.10/r_state.h b/linuxdoom-1.10/r_state.h
+index 645718d..252ad06 100644
+--- a/linuxdoom-1.10/r_state.h
++++ b/linuxdoom-1.10/r_state.h
+@@ -124,6 +124,8 @@ extern void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_
+ // Renderer-only hitscan blood: x,y,z is the blood spot, dx,dy the shot direction,
+ // slope its vertical rise per horizontal unit (to locate the hit on the sprite).
+ extern void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
++// Rendering only. Triggered after hitscan damage: kind = wp_damage_kind_t; extreme = vanilla xdeath.
++extern void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
+ // Every damage event, before it is applied (renderer only: who hit what, with what).
+ extern void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
+ extern void (*R_VileHurt)(const mobj_t *vile);
+diff --git a/platform/scene3d.h b/platform/scene3d.h
+index a06fc17..a2fbd56 100644
+--- a/platform/scene3d.h
++++ b/platform/scene3d.h
+@@ -118,6 +118,11 @@ struct Settings {
+     int bloodShine=1; // Fresh blood glints under dynamic lights, then dries matte.
+     int deathMotion=0; // Optional deaths jolt with the killing blow's push and height.
+     int wounds=1; // Hitscan hits shoot holes through monsters' sprites, rimmed with blood; drawing only.
++    // M1: only stock Zombieman/Shotgun Guy, close lethal shotgun hits, <200 map monsters.
++    int goreLevel=1; // 0 Classic, 1 Enhanced. Visual-only; never modifies combat damage.
++    int goreHeads=1; // Burst on concentrated confirmed head pellets; no detached head art.
++    int goreFragments=1; // Small directional procedural flesh pieces, capped globally.
++    int goreWallBlood=1; // Larger splashes and drips from lethal close-range blasts.
+     int deathFalls=0; // Optional procedural falls: 0 off, 1 by hit, 2 legs, 3 chest, 4 head.
+     int deathRagdoll=0; // Rigged monsters fall as ragdolls instead: the pain drawing raised into a relief on a small skeleton the hit knocks over.
+     int deathGuided=1; // With deathRagdoll: chest blasts from the front sometimes play the shot death on strings (hand rigs that fit it: the zombieman).
+diff --git a/platform/scene3d/blood.cpp b/platform/scene3d/blood.cpp
+index 228223d..a5cb6c7 100644
+--- a/platform/scene3d/blood.cpp
++++ b/platform/scene3d/blood.cpp
+@@ -479,6 +479,8 @@ void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fi
+     const bool sawCut=boostedSaw&&(target->type==MT_SERGEANT||target->type==MT_SHADOWS);
+     int visualDamage=boostedSaw?std::max(damage,35):damage;
+     BloodSourceScope bloodSource(target);
++    // Before damage and state transition: preserve the actual sprite-space pellet hit.
++    goreCapture(target,shooter,fx,fy,fz,fdx,fdy,slope);
+     shotThrough(target,fx,fy,fz,fdx,fdy,visualDamage);
+     bodyHit(target,fx,fy,fz,fdx,fdy,visualDamage);
+     float z=units(fz);
+diff --git a/platform/scene3d/body_motion.cpp b/platform/scene3d/body_motion.cpp
+index bfee434..4a38e9a 100644
+--- a/platform/scene3d/body_motion.cpp
++++ b/platform/scene3d/body_motion.cpp
+@@ -125,7 +125,8 @@ static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hi
+ void watchBodies() {
+     bool spray=settings.blood&&settings.bloodSpray;
+     if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!settings.wounds&&!spray&&
+-        !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks)||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
++        !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&
++        !(settings.goreLevel&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
+     if(bodyLevelSerial!=r_levelserial) {bodyMotionShutdown();bodyLevelSerial=r_levelserial;}
+     for(auto &entry:watched)entry.second.seen=false;
+     static std::vector<mobj_t*> bodies;bodies.clear();
+diff --git a/platform/scene3d/internal.h b/platform/scene3d/internal.h
+index c50348b..9092ae8 100644
+--- a/platform/scene3d/internal.h
++++ b/platform/scene3d/internal.h
+@@ -641,6 +641,11 @@ bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z)
+ bool hasRagdoll(const mobj_t *thing);   // a ragdoll draws it: its own contacts make its blood and slaps
+ bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (ragdoll_test.cpp's -ragdollloop)
+ 
++// gore M1: wound-space pixel capture before hitscan damage and confirmed result after damage.
++void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
++                 fixed_t dx,fixed_t dy,fixed_t slope);
++void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
++void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head);
+ // wounds.cpp
+ int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
+ int weakpointLocate(mobj_t*,mobj_t*,wp_impact_t*);
+diff --git a/platform/scene3d/scene.cpp b/platform/scene3d/scene.cpp
+index 3e63fc7..7afbdef 100644
+--- a/platform/scene3d/scene.cpp
++++ b/platform/scene3d/scene.cpp
+@@ -222,6 +222,7 @@ void applySettings() {
+     R_WallImpact=settings.accelerated?wallImpact:nullptr;
+     R_DamageHit=settings.accelerated?bodyDamaged:nullptr;
+     R_BloodHit=settings.accelerated?bloodHit:nullptr;
++    R_GoreHit=settings.accelerated?goreAfterHit:nullptr;
+     R_VileHurt=vileEffectsEnabled()?vileHurt:nullptr;
+     R_RevenantDeath=settings.accelerated&&settings.revenantSoulRelease?revenantDeath:nullptr;
+     if(!R_RevenantDeath)resetRevenantSouls();
+@@ -320,7 +321,7 @@ void sceneShutdown() {
+     for(auto &texture:keyHandTextures)texture.reset();keyHandVisible=keyWeaponDrop=0;
+     toastyTexture.reset();toastyVisible=0;romeroTexture.reset();romeroAge=-1;
+     cancelRelight();
+-    R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
++    R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_GoreHit=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
+     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
+     clearLevelGeometry();
+     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
+diff --git a/platform/scene3d/spray.cpp b/platform/scene3d/spray.cpp
+index fe50c8b..9574450 100644
+--- a/platform/scene3d/spray.cpp
++++ b/platform/scene3d/spray.cpp
+@@ -16,7 +16,11 @@ namespace doom3d {
+ // when. Its splat is laid then, shown from that moment, and the speck flies
+ // until it gets there, moving at the tic rate like the debris.
+ constexpr float sprayGravity=1225; // Doom's: a unit a tic, each tic.
+-struct Drop { float x,y,z,vx,vy,vz,born,end,size;std::array<float,3> color;bool decoration=false; };
++struct Drop {
++    float x,y,z,vx,vy,vz,born,end,size;
++    std::array<float,3> color;
++    bool decoration=false,flesh=false;
++};
+ static std::vector<Drop> drops;
+ constexpr size_t maxDrops=768;
+ // Dying and dead bodies watched for sliding (smears) and stopping short (a wall).
+@@ -38,7 +42,7 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
+ // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
+ // a second; splat: the size of what it leaves (0 none).
+ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
+-                      const uint32_t *decorationSeed=nullptr) {
++                      const uint32_t *decorationSeed=nullptr,bool flesh=false) {
+     float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
+     const sector_t *start=sectorAt(x,y);
+     z=std::clamp(z,floorZ(start)+0.5f,ceilZ(start)-0.5f);
+@@ -103,7 +107,7 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
+     if(decorationSeed&&!settings.bloodSpray)return floorSplat;
+     if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
+     const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):randomRange(.35f,.7f);
+-    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr});
++    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr,flesh});
+     return floorSplat;
+ }
+ 
+@@ -138,6 +142,40 @@ static void burst(float x,float y,float z,float dx,float dy,const Burst &b) {
+     }
+ }
+ 
++// Milestone 1 heavy close-range impact. These are short-lived drawn pixel
++// clusters, never new actors/physics bodies. The existing ballistic drop
++// integrator finds walls/floors/ceilings and uses the ordinary decal caps.
++void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head) {
++    if(!settings.accelerated||settings.goreLevel!=1||!settings.blood||
++       totalkills>=200||(!settings.goreWallBlood&&!settings.goreFragments))return;
++    checkSprayLevel();
++    BloodSourceScope tint(&target);
++    const float heading=std::atan2(dy,dx);
++    int wallBudget=settings.goreWallBlood?3:0;
++    // A directional cloud behind the victim makes the shot feel forceful
++    // without globally increasing normal bullet spray.
++    if(settings.goreWallBlood)for(int n=0;n<(head?4:3);++n) {
++        const float a=heading+randomRange(-.43f,.43f),speed=randomRange(68,126);
++        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
++            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget);
++    }
++    if(!settings.goreFragments)return;
++    // Max 64 live flesh clusters across the whole scene. Keep the 768-drop
++    // budget shared with normal blood instead of allocating a new particle pool.
++    const float now=gameSeconds();
++    int active=0;
++    for(const auto &d:drops)if(d.flesh&&d.end>now)++active;
++    const int count=std::min(head?6:3,std::max(0,64-active));
++    for(int n=0;n<count;++n) {
++        const float a=heading+randomRange(-.60f,.60f),speed=randomRange(54,132);
++        float vZ=randomRange(-25,105);
++        // Only the existing decal system persists on the ground or wall.
++        const float splat=settings.goreWallBlood?randomRange(9,17):0;
++        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,vZ,
++                  randomRange(1.45f,2.6f),splat,BLOOD_SPLAT,&wallBudget,nullptr,true);
++    }
++}
++
+ void combatHeadBlood(const wp_damage_event_t &event) {
+     if(!bloodOn())return;
+     checkSprayLevel();BloodSourceScope source(event.target);++combatFeedbackStats.headBursts;
+@@ -352,8 +390,10 @@ static void drip(const mobj_t &thing) {
+     }
+ }
+ void watchSpray() {
+-    if(!sprayOn()||levelSerial!=r_levelserial) {drops.clear();slides.clear();return;}
++    const bool goreOnly=settings.accelerated&&settings.goreLevel&&settings.blood&&totalkills<200;
++    if((!sprayOn()&&!goreOnly)||levelSerial!=r_levelserial) {drops.clear();slides.clear();return;}
+     checkSprayLevel();
++    if(!sprayOn()){slides.clear();return;}
+     for(auto &entry:slides)entry.second.seen=false;
+     float now=gameSeconds();
+     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
+@@ -401,7 +441,13 @@ void buildSpray(const Uniforms &camera) {
+         float x=d.x+d.vx*t,y=d.y+d.vy*t,z=d.z+d.vz*t-0.5f*sprayGravity*t*t;
+         float light=lighting(sectorAt(x,y)),tall=std::abs(d.vz-sprayGravity*t)>250?2.0f:1.0f;
+         std::array<float,3> lit;for(int c=0;c<3;++c)lit[c]=std::min(1.0f,d.color[c]*light);
+-        pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
++        if(d.flesh) {
++            // A tiny uneven two-lobe cluster reads as tissue rather than a
++            // perfectly spherical drop, without art or additional textures.
++            pixelBlock(particleVertices,camera,x,y,z,d.size*1.15f,tall,lit,false,&d.color);
++            pixelBlock(particleVertices,camera,x+d.size*.4f,y-d.size*.25f,z+d.size*.25f,
++                       d.size*.63f,tall,lit,false,&d.color);
++        } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
+     }
+ }
+ void sprayShutdown() {drops.clear();slides.clear();}
+diff --git a/platform/scene3d/wounds.cpp b/platform/scene3d/wounds.cpp
+index a23eda5..0483477 100644
+--- a/platform/scene3d/wounds.cpp
++++ b/platform/scene3d/wounds.cpp
+@@ -27,6 +27,19 @@ struct Wound {
+     unsigned char stage=0,contacts=0;
+ };
+ static std::unordered_map<const mobj_t*,std::vector<Wound>> wounds;
++// M1 gore never owns Doom actors or alters their health/state. One accumulated
++// shotgun discharge per victim, and a single persistent *visual* corpse flag.
++struct GoreShot {
++    uint64_t discharge=0;
++    int tic=0,contacts=0,heads=0;
++    float x=0,y=0,z=0,hx=0,hy=0,hz=0,dx=1,dy=0;
++    bool emitted=false;
++};
++static std::unordered_map<const mobj_t*,GoreShot> goreShots;
++static std::unordered_set<const mobj_t*> goreHeadless;
++// All dismembered corpses sharing the same stock frame reuse a single mask.
++static std::unordered_map<const Image*,std::vector<byte>> goreFrameMasks;
++
+ static std::unordered_map<int,float> standing;
+ struct WoundSurface {
+     const mobj_t *viewer;
+@@ -70,7 +83,7 @@ constexpr float maxRadius=3.0f;
+ 
+ void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
+                float top,float bottom,float rx,float ry,const BodyPose *pose,int rotation) {
+-    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks)||!thing||!thing->info||thing->health<=0)return;
++    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&!(settings.goreLevel&&settings.blood&&totalkills<200))||!thing||!thing->info||thing->health<=0)return;
+     if(!(thing->info->flags&MF_COUNTKILL)&&thing->type!=MT_SKULL)return;
+     surfaces[thing]={viewer,&image,x,y,feet,top,bottom,rx,ry,
+         (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr,thing->sprite,thing->frame,rotation};
+@@ -207,6 +220,89 @@ static bool captureSpriteHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fix
+     return true;
+ }
+ 
++// A death mask is only safe on the verified stock death frame. A replacement
++// WAD, alternate frame family, or changed DEH actor state gets normal death art.
++static bool goreStockDeath(const mobj_t &actor) {
++    if(!actor.info||(actor.type!=MT_POSSESSED&&actor.type!=MT_SHOTGUY))return false;
++    const int state=actor.info->deathstate;
++    if(state<=S_NULL||state>=NUMSTATES)return false;
++    const auto &frame=states[state];
++    if(frame.sprite<0||frame.sprite>=numsprites)return false;
++    const auto &sprite=sprites[frame.sprite];
++    const int index=frame.frame&FF_FRAMEMASK;
++    if(index>=sprite.numframes)return false;
++    const int lump=firstspritelump+sprite.spriteframes[index].lump[0];
++    const Image &image=lumpImage(lump,false);
++    char name[9];std::memcpy(name,lumpinfo[lump].name,8);name[8]=0;
++    if(std::strcmp(name,actor.type==MT_POSSESSED?"POSSH0":"SPOSH0"))return false;
++    return doom_stock_rig_for(name,image.width,image.height,image.pixels.data())!=nullptr;
++}
++static bool goreEligible(const mobj_t *target,const mobj_t *source) {
++    return settings.accelerated&&settings.goreLevel==1&&settings.blood&&
++        totalkills<200&&levelSerial==r_levelserial&&!netgame&&!demoplayback&&!demorecording&&
++        target&&source&&source->player&&target->health>0&&
++        (target->type==MT_POSSESSED||target->type==MT_SHOTGUY)&&
++        !(target->flags&MF_NOBLOOD)&&(!criticalVoxelModel||!criticalVoxelModel(*target));
++}
++// Called by the *existing* blood hit hook before damage. Unlike PT_CRITICAL
++// this never changes which pellets connect: the engine's vanilla cylinder
++// remains authoritative even when Critical Parts is off.
++void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
++                 fixed_t dx,fixed_t dy,fixed_t slope) {
++    if(!goreEligible(target,source)||P_WeakpointBulletKind()!=WP_SHOTGUN_PELLET)return;
++    const uint64_t shot=P_WeakpointDischarge(source);
++    if(!shot)return;
++    const float distance=std::hypot(units(target->x)-units(source->x),units(target->y)-units(source->y));
++    if(distance>128.f)return; // close range is measured from the shooter, not the sprite plane
++    auto &acc=goreShots[target];
++    if(acc.discharge!=shot)acc={};
++    acc.discharge=shot;acc.tic=leveltime;
++    ++acc.contacts;
++    acc.x=units(x);acc.y=units(y);acc.z=units(z);
++    float length=std::hypot(units(dx),units(dy));
++    if(length>1e-4f){acc.dx=units(dx)/length;acc.dy=units(dy)/length;}
++    SpriteImpact impact;
++    if(!captureSpriteHit(target,x,y,z,dx,dy,slope,source,impact)||!impact.image)return;
++    auto profile=heads.find(impact.image);
++    if(profile==heads.end()) {
++        HeadProfile head{};
++        const Image &img=*impact.image;
++        head.found=doom_joints::findHead(img.pixels.data(),img.width,img.height,img.left,img.top,head.head);
++        profile=heads.emplace(impact.image,head).first;
++    }
++    const auto &head=profile->second;
++    if(head.found&&impact.image->top-impact.point.v>=head.head.neck&&
++       std::abs(impact.point.u-impact.image->left-head.head.middle)<=head.head.width*.5f) {
++        ++acc.heads;
++        acc.hx=acc.x;acc.hy=acc.y;acc.hz=acc.z;
++    }
++}
++void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int killed,int extreme) {
++    if(kind!=WP_SHOTGUN_PELLET||!target||!source||!source->player)return;
++    auto found=goreShots.find(target);
++    if(found==goreShots.end())return;
++    GoreShot &shot=found->second;
++    if(shot.discharge!=P_WeakpointDischarge(source)||shot.tic!=leveltime||shot.emitted||!killed)return;
++    shot.emitted=true;
++    // No late damage, resurrected bodies, custom replacements, boss actors or gib-frame conflicts.
++    const bool verified=goreStockDeath(*target);
++    if(!settings.accelerated||settings.goreLevel!=1||!settings.blood||totalkills>=200||
++       netgame||demoplayback||demorecording||!verified) {
++        if(M_CheckParm((char*)"-goredebug"))
++            std::fprintf(stderr,"GORE M1: skipped type=%d stock=%d contacts=%d heads=%d\n",
++                int(target->type),int(verified),shot.contacts,shot.heads);
++        return;
++    }
++    const bool head=settings.goreHeads&&!extreme&&!settings.deathRagdoll&&
++        shot.heads>0&&shot.heads*2>=shot.contacts;
++    if(head)goreHeadless.insert(target);
++    if(M_CheckParm((char*)"-goredebug"))
++        std::fprintf(stderr,"GORE M1: death type=%d contacts=%d heads=%d headless=%d extreme=%d\n",
++            int(target->type),shot.contacts,shot.heads,int(head),extreme);
++    goreBurst(*target,head?shot.hx:shot.x,head?shot.hy:shot.y,head?shot.hz:shot.z,
++              shot.dx,shot.dy,head);
++}
++
+ int cosmeticBulletLocate(mobj_t *target,mobj_t *shooter,fixed_t x,fixed_t y,fixed_t z,fixed_t dx,fixed_t dy,fixed_t slope,wp_impact_t *out) {
+     if(!settings.accelerated||!settings.monsterMetalSparks||!target||!shooter||
+         (target->type!=MT_BABY&&target->type!=MT_SPIDER)||!P_WeakpointActive()||
+@@ -424,7 +520,10 @@ bool sawWoundHit(mobj_t *target,mobj_t *shooter,float &z) {
+     list.push_back(std::move(wound));
+     return true;
+ }
+-void forgetWounds(const mobj_t *thing) {wounds.erase(thing);surfaces.erase(thing);bulletImpacts.erase(thing);bulletResults.erase(thing);}
++void forgetWounds(const mobj_t *thing) {
++    wounds.erase(thing);surfaces.erase(thing);bulletImpacts.erase(thing);bulletResults.erase(thing);
++    goreShots.erase(thing);goreHeadless.erase(thing);
++}
+ int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
+     auto found=wounds.find(thing);
+     if(found==wounds.end())return 0;
+@@ -435,7 +534,10 @@ int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
+     }
+     return count;
+ }
+-void woundsShutdown() {wounds.clear();surfaces.clear();lyings.clear();standing.clear();bulletImpacts.clear();bulletResults.clear();heads.clear();regionMasks.clear();bulletShooter=nullptr;}
++void woundsShutdown() {
++    wounds.clear();surfaces.clear();lyings.clear();standing.clear();bulletImpacts.clear();bulletResults.clear();
++    goreShots.clear();goreHeadless.clear();goreFrameMasks.clear();heads.clear();regionMasks.clear();bulletShooter=nullptr;
++}
+ 
+ // How tall a monster stands, by its first drawing, to tell lying death drawings.
+ static float standingTop(const mobj_t &thing) {
+@@ -510,15 +612,87 @@ static byte sawMark(float x,float y,unsigned char stage,uint32_t seed) {
+     return 0;
+ }
+ 
++// Apply after ordinary wound masks, so an intact head cannot reappear on
++// later death frames. No texture rewriting and no extra GPU resources.
++static bool goreHeadMask(const mobj_t &actor,const Image &image,std::vector<byte> &mask) {
++    if(!settings.accelerated||!settings.goreLevel||!settings.goreHeads||
++       !settings.blood||totalkills>=200||actor.health>0||
++       !goreHeadless.count(&actor)||image.pixels.empty())return false;
++    const int w=image.width,h=image.height;
++    if(w<=0||h<=0)return false;
++    // Mask depends on the artwork and its original geometry, not on the actor.
++    auto cached=goreFrameMasks.find(&image);
++    if(cached==goreFrameMasks.end()) {
++        std::vector<byte> cut((size_t)w*h,0);
++        const bool lying=image.top<standingTop(actor)*.85f;
++        const Lying *body=lying?&lyingOf(image):nullptr;
++        if(body&&body->first<0)return false;
++        auto profile=heads.find(&image);
++        doom_joints::Head head{};
++        bool found=profile!=heads.end()&&profile->second.found;
++        if(found)head=profile->second.head;
++        else if(!lying) {
++            profile=heads.emplace(&image,HeadProfile{}).first;
++            profile->second.found=doom_joints::findHead(image.pixels.data(),w,h,image.left,image.top,profile->second.head);
++            if(profile->second.found){head=profile->second.head;found=true;}
++        }
++        if(!found&&!lying) {
++            // Transitional fall frames sometimes lack visible shoulders. This
++            // conservative estimate stays confined to the upper silhouette.
++            int first=h;
++            for(int r=0;r<h;++r)for(int c=0;c<w;++c)
++                if(image.pixels[((size_t)r*w+c)*2+1])first=std::min(first,r);
++            if(first>=h)return false;
++            head={float(image.top-first-std::clamp(h/5,6,12)),
++                  float(w/2-image.left),float(std::clamp(w/3,8,17))};
++            found=true;
++        }
++        for(int r=0;r<h;++r)for(int c=0;c<w;++c) {
++            size_t i=(size_t)r*w+c;
++            if(!image.pixels[i*2+1])continue;
++            bool remove=false,rim=false;
++            if(lying) {
++                const int span=body->last+1-body->first;
++                if(span<12)continue;
++                const int width=std::max(3,(int)std::lround(span*.19f));
++                const int dist=body->headRight?body->last-c:c-body->first;
++                remove=dist<width-1;
++                rim=dist>=width-1&&dist<=width+1;
++            } else if(found) {
++                const float above=image.top-r-.5f;
++                const float across=c-image.left+.5f-head.middle;
++                const float width=std::max(3.f,head.width*.62f);
++                if(std::abs(across)>width+1.f)continue;
++                remove=above>head.neck+1.f&&std::abs(across)<width;
++                rim=above>=head.neck-1.5f&&above<=head.neck+2.f;
++            }
++            if(remove)cut[i]=1;
++            else if(rim)cut[i]=((c+2*r)%5==0)?4:3;
++        }
++        cached=goreFrameMasks.emplace(&image,std::move(cut)).first;
++    }
++    if(mask.size()!=(size_t)w*h)mask.assign((size_t)w*h,0);
++    bool any=false;
++    const auto &cut=cached->second;
++    for(size_t i=0;i<cut.size();++i) {
++        if(!cut[i])continue;
++        any=true;
++        if(cut[i]==1)mask[i]=1;
++        else if(mask[i]!=1)mask[i]=cut[i];
++    }
++    return any;
++}
++
+ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask) {
+     auto found=wounds.find(&thing);
+-    if((!settings.wounds&&!settings.blood)||found==wounds.end()||found->second.empty()||image.pixels.empty())return false;
++    if((!settings.wounds&&!settings.blood)||found==wounds.end()||found->second.empty()||image.pixels.empty())
++        return goreHeadMask(thing,image,mask);
+     bool dead=thing.health<=0;
+     // Death drawings face the viewer; lying ones carry the holes along the body.
+     float tall=standingTop(thing);
+     bool lying=dead&&image.top<0.85f*tall;
+     const Lying *body=lying?&lyingOf(image):nullptr;
+-    if(lying&&body->first<0)return false;
++    if(lying&&body->first<0)return goreHeadMask(thing,image,mask);
+     float a=(float)(thing.angle*(2*doomPi/4294967296.0));
+     int w=image.width,h=image.height;
+     mask.assign((size_t)w*h,0);
+@@ -566,7 +740,7 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
+                 any=any||mark!=0;
+             }
+     }
+-    return any;
++    return goreHeadMask(thing,image,mask)||any;
+ }
+ 
+ void woundVertex(Vertex &vertex,byte state) {
+diff --git a/platform/settings_layout.h b/platform/settings_layout.h
+index af50eb8..bfc54f9 100644
+--- a/platform/settings_layout.h
++++ b/platform/settings_layout.h
+@@ -44,6 +44,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const
+         if(!strcmp(k,"corrosive_barrels"))return {"Combat","Barrels"};
+         if(settingIs(k,{"critical_parts","enhanced_weak_points","monster_weapon_vulnerabilities","kill_shots_carry"}))return {"Combat","Hits"};
+         if(settingIs(k,{"localized_injury_effects","elemental_damage_over_time","advanced_monster_reactions","eye_injuries","monster_bleeding","hit_flinch"}))return {"Combat","Injuries"};
++        if(settingIs(k,{"gore_level","gore_heads","gore_fragments","gore_wall_blood"}))return {"Combat","Gore"};
+         if(settingIs(k,{"blood","blood_spray","blood_shine","severe_critical_bloodspill","monster_skin_damage","wounds"}))return {"Combat","Blood"};
+         if(settingIs(k,{"varied_deaths","death_falls","death_face_viewer","death_motion","body_motion_strength","soft_effects"}))return {"Combat","Deaths"};
+         if(!strcmp(k,"shootable_lights"))return {"Destruction","Lights"};
+@@ -80,7 +81,7 @@ inline std::vector<OptionTab> settingsLayout(std::vector<OptionTab> source) {
+         {"Controls",{},{{"Aiming",{}},{"Peeking",{}}}},
+         {"HUD",{},{{"Layout",{}},{"Portrait",{}},{"Feedback",{}},{"Speedrun",{}},{"Run stats",{}}}},
+         {"Gameplay",{},{{"Weapons",{}},{"Arenas",{}}}},
+-        {"Combat",{},{{"Hits",{}},{"Injuries",{}},{"Blood",{}},{"Deaths",{}},{"Feedback",{}},{"Barrels",{}}}},
++        {"Combat",{},{{"Hits",{}},{"Injuries",{}},{"Blood",{}},{"Gore",{}},{"Deaths",{}},{"Feedback",{}},{"Barrels",{}}}},
+         {"Monsters",{},{{"AI",{}},{"Survival",{}},{"Appearance",{}}}},
+         {"ENCOUNTER DIRECTOR",{},{{"Overview",{}},{"Monsters",{}},{"Reinforcements",{}},{"Items",{}},{"Population",{}},{"Advanced",{}}}},
+         {"Destruction",{},{{"Surfaces",{}},{"Doors",{}},{"Collapses",{}},{"Debris",{}},{"Lights",{}},{"Effects",{}}}},
+diff --git a/platform/settings_panel.cpp b/platform/settings_panel.cpp
+index cd44a54..79869e0 100644
+--- a/platform/settings_panel.cpp
++++ b/platform/settings_panel.cpp
+@@ -53,6 +53,7 @@ const char *effectCost(const char *key) {
+         {"sun_shadows","LOAD-TIME COST: sunlight is baked, not rebuilt every frame."},
+         {"decoration_shadows","LOAD-TIME COST: changing this re-bakes lighting."},
+         {"wounds","VARIABLE COST: rises with wounded monsters in view."},
++        {"gore_level","BOUNDED COST: two stock human monsters, close lethal shotgun hits only; disabled on maps with 200 or more kill-count monsters."},
+         {"monster_skin_damage","ONE-TIME GPU TEXTURE COST: caches recognized stock sprite damage tiers (bounded to 16 MiB)."},
+         {"death_falls","VARIABLE COST: rises with simultaneous visible deaths."},
+         {"varied_deaths","VARIABLE COST: rises during large fights."},
+@@ -240,6 +241,21 @@ std::vector<OptionTab> optionTabs(Settings &s) {
+                     "No impact tracking, no gameplay changes. Keeps heads untouched, excludes replacement sprites and voxel models. "
+                     "Independent of Wound holes and Monster Bleeding; Off by default.",
+                     [](const Settings &d){return d.accelerated!=0;}),
++                choice("gore_level","Advanced Gore",&s.goreLevel,{"Classic","Enhanced"},{0,1},
++                    "Cosmetic-only lethal close-range shotgun impacts on stock Zombieman and Shotgun Guy. "
++                    "Below 200 map kill-count monsters; no gameplay damage changes, no new sprites or actors.",
++                    [](const Settings &d){return d.accelerated&&d.blood;}),
++                check("gore_heads","Head destruction",&s.goreHeads,
++                    "Concentrated lethal head impacts remove the head from the corpse and scatter fragments. "
++                    "Uses validated stock death artwork; other art falls back to an ordinary death.",
++                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
++                check("gore_fragments","Flying flesh fragments",&s.goreFragments,
++                    "A few irregular flesh particles follow the blast, fall under gravity, and deposit blood on surfaces. "
++                    "Procedural, cosmetic and limited in number.",
++                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
++                check("gore_wall_blood","Enhanced wall blood",&s.goreWallBlood,
++                    "Extra directional impact splashes, wall drips and floor stains, using the existing collision and decal budgets.",
++                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
+                 check("wounds","Wound holes",&s.wounds,
+                     "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "
+                     "The marks follow the monster's animation. Close hits widen a hole; seen from the side it closes. "

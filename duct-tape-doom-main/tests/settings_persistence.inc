@@ -7,7 +7,15 @@ static std::string fileContents(const char *name){std::ifstream f(name,std::ios:
 static void settingsPersistenceFrame(){
     // Dummy video has no GPU device, so invoke the normal scene initialization explicitly.
     sceneInit(SDL_GetKeyboardFocus());
-    if(settingsCase=="--settings-immersion-write"||settingsCase=="--settings-immersion-read") {
+    if(settingsCase=="--settings-oil-write"||settingsCase=="--settings-oil-read"||settingsCase=="--settings-oil-disable") {
+        const bool enable=settingsCase=="--settings-oil-write";
+        check(settings.incendiaryBarrels!=enable,"oil profile starts with the expected persisted choice");
+        if(settingsCase!="--settings-oil-read")
+            check(I_TestSettingsPersistence(12),"real F4 Combat checkbox applies and saves");
+        const bool want=settingsCase!="--settings-oil-disable";
+        check((settings.incendiaryBarrels!=0)==want&&(P_IncendiaryEnabled()!=0)==want,
+              "oil preference reaches the live engine and survives process restart");
+    }else if(settingsCase=="--settings-immersion-write"||settingsCase=="--settings-immersion-read") {
         if(settingsCase=="--settings-immersion-write") {
             check(!settings.livingSurfaces&&settings.livingIntensity==2,"new profile starts Off and Medium");
             check(I_TestSettingsPersistence(11),"F4 applies and saves every immersion control");
