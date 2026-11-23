@@ -468,6 +468,19 @@ Image &wallImage(int index) {
         glass.empty()?nullptr:glass.data(),true)).first->second,name,false);
     image.switchIndicator=doom_switch_texture(name);
     image.skyArtwork=classifySkyArtwork(image,index,name);
+    if(image.skyArtwork!=SkyArtwork::Unknown) {
+        const int lump=W_GetNumForName((char*)"PLAYPAL");
+        if(W_LumpLength(lump)>=768)
+            image.skyPalette=skyFingerprint((const byte*)W_CacheLumpNum(lump,PU_CACHE),768);
+    }
+    if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode==commercial) {
+        if(image.skyArtwork==SkyArtwork::BurningCity&&image.skyPalette==stockSkyPalette)
+            skyDepthScene(image);
+        else if(devparm&&SDL_strcasecmp(name,"SKY2")==0) {
+            const char *reason=image.skyArtwork==SkyArtwork::BurningCity?"custom PLAYPAL":"unrecognized artwork";
+            fprintf(stderr,"Sky depth: SKY2 fallback (%s).\n",reason);
+        }
+    }
     setLivingWallProfile(image,index,name);
     if(image.leaded)return withLeadedRelief(withGlassFrame(image,frame));
     return withRelief(withGlassFrame(image,frame),image.opaque&&!animated?wallTiles:nullptr);

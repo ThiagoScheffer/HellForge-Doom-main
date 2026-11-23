@@ -3,8 +3,11 @@
 struct SkyDepthCacheEntry {
     bool attempted=false;
     GpuTextureRef texture;
+    SkyDepthScene scene;
 };
 static std::array<std::array<SkyDepthCacheEntry,2>,(size_t)SkyArtwork::Count> skyDepthCache;
+std::array<float,3> skyDepthOrigin{};
+static constexpr uint64_t stockSkyPalette=0x43701a484700347fULL;
 
 static uint64_t skyFingerprint(const byte *pixels,size_t count) {
     uint64_t hash=14695981039346656037ULL;
@@ -133,34 +136,10 @@ static float skyLuma(const byte *rgb) {
     return .299f*rgb[0]+.587f*rgb[1]+.114f*rgb[2];
 }
 
-// Classify the painted facades between roof steps. Shorter, brighter
-// profiles generally belong behind the tall, hard-edged black towers.
-// Walk a full wrapped interval so the last facade can cross column zero.
-static std::vector<float> cityDistances(const std::vector<int> &roof,
-                                        const std::vector<float> &facade,int h) {
-    const int w=(int)roof.size();
-    std::vector<float> depth(w,.4f);
-    std::vector<int> edges;
-    for(int x=0;x<w;++x)
-        if(std::abs(roof[x]-roof[(x+w-1)%w])>=4)edges.push_back(x);
-    if(edges.empty())return depth;
-    for(size_t i=0;i<edges.size();++i) {
-        const int start=edges[i],end=i+1<edges.size()?edges[i+1]:edges[0]+w;
-        float top=0,brightness=0;
-        for(int x=start;x<end;++x) {
-            top+=roof[x%w];
-            brightness+=facade[x%w];
-        }
-        const float span=float(end-start);
-        const float low=std::clamp((top/span-h*.33f)/(h*.29f),0.0f,1.0f);
-        const float soft=std::clamp((brightness/span-8)/25,0.0f,1.0f);
-        const float far=std::clamp(.11f+.66f*low+.24f*soft,0.11f,.92f);
-        for(int x=start;x<end;++x)depth[x%w]=far;
-    }
-    return depth;
-}
+#include "sky_depth_city.inc"
 
-static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const std::vector<int> &roof) {
+static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const std::vector<int> &roof,
+                                      const std::vector<SkyDepthBuilding> &buildings) {
     const int w=sky.width,h=sky.height;
     const bool city=sky.skyArtwork==SkyArtwork::BurningCity;
     auto pixel=[&](int x,int y){
@@ -175,9 +154,11 @@ static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const
         return p[0]-p[2]>21&&p[0]-p[1]>10&&p[0]<146&&lum>=29&&lum<104;
     };
     if(city) {
-        std::vector<float> facade(w),heat(w);
+        std::vector<float> heat(w);
+        std::fill(distance.begin(),distance.end(),.4f);
+        for(const auto &building:buildings)
+            for(int x=building.first;x<building.end;++x)distance[x%w]=building.haze;
         for(int x=0;x<w;++x) {
-            for(int j=4;j<18;++j)facade[x]+=std::min(50.0f,luma(x,roof[x]+j))/14;
             for(int y=roof[x]-22;y<roof[x]+34;++y) {
                 const byte *p=pixel(x,y);
                 // Bright warm paint near street level or in the smoke
@@ -187,7 +168,6 @@ static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const
                 heat[x]+=warm*bright;
             }
         }
-        distance=cityDistances(roof,facade,h);
         for(int x=0;x<w;++x) {
             for(int j=-8;j<=8;++j)fire[x]+=heat[(x+j+w)%w]*(9-std::abs(j))/81;
             fire[x]=std::clamp((fire[x]-.85f)/6.4f,0.0f,1.0f);
@@ -257,23 +237,34 @@ static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const
     return layers;
 }
 
-const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep) {
+static const SkyDepthCacheEntry &loadSkyDepth(const Image &sky,bool deep) {
+    static const SkyDepthCacheEntry invalid{};
+    if(sky.skyPalette!=stockSkyPalette)return invalid;
     auto &cached=skyDepthCache[(size_t)sky.skyArtwork][deep?1:0];
-    if(cached.attempted)return cached.texture;
+    if(cached.attempted)return cached;
     cached.attempted=true;
     const int paletteLump=W_GetNumForName((char*)"PLAYPAL");
-    if(W_LumpLength(paletteLump)<768)return cached.texture;
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
-    if(skyFingerprint(palette,768)!=0x43701a484700347fULL)return cached.texture;
     const bool cloudOnly=skyDepthCloudOnly(sky.skyArtwork);
     const auto skyline=cloudOnly?std::vector<int>{}:findSkyline(sky,palette);
-    if(!cloudOnly&&skyline.empty())return cached.texture;
+    if(!cloudOnly&&skyline.empty()) {
+        if(deep&&sky.skyArtwork==SkyArtwork::BurningCity&&devparm)
+            fprintf(stderr,"Sky depth: RSKY2 skyline confidence too low.\n");
+        return cached;
+    }
 
     const int w=sky.width,h=sky.height;
     if(deep) {
-        const auto layers=buildDeepSky(sky,palette,skyline);
+        const bool city=sky.skyArtwork==SkyArtwork::BurningCity;
+        const auto buildings=city?segmentSkyBuildings(sky,palette,skyline):std::vector<SkyDepthBuilding>{};
+        auto layers=buildDeepSky(sky,palette,skyline,buildings);
+        if(city) {
+            cached.scene=buildSkyDepthCity(sky,palette,skyline,buildings,layers);
+            if(cached.scene.atlas)return cached;
+            if(layers.size()!=(size_t)w*h*4)layers=buildDeepSky(sky,palette,skyline,buildings);
+        }
         cached.texture=gpuCreateTexture(GpuFormat::RGBA8,w,h,layers.data(),w*4);
-        return cached.texture;
+        return cached;
     }
     std::vector<byte> layers((size_t)w*h*2);
     for(int x=0;x<w;++x)for(int y=0;y<h;++y) {
@@ -286,5 +277,13 @@ const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep) {
         layers[at+1]=(byte)std::clamp(134+distance*12,0,255);
     }
     cached.texture=gpuCreateTexture(GpuFormat::RG8,w,h,layers.data(),w*2);
-    return cached.texture;
+    return cached;
+}
+
+const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep) {
+    return loadSkyDepth(sky,deep).texture;
+}
+
+const SkyDepthScene &skyDepthScene(const Image &sky) {
+    return loadSkyDepth(sky,true).scene;
 }

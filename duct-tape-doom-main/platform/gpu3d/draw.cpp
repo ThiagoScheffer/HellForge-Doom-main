@@ -266,9 +266,19 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         float depthMode=0.0f;
         const bool legacyDepth=settings.artworkSkyDepth||settings.atmosphericCloudDepth;
         const bool doom2Art=artwork==SkyArtwork::BrownClouds||artwork==SkyArtwork::BurningCity||artwork==SkyArtwork::BloodHell;
+        const SkyDepthScene *depthScene=nullptr;
         bool deep=false;
         if(settings.doom2DeepSky&&gamemode==commercial&&doom2Art&&skyMode>=2) {
-            if(const auto &layers=skyDepthTexture(skyArt,true)) {
+            if(artwork==SkyArtwork::BurningCity) {
+                const auto &scene=skyDepthScene(skyArt);
+                if(scene.atlas) {
+                    depthScene=&scene;
+                    depthArt=gpu(scene.atlas);
+                    depthMode=3.0f;
+                    deep=true;
+                }
+            }
+            if(!deep)if(const auto &layers=skyDepthTexture(skyArt,true)) {
                 depthArt=gpu(layers);
                 depthMode=artwork==SkyArtwork::BurningCity?3.0f:artwork==SkyArtwork::BloodHell?4.0f:1.0f;
                 deep=true;
@@ -284,9 +294,14 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         // A failed extraction leaves the legacy sky in control, as does
         // unrecognized artwork. Cloud-only skies need no skyline cutout.
         int clouds=(settings.atmosphericCloudDepth||deep)&&depthMode>0.0f?(int)artwork:0;
-        float hfSkyUniform[8]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,
+        float hfSkyUniform[16]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,
                               eclipse?1.0f:0.0f,depthMode,(float)clouds,deep?1.0f:0.0f,
                               legacyDepth&&depthMode==4.0f?1.0f:0.0f};
+        if(depthScene) {
+            std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),hfSkyUniform+8);
+            hfSkyUniform[11]=depthScene->firstRow;
+            std::copy(depthScene->shells.begin(),depthScene->shells.end(),hfSkyUniform+12);
+        }
         SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
         SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},
                                                {gpu(cloudTexture),linearRepeat},{depthArt,linearRepeat}};

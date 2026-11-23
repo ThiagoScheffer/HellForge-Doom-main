@@ -347,6 +347,12 @@ static void startLevel() {
     oldThings.clear();oldHeights.clear();tickTime=0;
     resetWeaponPositions();
     buildMap();
+    // Anchor to the authored start in XY and the map datum in Z. These
+    // stay fixed across camera movement, reflections and save reloads.
+    const mapthing_t &skyStart=playerstarts[0];
+    skyDepthOrigin={0.0f,0.0f,41.0f};
+    if(!deathmatch&&skyStart.type==1)
+        skyDepthOrigin={float(skyStart.x),float(skyStart.y),41.0f};
     prepareFalls();
     buildCaustics();
     buildShore();

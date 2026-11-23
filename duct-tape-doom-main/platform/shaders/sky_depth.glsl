@@ -1,9 +1,118 @@
-// The derived RG texture stores a reconstructed background palette index
+const float skyTurns=6.2831853;
+const float skyRepeats=4.0;
+const float skyHorizon=.70;
+const float skyRiseScale=.68;
+
+vec2 skyPlateUV(float angle,float rise,vec2 size) {
+    return vec2(-angle/skyTurns*size.x*skyRepeats,
+                clamp(skyHorizon-skyRiseScale*rise,.001,.999)*size.y);
+}
+
+vec3 skyDepthPalette(float value) {
+    return texelFetch(palette,ivec2(int(round(value*255.0)),0),0).rgb;
+}
+
+ivec2 skyDepthTexel(ivec2 at,ivec2 size) {
+    return ivec2(wrapTexel(ivec2(at.x,0),size).x,clamp(at.y,0,size.y-1));
+}
+
+vec4 skyShellMetadata(ivec2 at,ivec2 size) {
+    return texelFetch(skyDepthArt,skyDepthTexel(at,size)+ivec2(0,size.y),0);
+}
+
+vec3 skyBackdrop(vec2 uv,ivec2 size,bool filtered) {
+    if(!filtered)
+        return skyDepthPalette(texelFetch(skyDepthArt,skyDepthTexel(ivec2(floor(uv)),size),0).r);
+    vec2 p=uv-.5,f=fract(p);
+    ivec2 at=ivec2(floor(p));
+    vec3 a=skyDepthPalette(texelFetch(skyDepthArt,skyDepthTexel(at,size),0).r);
+    vec3 b=skyDepthPalette(texelFetch(skyDepthArt,skyDepthTexel(at+ivec2(1,0),size),0).r);
+    vec3 c=skyDepthPalette(texelFetch(skyDepthArt,skyDepthTexel(at+ivec2(0,1),size),0).r);
+    vec3 d=skyDepthPalette(texelFetch(skyDepthArt,skyDepthTexel(at+ivec2(1,1),size),0).r);
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+}
+
+vec3 skyDepthEye(vec3 eye,vec3 origin,float nearestRadius) {
+    vec3 delta=eye-origin;
+    delta.xy/=1.0+length(delta.xy)/(nearestRadius*.0875);
+    delta.z/=1.0+abs(delta.z)/(nearestRadius*.025);
+    return delta;
+}
+
+// The XY intersection decomposes in the horizontal ray basis. The hit has
+// the same transverse coordinate as the eye. Its forward coordinate is the
+// positive root on a unit cylinder. The bounded eye is always inside it.
+vec2 skyShellUV(float angle,float rise,vec3 eyeInRayBasis,float radius,vec2 size) {
+    vec3 relative=eyeInRayBasis/radius;
+    float travel=sqrt(1.0-relative.y*relative.y)-relative.x;
+    return skyPlateUV(angle+asin(relative.y),rise*travel+relative.z,size);
+}
+
+struct SkyShellSample {
+    vec3 color;
+    float coverage;
+    float window;
+    vec2 uv;
+    float side;
+};
+
+SkyShellSample skyShell(float angle,float rise,vec3 eyeInRayBasis,vec2 radii,
+                        float layer,ivec2 size,bool filtered) {
+    vec2 front=skyShellUV(angle,rise,eyeInRayBasis,radii.x,vec2(size));
+    SkyShellSample surface=SkyShellSample(vec3(0.0),0.0,0.0,front,0.0);
+    vec2 p=filtered?front-.5:front;
+    ivec2 at=ivec2(floor(p));
+    vec2 f=fract(p);
+    for(int i=0;i<(filtered?4:1);++i) {
+        ivec2 offset=ivec2(i&1,i>>1);
+        vec4 meta=skyShellMetadata(at+offset,size);
+        if(abs(meta.g*255.0-layer)>.5)continue;
+        vec2 factor=mix(1.0-f,f,vec2(offset));
+        float weight=filtered?factor.x*factor.y:1.0;
+        surface.coverage+=weight;
+        surface.window+=weight*meta.a;
+        surface.color+=weight*texel(image,palette,skyDepthTexel(at+offset,size),false).rgb;
+    }
+
+    if(surface.coverage<.999&&abs(eyeInRayBasis.y)>.01&&radii.y>0.0) {
+        vec2 rear=skyShellUV(angle,rise,eyeInRayBasis,radii.x+radii.y,vec2(size));
+        float width=abs(rear.x-front.x);
+        if(width>.015) {
+            // Only expose lateral surfaces where the rear ray is inside a
+            // building and the front ray has crossed its side in longitude.
+            // Testing at the rear row excludes bands caused by roof height.
+            float x=rear.x-.5;
+            int row=int(rear.y);
+            int column=skyDepthTexel(ivec2(int(floor(front.x)),0),size).x;
+            float frontObject=texelFetch(skyDepthArt,ivec2(column,size.y*2),0).r;
+            float side=0.0;
+            vec3 sideColor=vec3(0.0);
+            for(int i=0;i<2;++i) {
+                vec4 meta=skyShellMetadata(ivec2(int(floor(x))+i,row),size);
+                if(abs(meta.g*255.0-layer)>.5||meta.r==frontObject)continue;
+                float weight=(i==0?1.0-fract(x):fract(x))*min(width,1.0);
+                side+=weight;
+                sideColor+=weight*(skyDepthPalette(meta.b)*vec3(.63,.59,.55)+vec3(.013,.009,.007));
+            }
+            float behind=1.0-surface.coverage;
+            surface.side=side*behind;
+            surface.coverage+=surface.side;
+            surface.color+=sideColor*behind;
+        }
+    }
+    if(surface.coverage>0.0) {
+        surface.color/=surface.coverage;
+        surface.window/=surface.coverage;
+    }
+    return surface;
+}
+
+// The legacy derived RG texture stores a reconstructed background palette index
 // and a signed distance to the painted skyline. For cloud-only artwork
 // the original indexed texture is bound here and only R is sampled.
 vec3 depthColorAt(ivec2 at,ivec2 size) {
     float value=texelFetch(skyDepthArt,wrapTexel(at,size),0).r;
-    return texelFetch(palette,ivec2(int(round(value*255.0)),0),0).rgb;
+    return skyDepthPalette(value);
 }
 
 vec3 depthCloudColor(vec2 uv,ivec2 size) {

@@ -19,6 +19,8 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     float atmosphericArtwork;
     float deepSkyEnabled;
     float eclipseRidge;
+    vec4 depthOrigin; // xyz reference, w normalized top of extracted artwork
+    vec4 depthShells; // middle/near radii, then middle/near thickness
 };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
@@ -41,23 +43,7 @@ vec3 skyAir(vec3 color,vec3 low,float amount) {
 vec3 skySunDirection() {
     return vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
 }
-void main() {
-    vec2 size=vec2(textureSize(image,0));
-#ifdef SURFACE
-    vec3 ray=normalize(vWorld-c.eye.xyz);
-#else
-    vec2 screen=vUV*2.0-1.0;
-    vec3 ray=normalize(c.forward.xyz+c.right.xyz*screen.x/c.projection.x-c.up.xyz*screen.y/c.projection.y);
-#endif
-    // World-anchored cylinder: yaw and height come from the view ray, so the
-    // sky no longer shears with pitch or stretches with FOV. Scaled a little
-    // toward vanilla proportions; the horizon row moves down with it so the
-    // painted top edge stays near 46 degrees up.
-    float angle=atan(ray.y,ray.x);
-    float rise=ray.z/max(length(ray.xy),1e-4);
-    float v=0.70-rise*0.68;
-    vec2 uv=vec2(-angle/6.2831853*size.x*4.0,clamp(v,0.001,0.999)*size.y);
-    bool filtered=c.effects.x>0.0;
+vec4 paintedSky(vec2 uv,vec2 size,bool filtered) {
     // Light distance softening: blend in a 2x2 texel box so the sky sits a
     // touch softer than the crisp walls in front of it. Taps stay inside the
     // texture rows so the top and bottom don't wrap into each other.
@@ -68,16 +54,81 @@ void main() {
         soft+=indexed(image,palette,vec2(uv.x+o.x,clamp(uv.y+o.y,0.5,size.y-0.5)),filtered,true).rgb;
     }
     color.rgb=mix(color.rgb,soft/4.0,0.6);
+    return color;
+}
+vec3 skyForegroundAir(vec3 color,vec3 low,float air,float v,float height) {
+    color=skyAir(color,low,air);
+    color=mix(color,low,smoothstep(0.88,1.02,v));
+    if(c.materials.z>0.0&&c.effects.z==0.0)
+        color=mix(color,low,0.55*(1.0-smoothstep(-0.05,0.3,height)));
+    return color;
+}
+void main() {
+    vec2 size=vec2(textureSize(image,0));
+#ifdef SURFACE
+    vec3 ray=normalize(vWorld-c.eye.xyz);
+#else
+    vec2 screen=vUV*2.0-1.0;
+    vec3 ray=normalize(c.forward.xyz+c.right.xyz*screen.x/c.projection.x-c.up.xyz*screen.y/c.projection.y);
+#endif
+    // Both the world-anchored plate and the depth shells use this same
+    // perspective ray and the same cylindrical artwork convention.
+    float horizontal=max(length(ray.xy),1e-4);
+    float angle=atan(ray.y,ray.x);
+    float rise=ray.z/horizontal;
+    float v=skyHorizon-rise*skyRiseScale;
+    vec2 uv=skyPlateUV(angle,rise,size);
+    bool filtered=c.effects.x>0.0;
     float depthMode=skyEnvironment.w;
     int cloudProfile=int(atmosphericArtwork);
     bool deep=deepSkyEnabled>0.0;
     bool deepCity=deep&&cloudProfile==SKY_ART_BURNING_CITY;
     bool deepStorm=deep&&cloudProfile==SKY_ART_BROWN_CLOUDS;
+    bool depthScene=depthShells.x>0.0;
+    // Keep the cutoff outside the maximum vertical shift and filter reach.
+    bool depthBand=depthScene&&v>=depthOrigin.w-.09;
+    SkyShellSample middle=SkyShellSample(vec3(0.0),0.0,0.0,uv,0.0);
+    SkyShellSample near=middle;
+    vec4 color;
     vec2 artworkData=vec2(0.0);
     float foregroundMask=0.0;
-    vec3 foreground=color.rgb;
-    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,deep,foregroundMask,artworkData);
-    else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
+    vec3 foreground=vec3(0.0);
+    if(depthScene) {
+        vec2 at=vec2(uv.x,clamp(uv.y,.5,size.y-.5));
+        artworkData=textureLod(skyDepthArt,at/vec2(textureSize(skyDepthArt,0)),0.0).ba;
+        if(depthBand) {
+            vec3 delta=skyDepthEye(c.eye.xyz,depthOrigin.xyz,min(depthShells.x,depthShells.y));
+            vec2 axis=ray.xy/horizontal;
+            vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
+            near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,ivec2(size),filtered);
+            if(near.coverage<.999) {
+                middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,ivec2(size),filtered);
+            }
+            foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
+#ifdef SKY_DEPTH_DEBUG
+            // 1: solid mask, 2: object IDs, 3: depth, 4: backdrop, 5: sides.
+            color=vec4(skyBackdrop(uv,ivec2(size),filtered),1.0);
+            if(SKY_DEPTH_DEBUG==1)color.rgb=vec3(foregroundMask);
+            if(SKY_DEPTH_DEBUG==2) {
+                vec2 faceUV=near.coverage>middle.coverage?near.uv:middle.uv;
+                float id=skyShellMetadata(ivec2(floor(faceUV)),ivec2(size)).r*255.0;
+                color.rgb=fract(id*vec3(.37,.59,.81))*foregroundMask;
+            }
+            if(SKY_DEPTH_DEBUG==3)color.rgb=vec3(near.coverage,0.0,middle.coverage);
+            if(SKY_DEPTH_DEBUG==5)color.rgb=vec3(near.side,0.0,middle.side);
+            outColor=color;
+            return;
+#else
+            color=vec4(0.0,0.0,0.0,1.0);
+            if(near.coverage<1.0)color.rgb=skyBackdrop(uv,ivec2(size),filtered);
+#endif
+        } else color=paintedSky(uv,size,filtered);
+    } else {
+        color=paintedSky(uv,size,filtered);
+        foreground=color.rgb;
+        if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,deep,foregroundMask,artworkData);
+        else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
+    }
     vec3 cloudArt=color.rgb;
     // The sky's own low-row color, the tint of air at the horizon.
     vec3 low=vec3(0);
@@ -121,12 +172,7 @@ void main() {
     // silhouettes meet a soft band rather than a hard painted edge.
     if(c.materials.z>0.0&&c.effects.z==0.0)
         color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
-    if(foregroundMask>0.0) {
-        foreground=skyAir(foreground,low,air);
-        foreground=mix(foreground,low,smoothstep(0.88,1.02,v));
-        if(c.materials.z>0.0&&c.effects.z==0.0)
-            foreground=mix(foreground,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
-    }
+    if(foregroundMask>0.0&&!depthScene)foreground=skyForegroundAir(foreground,low,air,v,ray.z);
     // D1/2: negative style.w encodes episode/profile and themed-lightning
     // switch without adding a Camera field. Inferno [-3,-1], Deimos [-5,-3].
     // E1+: non-overlapping 2-wide ranges, reserved through Doom II SKY3.
@@ -171,7 +217,7 @@ void main() {
     bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
-    if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&artworkData.x>.25))) {
+    if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&(depthScene?middle.coverage>0.0:artworkData.x>.25)))) {
         vec3 eclipseCenter=eclipse?bloodEclipseCenter(eclipseRidge>0.0):vec3(0.0);
         vec3 key=deepCity?vec3(0.0,0.0,-1.0):
                  eclipse?eclipseCenter:c.sun.w>0.0?skySunDirection():vec3(0.56,-0.45,0.69);
@@ -187,7 +233,7 @@ void main() {
         // City metadata changes from warm smoke to painted panes at
         // the cutout. Pane values only reach the foreground composite.
         vec2 cloudData=artworkData;
-        if(deepCity)cloudData.y*=1.0-foregroundMask;
+        if(deepCity&&!depthScene)cloudData.y*=1.0-foregroundMask;
         color.rgb=atmosphericCloudDecks(ray,angle/6.2831853,color.rgb,cloudArt,cloudProfile,
                                         key,eclipseCenter,stormLight,deep,cloudData,cloudCover);
     } else if(hfMode>=2 && hfMode<=5 && foregroundMask<1.0) {
@@ -228,9 +274,20 @@ void main() {
         float amount=saturate(disc*0.75+glow)*c.fx2.w*transmission;
         color.rgb=mix(color.rgb,max(color.rgb,c.sun.rgb),saturate(disc*c.fx2.w*transmission))+c.sun.rgb*amount*(1.0-disc*0.5);
     }
-    // Restore the fixed, painted foreground after both celestial and cloud
-    // layers. Weather in front of the artwork still uses the original path.
-    if(foregroundMask>0.0) {
+    // Resolve the shells back to front, over the existing smoke and celestial layers.
+    if(depthBand) {
+        for(int layer=0;layer<2;++layer) {
+            SkyShellSample surface=layer==0?middle:near;
+            if(surface.coverage<=0.0)continue;
+            vec3 facade=skyForegroundAir(surface.color,low,air,v,ray.z);
+            if(deepCity&&v<1.02) {
+                vec2 at=vec2(mod(surface.uv.x,size.x*skyRepeats),surface.uv.y);
+                vec3 lit=deepCityFacade(facade,at,layer==0?.64:.15,surface.window,cloudCover,rise);
+                facade=mix(lit,facade,smoothstep(.88,1.02,v));
+            }
+            color.rgb=mix(color.rgb,facade,surface.coverage);
+        }
+    } else if(foregroundMask>0.0) {
         if(deepCity&&v<1.02) {
             vec2 at=vec2(mod(uv.x,size.x*4.0),uv.y);
             vec3 facade=deepCityFacade(foreground,at,artworkData.x,artworkData.y,

@@ -268,7 +268,7 @@ enum class SkyArtwork {
     Inferno=SKY_ART_INFERNO, OrangeClouds=SKY_ART_ORANGE_CLOUDS, BrownClouds=SKY_ART_BROWN_CLOUDS,
     BurningCity=SKY_ART_BURNING_CITY, BloodHell=SKY_ART_BLOOD_HELL, Count
 };
-struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
+struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; uint64_t skyPalette=0; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
 
 // Frame profiling for the performance smoke test (I_Render3DProfile).
 struct Profile { bool enabled=false; unsigned skip=0; const char *screenshotPath=nullptr; I_Render3DFrameProfile frame={}; };
@@ -368,6 +368,14 @@ void buildCloudTexture();
 Image &wallImage(int index);
 bool skyDepthCloudOnly(SkyArtwork artwork);
 const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep=false);
+// Atlas and projection data shared by every pass that draws a depth scene.
+struct SkyDepthScene {
+    GpuTextureRef atlas;
+    std::array<float,4> shells{}; // middle/near radii, then their radial thicknesses
+    float firstRow=0;             // normalized source row of the highest solid texel
+};
+const SkyDepthScene &skyDepthScene(const Image &sky);
+extern std::array<float,3> skyDepthOrigin;
 Image &lumpImage(int lump,bool flat);
 // Builds the camera, layout and (when the world is visible) all geometry and lights.
 FrameView prepareFrame(int width,int height);
