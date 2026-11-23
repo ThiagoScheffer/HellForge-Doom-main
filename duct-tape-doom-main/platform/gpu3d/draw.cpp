@@ -1,10 +1,18 @@
 /* Drawing helpers: the per-frame upload of vertices and light and sector
    data, resource binding, and the world and overlay draws the passes share. */
 #include "internal.h"
+#include "../scene3d/sky_atmosphere.h"
 #include "../shaders/living_surfaces.h"
 #include <set>
 
 namespace gpu3d {
+// Matches HellforgeSky in both sky fragment variants.
+struct alignas(16) SkyUniforms {
+    float legacy[16];
+    std::array<float,4> horizon,zenith,dark,middle,light,projection,wind;
+};
+static_assert(offsetof(SkyUniforms,horizon)==64 && sizeof(SkyUniforms)==176);
+
 struct Arena { SDL_GPUBuffer *buffer=nullptr; Uint32 capacity=0; };
 static Arena vertexArena,blockerArena,sectorArena;
 struct ResidentVertices {Arena arena;std::vector<Vertex> snapshot;size_t count=0;unsigned revision=~0u,seen=0;uint64_t maskStamp=0;};
@@ -267,8 +275,10 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         const bool legacyDepth=settings.artworkSkyDepth||settings.atmosphericCloudDepth;
         const bool doom2Art=artwork==SkyArtwork::BrownClouds||artwork==SkyArtwork::BurningCity||artwork==SkyArtwork::BloodHell;
         const SkyDepthScene *depthScene=nullptr;
+        const SkyAtmosphereProfile *atmosphere=nullptr;
         bool deep=false;
         if(settings.doom2DeepSky&&gamemode==commercial&&doom2Art&&skyMode>=2) {
+            atmosphere=skyAtmosphereProfile(skyArt);
             if(artwork==SkyArtwork::BurningCity) {
                 const auto &scene=skyDepthScene(skyArt);
                 if(scene.atlas) {
@@ -278,13 +288,13 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
                     deep=true;
                 }
             }
-            if(!deep)if(const auto &layers=skyDepthTexture(skyArt,true)) {
+            if(!deep&&!atmosphere)if(const auto &layers=skyDepthTexture(skyArt,true)) {
                 depthArt=gpu(layers);
                 depthMode=artwork==SkyArtwork::BurningCity?3.0f:artwork==SkyArtwork::BloodHell?4.0f:1.0f;
                 deep=true;
             }
         }
-        if(!deep&&legacyDepth&&skyMode>=2&&artwork!=SkyArtwork::Unknown) {
+        if(!deep&&!atmosphere&&legacyDepth&&skyMode>=2&&artwork!=SkyArtwork::Unknown) {
             if(skyDepthCloudOnly(artwork))depthMode=1.0f;
             else if(const auto &layers=skyDepthTexture(skyArt)) {
                 depthArt=gpu(layers);
@@ -294,15 +304,33 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         // A failed extraction leaves the legacy sky in control, as does
         // unrecognized artwork. Cloud-only skies need no skyline cutout.
         int clouds=(settings.atmosphericCloudDepth||deep)&&depthMode>0.0f?(int)artwork:0;
-        float hfSkyUniform[16]={(float)skyMode,skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f,
-                              eclipse?1.0f:0.0f,depthMode,(float)clouds,deep?1.0f:0.0f,
-                              legacyDepth&&depthMode==4.0f?1.0f:0.0f};
+        SkyUniforms uniforms{};
+        auto *legacy=uniforms.legacy;
+        legacy[0]=(float)skyMode;
+        legacy[1]=skyArt.livingProfile==LS_SKY?(float)skyArt.livingVariant:0.0f;
+        legacy[2]=eclipse?1.0f:0.0f;
+        legacy[3]=depthMode;
+        legacy[4]=(float)clouds;
+        legacy[5]=deep?1.0f:0.0f;
+        legacy[6]=legacyDepth&&depthMode==4.0f?1.0f:0.0f;
+        if(depthScene||atmosphere)std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),legacy+8);
         if(depthScene) {
-            std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),hfSkyUniform+8);
-            hfSkyUniform[11]=depthScene->firstRow;
-            std::copy(depthScene->shells.begin(),depthScene->shells.end(),hfSkyUniform+12);
+            legacy[11]=depthScene->firstRow;
+            std::copy(depthScene->shells.begin(),depthScene->shells.end(),legacy+12);
         }
-        SDL_PushGPUFragmentUniformData(command,3,hfSkyUniform,sizeof(hfSkyUniform));
+        if(atmosphere) {
+            auto pack=[](const std::array<float,3> &color,float value) {
+                return std::array<float,4>{color[0],color[1],color[2],value};
+            };
+            uniforms.horizon=pack(atmosphere->horizon,atmosphere->coverage);
+            uniforms.zenith=pack(atmosphere->zenith,(float)atmosphere->kind);
+            uniforms.dark=pack(atmosphere->cloudDark,atmosphere->nearOpacity);
+            uniforms.middle=pack(atmosphere->cloudMiddle,atmosphere->farOpacity);
+            uniforms.light=pack(atmosphere->cloudLight,atmosphere->windSpeed);
+            uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,0};
+            uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
+        }
+        SDL_PushGPUFragmentUniformData(command,3,&uniforms,sizeof(uniforms));
         SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},
                                                {gpu(cloudTexture),linearRepeat},{depthArt,linearRepeat}};
         SDL_BindGPUFragmentSamplers(pass,0,images,4);

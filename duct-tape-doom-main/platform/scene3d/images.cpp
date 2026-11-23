@@ -1,6 +1,7 @@
 /* Textures from the WAD: upload with palette mips (sprites with their normals), bump
    relief, emissive masks and monitor glass; average and brightest colors. */
 #include "internal.h"
+#include "sky_atmosphere.h"
 #include "../shaders/living_surfaces.h"
 #include "../monster_regions.h"
 #include "../monster_skin_damage.h"
@@ -450,6 +451,18 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
     image.livingProfile=material.profile;image.livingVariant=material.variant;
 }
 #include "sky_depth.inc"
+
+// These two fingerprints identify a single immutable indexed source. Reuse
+// the CPU profile when the map reloads and the Image resources are rebuilt.
+static SkyAtmosphereProfile stormAtmosphere;
+static bool stormAtmosphereAnalyzed=false;
+
+const SkyAtmosphereProfile *skyAtmosphereProfile(const Image &sky) {
+    if(sky.skyArtwork!=SkyArtwork::BrownClouds||sky.skyPalette!=stockSkyPalette||
+       stormAtmosphere.kind==SkyAtmosphereKind::Legacy)return nullptr;
+    return &stormAtmosphere;
+}
+
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */
 Image &wallImage(int index) {
     auto found=images.find(index); if(found!=images.end()) return found->second;
@@ -470,8 +483,15 @@ Image &wallImage(int index) {
     image.skyArtwork=classifySkyArtwork(image,index,name);
     if(image.skyArtwork!=SkyArtwork::Unknown) {
         const int lump=W_GetNumForName((char*)"PLAYPAL");
-        if(W_LumpLength(lump)>=768)
-            image.skyPalette=skyFingerprint((const byte*)W_CacheLumpNum(lump,PU_CACHE),768);
+        if(W_LumpLength(lump)>=768) {
+            const auto *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
+            image.skyPalette=skyFingerprint(palette,768);
+            if(gamemode==commercial&&image.skyArtwork==SkyArtwork::BrownClouds&&
+               image.skyPalette==stockSkyPalette&&!stormAtmosphereAnalyzed) {
+                stormAtmosphere=analyzeSkyAtmosphere(image.pixels.data(),w,h,palette,SkyAtmosphereKind::DuskStorm);
+                stormAtmosphereAnalyzed=true;
+            }
+        }
     }
     if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode==commercial) {
         if(image.skyArtwork==SkyArtwork::BurningCity&&image.skyPalette==stockSkyPalette)

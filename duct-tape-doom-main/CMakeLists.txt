@@ -385,6 +385,7 @@ if(DOOM_BUILD_SDL)
         platform/scene3d/map.cpp
         platform/scene3d/relight.cpp
         platform/scene3d/scene.cpp
+        platform/scene3d/sky_atmosphere.cpp
         platform/scene3d/shadows.cpp
         platform/scene3d/shot_lights.cpp
         platform/scene3d/sprite_normals.cpp

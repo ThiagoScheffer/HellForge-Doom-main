@@ -9,6 +9,7 @@ extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
    (prepareFrame), plus the backend-independent I_Render3D calls. */
 #include "internal.h"
+#include "sky_atmosphere.h"
 #include "../audio/ambience_spots.h"
 #include "../decoration_ambience_rules.h"
 #include "../episode_atmosphere.h"
@@ -49,6 +50,7 @@ int I_Render3DPeekOrigin(mobj_t*,fixed_t*,fixed_t*,fixed_t*);
 }
 #include "../settings_panel.h"
 namespace doom3d {
+std::array<float,2> skyAtmosphereHeading{1.0f,0.0f};
 std::array<SpeedrunAtlasPanel,2> speedrunAtlasPanels{};
 int criticalThing(mobj_t*,critical_hit_t*);
 }
@@ -353,6 +355,7 @@ static void startLevel() {
     skyDepthOrigin={0.0f,0.0f,41.0f};
     if(!deathmatch&&skyStart.type==1)
         skyDepthOrigin={float(skyStart.x),float(skyStart.y),41.0f};
+    if(gamemode==commercial)rainHeading(skyAtmosphereHeading[0],skyAtmosphereHeading[1]);
     prepareFalls();
     buildCaustics();
     buildShore();
@@ -685,7 +688,11 @@ FrameView prepareFrame(int w,int h) {
         }
         uint64_t geometryStart=profileStart();
         stamp(1);
-        if(level)loadingStage(LoadStage::Textures);
+        if(level) {
+            loadingStage(LoadStage::Textures);
+            // Prepare the default sky even when sky color bakes are off.
+            if(gamemode==commercial)wallImage(skytexture);
+        }
         geometry(camera,fraction);
         stamp(2);
         profileAdd(profile.frame.geometryMs,geometryStart);

@@ -21,6 +21,13 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     float eclipseRidge;
     vec4 depthOrigin; // xyz reference, w normalized top of extracted artwork
     vec4 depthShells; // middle/near radii, then middle/near thickness
+    vec4 atmosphereHorizon; // RGB, estimated cloud coverage
+    vec4 atmosphereZenith; // RGB, atmosphere kind (zero uses legacy)
+    vec4 atmosphereDark; // RGB, near opacity
+    vec4 atmosphereMiddle; // RGB, far opacity
+    vec4 atmosphereLight; // RGB, wind speed in map units per second
+    vec4 atmosphereProjection; // near height, near scale, far scale
+    vec4 atmosphereWind; // fixed per-level wind heading in XY
 };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
@@ -36,12 +43,19 @@ layout(location=0) out vec4 outColor;
 #include "sky_immersion.glsl"
 #include "sky_eclipse.glsl"
 #include "sky_depth.glsl"
+#include "sky_atmosphere.glsl"
 vec3 skyAir(vec3 color,vec3 low,float amount) {
     float luma=dot(color,vec3(0.299,0.587,0.114));
     return mix(color,mix(vec3(luma),low,0.6),amount);
 }
 vec3 skySunDirection() {
     return vec3(cos(c.fx2.z)*cos(c.outdoor.w),sin(c.fx2.z)*cos(c.outdoor.w),sin(c.outdoor.w));
+}
+vec3 skyVisibleSun(vec3 color,vec3 ray,float transmission) {
+    float a=acos(clamp(dot(ray,skySunDirection()),-1.0,1.0));
+    float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;
+    float amount=saturate(disc*0.75+glow)*c.fx2.w*transmission;
+    return mix(color,max(color,c.sun.rgb),saturate(disc*c.fx2.w*transmission))+c.sun.rgb*amount*(1.0-disc*0.5);
 }
 vec4 paintedSky(vec2 uv,vec2 size,bool filtered) {
     // Light distance softening: blend in a 2x2 texel box so the sky sits a
@@ -83,7 +97,8 @@ void main() {
     int cloudProfile=int(atmosphericArtwork);
     bool deep=deepSkyEnabled>0.0;
     bool deepCity=deep&&cloudProfile==SKY_ART_BURNING_CITY;
-    bool deepStorm=deep&&cloudProfile==SKY_ART_BROWN_CLOUDS;
+    bool useAtmosphere=atmosphereZenith.w>0.0;
+    bool deepStorm=useAtmosphere||(deep&&cloudProfile==SKY_ART_BROWN_CLOUDS);
     bool depthScene=depthShells.x>0.0;
     // Keep the cutoff outside the maximum vertical shift and filter reach.
     bool depthBand=depthScene&&v>=depthOrigin.w-.09;
@@ -93,86 +108,93 @@ void main() {
     vec2 artworkData=vec2(0.0);
     float foregroundMask=0.0;
     vec3 foreground=vec3(0.0);
-    if(depthScene) {
-        vec2 at=vec2(uv.x,clamp(uv.y,.5,size.y-.5));
-        artworkData=textureLod(skyDepthArt,at/vec2(textureSize(skyDepthArt,0)),0.0).ba;
-        if(depthBand) {
-            vec3 delta=skyDepthEye(c.eye.xyz,depthOrigin.xyz,min(depthShells.x,depthShells.y));
-            vec2 axis=ray.xy/horizontal;
-            vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
-            near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,ivec2(size),filtered);
-            if(near.coverage<.999) {
-                middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,ivec2(size),filtered);
-            }
-            foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
-#ifdef SKY_DEPTH_DEBUG
-            // 1: solid mask, 2: object IDs, 3: depth, 4: backdrop, 5: sides.
-            color=vec4(skyBackdrop(uv,ivec2(size),filtered),1.0);
-            if(SKY_DEPTH_DEBUG==1)color.rgb=vec3(foregroundMask);
-            if(SKY_DEPTH_DEBUG==2) {
-                vec2 faceUV=near.coverage>middle.coverage?near.uv:middle.uv;
-                float id=skyShellMetadata(ivec2(floor(faceUV)),ivec2(size)).r*255.0;
-                color.rgb=fract(id*vec3(.37,.59,.81))*foregroundMask;
-            }
-            if(SKY_DEPTH_DEBUG==3)color.rgb=vec3(near.coverage,0.0,middle.coverage);
-            if(SKY_DEPTH_DEBUG==5)color.rgb=vec3(near.side,0.0,middle.side);
-            outColor=color;
-            return;
-#else
-            color=vec4(0.0,0.0,0.0,1.0);
-            if(near.coverage<1.0)color.rgb=skyBackdrop(uv,ivec2(size),filtered);
-#endif
-        } else color=paintedSky(uv,size,filtered);
-    } else {
-        color=paintedSky(uv,size,filtered);
-        foreground=color.rgb;
-        if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,deep,foregroundMask,artworkData);
-        else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
-    }
-    vec3 cloudArt=color.rgb;
-    // The sky's own low-row color, the tint of air at the horizon.
-    vec3 low=vec3(0);
-    for(int i=0;i<8;++i)
-        low+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*0.92),false,true).rgb;
-    low/=8.0;
-    // Aerial perspective: contrast and saturation fall toward the horizon,
-    // pulled toward a grey-tinted mix of that low color. Restrained overall.
+    vec3 cloudArt,low;
     float air=0.12+0.33*(1.0-smoothstep(0.0,0.6,rise));
-    color.rgb=skyAir(color.rgb,low,air);
-    if(deepCity&&foregroundMask<1.0) {
-        const vec3 farHaze=vec3(.40,.31,.23);
-        float distance=artworkData.x*(1.0-foregroundMask);
-        color.rgb=mix(color.rgb,farHaze,distance*.30);
-    }
-    // High-altitude haze in the sky's own upper-row color hides the clamped,
-    // stretched top rows. It begins just above the frame top when looking
-    // level and is opaque a little past the painted edge.
-    float high=deep?1.0-smoothstep(-0.13,0.28,v):smoothstep(0.12,-0.08,v);
-    if(high>0.0) {
-        vec3 cap=vec3(0);
-        for(int i=0;i<8;++i)
-            for(int j=0;j<2;++j)
-                cap+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*(0.03+0.08*float(j))),false,true).rgb;
-        cap/=16.0;
-        if(deep) {
-            // The cylindrical painting runs out overhead. Blend into a
-            // broad wind-driven field on the horizontal plane, where all
-            // azimuths meet continuously at the zenith.
-            vec2 overhead=ray.xy*1.37+vec2(.17,.39)+c.fog.w*vec2(-.005,.002);
-            float field=textureLod(skyCloudPattern,overhead,0.0).r;
-            cap*=mix(.50,1.08,smoothstep(.16,.82,field));
+    if(useAtmosphere) {
+        color=vec4(skyAtmosphereBase(ray),1.0);
+        low=atmosphereHorizon.rgb;
+        cloudArt=color.rgb;
+    } else {
+        if(depthScene) {
+            vec2 at=vec2(uv.x,clamp(uv.y,.5,size.y-.5));
+            artworkData=textureLod(skyDepthArt,at/vec2(textureSize(skyDepthArt,0)),0.0).ba;
+            if(depthBand) {
+                vec3 delta=skyDepthEye(c.eye.xyz,depthOrigin.xyz,min(depthShells.x,depthShells.y));
+                vec2 axis=ray.xy/horizontal;
+                vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
+                near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,ivec2(size),filtered);
+                if(near.coverage<.999) {
+                    middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,ivec2(size),filtered);
+                }
+                foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
+#ifdef SKY_DEPTH_DEBUG
+                // 1: solid mask, 2: object IDs, 3: depth, 4: backdrop, 5: sides.
+                color=vec4(skyBackdrop(uv,ivec2(size),filtered),1.0);
+                if(SKY_DEPTH_DEBUG==1)color.rgb=vec3(foregroundMask);
+                if(SKY_DEPTH_DEBUG==2) {
+                    vec2 faceUV=near.coverage>middle.coverage?near.uv:middle.uv;
+                    float id=skyShellMetadata(ivec2(floor(faceUV)),ivec2(size)).r*255.0;
+                    color.rgb=fract(id*vec3(.37,.59,.81))*foregroundMask;
+                }
+                if(SKY_DEPTH_DEBUG==3)color.rgb=vec3(near.coverage,0.0,middle.coverage);
+                if(SKY_DEPTH_DEBUG==5)color.rgb=vec3(near.side,0.0,middle.side);
+                outColor=color;
+                return;
+#else
+                color=vec4(0.0,0.0,0.0,1.0);
+                if(near.coverage<1.0)color.rgb=skyBackdrop(uv,ivec2(size),filtered);
+#endif
+            } else color=paintedSky(uv,size,filtered);
+        } else {
+            color=paintedSky(uv,size,filtered);
+            foreground=color.rgb;
+            if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,deep,foregroundMask,artworkData);
+            else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
         }
-        color.rgb=mix(color.rgb,cap,high);
-        if(cloudProfile>0)cloudArt=mix(cloudArt,cap,high);
+        cloudArt=color.rgb;
+        // The sky's own low-row color, the tint of air at the horizon.
+        low=vec3(0);
+        for(int i=0;i<8;++i)
+            low+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*0.92),false,true).rgb;
+        low/=8.0;
+        // Aerial perspective: contrast and saturation fall toward the horizon,
+        // pulled toward a grey-tinted mix of that low color. Restrained overall.
+        color.rgb=skyAir(color.rgb,low,air);
+        if(deepCity&&foregroundMask<1.0) {
+            const vec3 farHaze=vec3(.40,.31,.23);
+            float distance=artworkData.x*(1.0-foregroundMask);
+            color.rgb=mix(color.rgb,farHaze,distance*.30);
+        }
+        // High-altitude haze in the sky's own upper-row color hides the clamped,
+        // stretched top rows. It begins just above the frame top when looking
+        // level and is opaque a little past the painted edge.
+        float high=deep?1.0-smoothstep(-0.13,0.28,v):smoothstep(0.12,-0.08,v);
+        if(high>0.0) {
+            vec3 cap=vec3(0);
+            for(int i=0;i<8;++i)
+                for(int j=0;j<2;++j)
+                    cap+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*(0.03+0.08*float(j))),false,true).rgb;
+            cap/=16.0;
+            if(deep) {
+                // The cylindrical painting runs out overhead. Blend into a
+                // broad wind-driven field on the horizontal plane, where all
+                // azimuths meet continuously at the zenith.
+                vec2 overhead=ray.xy*1.37+vec2(.17,.39)+c.fog.w*vec2(-.005,.002);
+                float field=textureLod(skyCloudPattern,overhead,0.0).r;
+                cap*=mix(.50,1.08,smoothstep(.16,.82,field));
+            }
+            color.rgb=mix(color.rgb,cap,high);
+            if(cloudProfile>0)cloudArt=mix(cloudArt,cap,high);
+        }
+        // Past the painted bottom edge, fade into the low color the same way so
+        // the clamped bottom row doesn't streak when looking down from a ledge.
+        color.rgb=mix(color.rgb,low,smoothstep(0.88,1.02,v));
+        // Haze toward the horizon in the sky's own low-row color, so distant
+        // silhouettes meet a soft band rather than a hard painted edge.
+        if(c.materials.z>0.0&&c.effects.z==0.0)
+            color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
+        if(foregroundMask>0.0&&!depthScene)foreground=skyForegroundAir(foreground,low,air,v,ray.z);
     }
-    // Past the painted bottom edge, fade into the low color the same way so
-    // the clamped bottom row doesn't streak when looking down from a ledge.
-    color.rgb=mix(color.rgb,low,smoothstep(0.88,1.02,v));
-    // Haze toward the horizon in the sky's own low-row color, so distant
-    // silhouettes meet a soft band rather than a hard painted edge.
-    if(c.materials.z>0.0&&c.effects.z==0.0)
-        color.rgb=mix(color.rgb,low,0.55*(1.0-smoothstep(-0.05,0.3,ray.z)));
-    if(foregroundMask>0.0&&!depthScene)foreground=skyForegroundAir(foreground,low,air,v,ray.z);
     // D1/2: negative style.w encodes episode/profile and themed-lightning
     // switch without adding a Camera field. Inferno [-3,-1], Deimos [-5,-3].
     // E1+: non-overlapping 2-wide ranges, reserved through Doom II SKY3.
@@ -217,7 +239,18 @@ void main() {
     bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
-    if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&(depthScene?middle.coverage>0.0:artworkData.x>.25)))) {
+    if(useAtmosphere) {
+        // Celestial light enters the atmosphere from behind both layers.
+        if(!eclipse&&c.fx2.w>0.0)color.rgb=skyVisibleSun(color.rgb,ray,1.0);
+        vec3 key=c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
+        vec3 stormLight=vec3(0.0);
+        if(c.weather.w>0.0) {
+            float halo=hellforgeBoltHalo(angle,rise,c.style.y);
+            stormLight=vec3(.51,.55,.68)*c.weather.w*(.06+.54*halo);
+        }
+        SkyAtmosphereResult atmosphere=renderSkyAtmosphere(color.rgb,ray,angle,key,stormLight);
+        color.rgb=atmosphere.color;
+    } else if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&(depthScene?middle.coverage>0.0:artworkData.x>.25)))) {
         vec3 eclipseCenter=eclipse?bloodEclipseCenter(eclipseRidge>0.0):vec3(0.0);
         vec3 key=deepCity?vec3(0.0,0.0,-1.0):
                  eclipse?eclipseCenter:c.sun.w>0.0?skySunDirection():vec3(0.56,-0.45,0.69);
@@ -255,7 +288,7 @@ void main() {
             color.rgb+=scatter*(c.weather.w*cloudCover*(0.12+0.34*halo));
         }
     }
-    if(cloudProfile==0&&citySmoke&&foregroundMask<1.0) {
+    if(!useAtmosphere&&cloudProfile==0&&citySmoke&&foregroundMask<1.0) {
         float smokeCover;
         color.rgb=burningCitySmoke(ray,angle,color.rgb,smokeCover);
         cloudCover=1.0-(1.0-cloudCover)*(1.0-smokeCover);
@@ -264,15 +297,10 @@ void main() {
     // bakeSun in scene3d/bake_sun.cpp, 40 degrees for DOOM): a small
     // disc and a wide glow in its tint. Smooth, like the softened sky around
     // it; a dither here shimmers over a large part of the sky.
-    if(!eclipse&&c.fx2.w>0.0&&foregroundMask<1.0) {
-        vec3 toward=skySunDirection();
-        float a=acos(clamp(dot(ray,toward),-1.0,1.0));
-        float disc=1.0-smoothstep(0.016,0.024,a),glow=exp(-a*a/0.012)*0.45+exp(-a/0.35)*0.12;
+    if(!useAtmosphere&&!eclipse&&c.fx2.w>0.0&&foregroundMask<1.0) {
         // The visible sun sits behind moving cloud layers, while baked
         // world illumination remains unchanged in this prototype.
-        float transmission=1.0-0.80*cloudCover;
-        float amount=saturate(disc*0.75+glow)*c.fx2.w*transmission;
-        color.rgb=mix(color.rgb,max(color.rgb,c.sun.rgb),saturate(disc*c.fx2.w*transmission))+c.sun.rgb*amount*(1.0-disc*0.5);
+        color.rgb=skyVisibleSun(color.rgb,ray,1.0-0.80*cloudCover);
     }
     // Resolve the shells back to front, over the existing smoke and celestial layers.
     if(depthBand) {
