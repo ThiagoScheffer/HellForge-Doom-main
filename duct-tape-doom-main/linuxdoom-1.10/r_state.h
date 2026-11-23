@@ -124,6 +124,8 @@ extern void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_
 // Renderer-only hitscan blood: x,y,z is the blood spot, dx,dy the shot direction,
 // slope its vertical rise per horizontal unit (to locate the hit on the sprite).
 extern void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
+// Rendering only. Triggered after hitscan damage: kind = wp_damage_kind_t; extreme = vanilla xdeath.
+extern void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
 // Every damage event, before it is applied (renderer only: who hit what, with what).
 extern void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
 extern void (*R_VileHurt)(const mobj_t *vile);

@@ -643,6 +643,11 @@ bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z)
 bool hasRagdoll(const mobj_t *thing);   // a ragdoll draws it: its own contacts make its blood and slaps
 bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (ragdoll_test.cpp's -ragdollloop)
 
+// gore M1: wound-space pixel capture before hitscan damage and confirmed result after damage.
+void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
+                 fixed_t dx,fixed_t dy,fixed_t slope);
+void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
+void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head);
 // wounds.cpp
 int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
 int weakpointLocate(mobj_t*,mobj_t*,wp_impact_t*);

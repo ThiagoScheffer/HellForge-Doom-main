@@ -125,7 +125,8 @@ static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hi
 void watchBodies() {
     bool spray=settings.blood&&settings.bloodSpray;
     if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!settings.wounds&&!spray&&
-        !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks)||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
+        !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&
+        !(settings.goreLevel&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
     if(bodyLevelSerial!=r_levelserial) {bodyMotionShutdown();bodyLevelSerial=r_levelserial;}
     for(auto &entry:watched)entry.second.seen=false;
     static std::vector<mobj_t*> bodies;bodies.clear();

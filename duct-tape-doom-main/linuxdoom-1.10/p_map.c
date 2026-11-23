@@ -1402,6 +1402,10 @@ boolean PTR_ShootTraverse(intercept_t *in)
     if (la_damage)
         P_WeakpointDealDamage(&event);
     P_WeakpointAfterDamage(&event);
+    // Cosmetic gore consumes only the already-resolved result; it never alters tracing or damage.
+    if (R_GoreHit && la_damage && event.kind == WP_SHOTGUN_PELLET)
+        R_GoreHit(th, shootthing, event.kind, th->health <= 0,
+                  th->health < -th->info->spawnhealth && th->info->xdeathstate != S_NULL);
 
     // don't go any farther
     return false;

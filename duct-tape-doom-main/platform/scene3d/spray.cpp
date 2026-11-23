@@ -16,7 +16,11 @@ namespace doom3d {
 // when. Its splat is laid then, shown from that moment, and the speck flies
 // until it gets there, moving at the tic rate like the debris.
 constexpr float sprayGravity=1225; // Doom's: a unit a tic, each tic.
-struct Drop { float x,y,z,vx,vy,vz,born,end,size;std::array<float,3> color;bool decoration=false; };
+struct Drop {
+    float x,y,z,vx,vy,vz,born,end,size;
+    std::array<float,3> color;
+    bool decoration=false,flesh=false;
+};
 static std::vector<Drop> drops;
 constexpr size_t maxDrops=768;
 // Dying and dead bodies watched for sliding (smears) and stopping short (a wall).
@@ -38,7 +42,7 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
 // a second; splat: the size of what it leaves (0 none).
 static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
-                      const uint32_t *decorationSeed=nullptr) {
+                      const uint32_t *decorationSeed=nullptr,bool flesh=false) {
     float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
     const sector_t *start=sectorAt(x,y);
     z=std::clamp(z,floorZ(start)+0.5f,ceilZ(start)-0.5f);
@@ -103,7 +107,7 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
     if(decorationSeed&&!settings.bloodSpray)return floorSplat;
     if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
     const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):randomRange(.35f,.7f);
-    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr});
+    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr,flesh});
     return floorSplat;
 }
 
@@ -135,6 +139,40 @@ static void burst(float x,float y,float z,float dx,float dy,const Burst &b) {
         float splat=big?randomRange(b.bigSize[0],b.bigSize[1]):randomRange(0,1)<b.speckChance?randomRange(4.5f,7.5f):0;
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,randomRange(b.rise[0],b.rise[1]),big?1.6f:randomRange(0.8f,1.3f),
                   splat,big?BLOOD_SPLAT:BLOOD_SPECK);
+    }
+}
+
+// Milestone 1 heavy close-range impact. These are short-lived drawn pixel
+// clusters, never new actors/physics bodies. The existing ballistic drop
+// integrator finds walls/floors/ceilings and uses the ordinary decal caps.
+void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head) {
+    if(!settings.accelerated||settings.goreLevel!=1||!settings.blood||
+       totalkills>=200||(!settings.goreWallBlood&&!settings.goreFragments))return;
+    checkSprayLevel();
+    BloodSourceScope tint(&target);
+    const float heading=std::atan2(dy,dx);
+    int wallBudget=settings.goreWallBlood?3:0;
+    // A directional cloud behind the victim makes the shot feel forceful
+    // without globally increasing normal bullet spray.
+    if(settings.goreWallBlood)for(int n=0;n<(head?4:3);++n) {
+        const float a=heading+randomRange(-.43f,.43f),speed=randomRange(68,126);
+        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
+            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget);
+    }
+    if(!settings.goreFragments)return;
+    // Max 64 live flesh clusters across the whole scene. Keep the 768-drop
+    // budget shared with normal blood instead of allocating a new particle pool.
+    const float now=gameSeconds();
+    int active=0;
+    for(const auto &d:drops)if(d.flesh&&d.end>now)++active;
+    const int count=std::min(head?6:3,std::max(0,64-active));
+    for(int n=0;n<count;++n) {
+        const float a=heading+randomRange(-.60f,.60f),speed=randomRange(54,132);
+        float vZ=randomRange(-25,105);
+        // Only the existing decal system persists on the ground or wall.
+        const float splat=settings.goreWallBlood?randomRange(9,17):0;
+        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,vZ,
+                  randomRange(1.45f,2.6f),splat,BLOOD_SPLAT,&wallBudget,nullptr,true);
     }
 }
 
@@ -352,8 +390,10 @@ static void drip(const mobj_t &thing) {
     }
 }
 void watchSpray() {
-    if(!sprayOn()||levelSerial!=r_levelserial) {drops.clear();slides.clear();return;}
+    const bool goreOnly=settings.accelerated&&settings.goreLevel&&settings.blood&&totalkills<200;
+    if((!sprayOn()&&!goreOnly)||levelSerial!=r_levelserial) {drops.clear();slides.clear();return;}
     checkSprayLevel();
+    if(!sprayOn()){slides.clear();return;}
     for(auto &entry:slides)entry.second.seen=false;
     float now=gameSeconds();
     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
@@ -401,7 +441,13 @@ void buildSpray(const Uniforms &camera) {
         float x=d.x+d.vx*t,y=d.y+d.vy*t,z=d.z+d.vz*t-0.5f*sprayGravity*t*t;
         float light=lighting(sectorAt(x,y)),tall=std::abs(d.vz-sprayGravity*t)>250?2.0f:1.0f;
         std::array<float,3> lit;for(int c=0;c<3;++c)lit[c]=std::min(1.0f,d.color[c]*light);
-        pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
+        if(d.flesh) {
+            // A tiny uneven two-lobe cluster reads as tissue rather than a
+            // perfectly spherical drop, without art or additional textures.
+            pixelBlock(particleVertices,camera,x,y,z,d.size*1.15f,tall,lit,false,&d.color);
+            pixelBlock(particleVertices,camera,x+d.size*.4f,y-d.size*.25f,z+d.size*.25f,
+                       d.size*.63f,tall,lit,false,&d.color);
+        } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
     }
 }
 void sprayShutdown() {drops.clear();slides.clear();}

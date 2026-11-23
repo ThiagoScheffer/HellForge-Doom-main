@@ -11,19 +11,27 @@ static void check(bool ok,const char *message) {
     if(!ok) {std::fprintf(stderr,"%s\n",message);std::exit(1);}
 }
 
+constexpr int firstTestSpriteLump=100;
+constexpr int testSpriteCount=3;
+static lumpinfo_t testLumps[firstTestSpriteLump+testSpriteCount]={};
+
 extern "C" {
 state_t states[NUMSTATES]={};
-int firstspritelump=100;
+int firstspritelump=firstTestSpriteLump;
 int numsprites=NUMSPRITES;
 int leveltime=0;
 int p_critical_trace=0;
 spritedef_t *sprites=nullptr;
-
+unsigned r_levelserial=1;
+lumpinfo_t *lumpinfo=testLumps;
+int M_CheckParm(char*) {return 0;}
 }
 
 namespace doom3d {
 Settings settings;
-static std::array<Image,3> spriteImages;
+unsigned levelSerial=1;
+void goreBurst(const mobj_t&,float,float,float,float,float,bool) {}
+static std::array<Image,testSpriteCount> spriteImages;
 static unsigned bodyQuadCalls=0;
 const std::vector<byte> &bloodPalette() {
     static const std::vector<byte> shades={16,32,48,64,80,96,112,128,144};

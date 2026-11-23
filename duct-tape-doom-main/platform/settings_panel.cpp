@@ -53,6 +53,7 @@ const char *effectCost(const char *key) {
         {"sun_shadows","LOAD-TIME COST: sunlight is baked, not rebuilt every frame."},
         {"decoration_shadows","LOAD-TIME COST: changing this re-bakes lighting."},
         {"wounds","VARIABLE COST: rises with wounded monsters in view."},
+        {"gore_level","BOUNDED COST: two stock human monsters, close lethal shotgun hits only; disabled on maps with 200 or more kill-count monsters."},
         {"monster_skin_damage","ONE-TIME GPU TEXTURE COST: caches recognized stock sprite damage tiers (bounded to 16 MiB)."},
         {"death_falls","VARIABLE COST: rises with simultaneous visible deaths."},
         {"varied_deaths","VARIABLE COST: rises during large fights."},
@@ -243,6 +244,21 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "No impact tracking, no gameplay changes. Keeps heads untouched, excludes replacement sprites and voxel models. "
                     "Independent of Wound holes and Monster Bleeding; Off by default.",
                     [](const Settings &d){return d.accelerated!=0;}),
+                choice("gore_level","Advanced Gore",&s.goreLevel,{"Classic","Enhanced"},{0,1},
+                    "Cosmetic-only lethal close-range shotgun impacts on stock Zombieman and Shotgun Guy. "
+                    "Below 200 map kill-count monsters; no gameplay damage changes, no new sprites or actors.",
+                    [](const Settings &d){return d.accelerated&&d.blood;}),
+                check("gore_heads","Head destruction",&s.goreHeads,
+                    "Concentrated lethal head impacts remove the head from the corpse and scatter fragments. "
+                    "Uses validated stock death artwork; other art falls back to an ordinary death.",
+                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
+                check("gore_fragments","Flying flesh fragments",&s.goreFragments,
+                    "A few irregular flesh particles follow the blast, fall under gravity, and deposit blood on surfaces. "
+                    "Procedural, cosmetic and limited in number.",
+                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
+                check("gore_wall_blood","Enhanced wall blood",&s.goreWallBlood,
+                    "Extra directional impact splashes, wall drips and floor stains, using the existing collision and decal budgets.",
+                    [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("wounds","Wound holes",&s.wounds,
                     "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "
                     "The marks follow the monster's animation. Close hits widen a hole; seen from the side it closes. "

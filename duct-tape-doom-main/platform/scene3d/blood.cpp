@@ -479,6 +479,8 @@ void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fi
     const bool sawCut=boostedSaw&&(target->type==MT_SERGEANT||target->type==MT_SHADOWS);
     int visualDamage=boostedSaw?std::max(damage,35):damage;
     BloodSourceScope bloodSource(target);
+    // Before damage and state transition: preserve the actual sprite-space pellet hit.
+    goreCapture(target,shooter,fx,fy,fz,fdx,fdy,slope);
     shotThrough(target,fx,fy,fz,fdx,fdy,visualDamage);
     bodyHit(target,fx,fy,fz,fdx,fdy,visualDamage);
     float z=units(fz);

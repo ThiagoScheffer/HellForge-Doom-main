@@ -44,6 +44,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
         if(settingIs(k,{"corrosive_barrels","incendiary_barrels"}))return {"Combat","Barrels"};
         if(settingIs(k,{"critical_parts","enhanced_weak_points","monster_weapon_vulnerabilities","kill_shots_carry"}))return {"Combat","Hits"};
         if(settingIs(k,{"localized_injury_effects","elemental_damage_over_time","advanced_monster_reactions","eye_injuries","monster_bleeding","hit_flinch"}))return {"Combat","Injuries"};
+        if(settingIs(k,{"gore_level","gore_heads","gore_fragments","gore_wall_blood"}))return {"Combat","Gore"};
         if(settingIs(k,{"blood","blood_spray","blood_shine","severe_critical_bloodspill","monster_skin_damage","wounds"}))return {"Combat","Blood"};
         if(settingIs(k,{"varied_deaths","death_falls","death_face_viewer","death_motion","body_motion_strength","soft_effects"}))return {"Combat","Deaths"};
         if(!strcmp(k,"shootable_lights"))return {"Destruction","Lights"};
@@ -80,7 +81,7 @@ inline std::vector<OptionTab> settingsLayout(std::vector<OptionTab> source) {
         {"Controls",{},{{"Aiming",{}},{"Peeking",{}}}},
         {"HUD",{},{{"Layout",{}},{"Portrait",{}},{"Feedback",{}},{"Speedrun",{}},{"Run stats",{}}}},
         {"Gameplay",{},{{"Weapons",{}},{"Arenas",{}}}},
-        {"Combat",{},{{"Hits",{}},{"Injuries",{}},{"Blood",{}},{"Deaths",{}},{"Feedback",{}},{"Barrels",{}}}},
+        {"Combat",{},{{"Hits",{}},{"Injuries",{}},{"Blood",{}},{"Gore",{}},{"Deaths",{}},{"Feedback",{}},{"Barrels",{}}}},
         {"Monsters",{},{{"AI",{}},{"Survival",{}},{"Appearance",{}}}},
         {"ENCOUNTER DIRECTOR",{},{{"Overview",{}},{"Monsters",{}},{"Reinforcements",{}},{"Items",{}},{"Population",{}},{"Advanced",{}}}},
         {"Destruction",{},{{"Surfaces",{}},{"Doors",{}},{"Collapses",{}},{"Debris",{}},{"Lights",{}},{"Effects",{}}}},

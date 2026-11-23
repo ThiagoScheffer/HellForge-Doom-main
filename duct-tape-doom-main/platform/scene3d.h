@@ -118,6 +118,11 @@ struct Settings {
     int bloodShine=1; // Fresh blood glints under dynamic lights, then dries matte.
     int deathMotion=0; // Optional deaths jolt with the killing blow's push and height.
     int wounds=1; // Hitscan hits shoot holes through monsters' sprites, rimmed with blood; drawing only.
+    // M1: only stock Zombieman/Shotgun Guy, close lethal shotgun hits, <200 map monsters.
+    int goreLevel=1; // 0 Classic, 1 Enhanced. Visual-only; never modifies combat damage.
+    int goreHeads=1; // Burst on concentrated confirmed head pellets; no detached head art.
+    int goreFragments=1; // Small directional procedural flesh pieces, capped globally.
+    int goreWallBlood=1; // Larger splashes and drips from lethal close-range blasts.
     int deathFalls=0; // Optional procedural falls: 0 off, 1 by hit, 2 legs, 3 chest, 4 head.
     int deathRagdoll=0; // Rigged monsters fall as ragdolls instead: the pain drawing raised into a relief on a small skeleton the hit knocks over.
     int deathGuided=1; // With deathRagdoll: chest blasts from the front sometimes play the shot death on strings (hand rigs that fit it: the zombieman).

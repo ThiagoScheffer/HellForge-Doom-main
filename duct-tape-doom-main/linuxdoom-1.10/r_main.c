@@ -70,6 +70,7 @@ void (*R_SolidBulletImpact)(float x,float y,float z,float nx,float ny,float nz);
 void (*R_DoorDamage)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z, int broken);
 void (*R_WallImpact)(line_t *line, int side, fixed_t x, fixed_t y, fixed_t z);
 void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_t z, fixed_t dx, fixed_t dy, fixed_t slope, int damage);
+void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
 void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
 void (*R_VileHurt)(const mobj_t *vile);
 void (*R_RevenantDeath)(const mobj_t *revenant);
