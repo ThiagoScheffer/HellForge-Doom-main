@@ -305,21 +305,21 @@ also add dripping bloody
 {SPR_COL5,0,14,{NULL},S_HEARTCOL2,0,0},	// S_HEARTCOL
 {SPR_COL5,1,14,{NULL},S_HEARTCOL,0,0},	// S_HEARTCOL2
 	
-	
-	
-	
-	
-	
-	
-	
+		
 //later rework living_surfaces: 
  mwall4_1 mwall4_2 mwall5_1 - marble rock walls with demons simbols and engraved faces -  make like it is looking at the player.
- improve the Eyes to be more realistic immersion, similar to the improved sw2_6 Eye effect, but matches with the demon marble wall.
-	
-	
+ improve the Eyes to be more realistic immersion, similar to the improved sw2_6 Eye effect, but matches with the demon marble wall.		
 sw2_7 sw2_8	 sw2_1 sw2_2 sw2_4 - create realistc horror Eyes blinking to these demon skulls like switches.
+snak7_1	 and snak8_1 - textures that lookis like a living intestine bows or tentacles - give some horror moving like it is alive, intestine bows.
 	
 	
+
+fix foggy deimos decorations not immerse into the Foggy
+
+
+
+
+
 
 https://doom.fandom.com/wiki/Thing_types
 https://www.doomwiki.org/wiki/DeHackEd#Code_pointers

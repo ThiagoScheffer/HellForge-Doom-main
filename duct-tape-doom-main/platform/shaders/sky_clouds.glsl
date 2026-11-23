@@ -84,7 +84,8 @@ vec3 hellforgeCloudDecks(vec3 ray,vec3 skyColor,vec3 horizonColor,
 // Extend the existing decks with the same periodic noise texture. The
 // painted sky seeds both density and tint before celestial effects go in.
 vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profile,
-                           vec3 key,vec3 eclipseCenter,vec3 stormLight,out float cover) {
+                           vec3 key,vec3 eclipseCenter,vec3 stormLight,bool deep,
+                           vec2 artworkData,out float cover) {
     cover=0.0;
     bool city=profile==SKY_ART_BURNING_CITY;
     float height=ray.z;
@@ -97,7 +98,15 @@ vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profil
     vec2 farUV=vec2(longitude*3.0-along*t*0.004,height*1.8+t*0.001);
     vec2 midUV=vec2(longitude*5.0+along*t*0.007,height*2.8)+vec2(0.19,0.63);
     vec2 nearUV=vec2(longitude*8.0-along*t*0.010,height*4.2)+vec2(0.61,0.09);
-    if(city) {
+    if(city&&deep) {
+        // Let the more distant, broader field overtake the rising column.
+        // Bend the two smoke banks at different rates over stationary fires.
+        float bend=sin(longitude*18.849556+height*5.0-t*.14);
+        midUV.x+=bend*(.05+.12*height);
+        nearUV.x+=sin(longitude*31.41593-height*3.0+t*.10)*(.03+.18*height);
+        midUV.y-=t*.013;
+        nearUV.y-=t*.020;
+    } else if(city) {
         // Sampling downward advects the smoke upward. The near bank rises
         // a little faster and thins above the painted fires.
         midUV.y-=t*0.016;
@@ -145,15 +154,29 @@ vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profil
     // softly, while the weaker upper and near banks may drift independently.
     float density=0.59*middle+0.27*farField+0.14*mix(0.5,detail,fine);
     float bias=mix(-0.074,0.10,painted);
+    if(deep) {
+        if(city) {
+            float pooled=artworkData.y*(1.0-smoothstep(.27,.64,height));
+            bias=mix(-.14,.19,max(.58*painted,pooled));
+            density=mix(density,mix(middle,farField,smoothstep(.25,.62,height)),.22);
+        } else if(profile==SKY_ART_BROWN_CLOUDS) {
+            bias=mix(-.17,.14,artworkData.x);
+            density=mix(density,.62*farField+.38*middle,.25);
+            thickness=1.15;
+        } else {
+            bias=mix(-.15,.12,artworkData.x);
+            thickness=1.21;
+        }
+    }
     float core=smoothstep(0.38,0.76,density+bias);
     float far=0.25*smoothstep(0.44,0.80,farField+bias*0.72);
     float mid=0.71*core;
     float near=0.19*smoothstep(0.51,0.83,detail*0.64+middle*0.36+bias)*fine;
     if(city) {
         float smokeBand=1.0-smoothstep(0.25,0.65,height);
-        far*=0.32*smokeBand;
-        mid*=0.58*smokeBand;
-        near*=0.70*smokeBand;
+        far*=(deep?.85:.32)*smokeBand;
+        mid*=(deep?.88:.58)*smokeBand;
+        near*=(deep?.96:.70)*smokeBand;
     }
     far*=visible;
     mid=clamp(mid*visible*thickness,0.0,1.0);
@@ -172,7 +195,9 @@ vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profil
     float shadow=smoothstep(0.37,0.78,0.50*front+0.32*deeper+0.18*middle+bias);
     float exposed=smoothstep(0.015,0.22,middle-front)*(1.0-shadow);
     float sun=max(c.sun.w,0.0)*(0.18+0.82*smoothstep(-0.12,0.82,dot(ray,key)));
-    float heat=city?painted*(1.0-smoothstep(0.14,0.62,height)):0.0;
+    vec2 fire=vec2(0.0);
+    if(city)fire=deep?deepCityFire(longitude,artworkData.y,core,height):vec2(painted,0.0);
+    float heat=fire.x*(1.0-smoothstep(0.14,0.62,height));
     float corona=smoothstep(0.961,0.995,dot(ray,eclipseCenter));
     vec3 pigment=mix(art,tint,city?0.56:0.34);
     // Thin red vapor crossing the disc should read as a cloud, without
@@ -183,6 +208,20 @@ vec3 atmosphericCloudDecks(vec3 ray,float longitude,vec3 sky,vec3 art,int profil
         +c.sun.rgb*(sun*0.12*exposed)
         +stormLight*(0.46+0.54*exposed)
         +vec3(.19,.023,.017)*(corona*(.11+.15*exposed));
+    if(deep) {
+        if(city) {
+            vec3 ember=vec3(.92,.32,.065);
+            sky+=ember*(heat*.15+fire.y*.20)*smoothstep(.002,.12,cover);
+            lit+=ember*(heat*(.13+.19*exposed)+fire.y*.27);
+        } else if(profile==SKY_ART_BROWN_CLOUDS) {
+            lit*=1.0-.24*shadow;
+            lit+=illumination*exposed*.15+stormLight*core*.52;
+        } else {
+            float veil=(1.0-smoothstep(.07,.55,height))*(.16+.28*farField)*smoothstep(.002,.14,cover);
+            sky=mix(sky,vec3(.26,.025,.043),veil*(1.0-.85*corona));
+            lit+=vec3(.15,.018,.024)*(farField*.34+exposed*.26);
+        }
+    }
     sky=mix(sky,mix(pigment,lit,0.44),far);
     sky=mix(sky,lit,mid);
     return mix(sky,lit*0.83,near);

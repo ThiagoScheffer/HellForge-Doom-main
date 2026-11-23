@@ -12,20 +12,28 @@ vec3 depthCloudColor(vec2 uv,ivec2 size) {
     return mix(depthColorAt(at,size),depthColorAt(at+ivec2(1,0),size),fract(x));
 }
 
-vec3 artworkSkyLayers(vec3 painted,vec2 uv,vec2 size,float mode,bool atmospheric,out float foreground) {
+vec3 artworkSkyLayers(vec3 painted,vec2 uv,vec2 size,float mode,bool atmospheric,bool deep,
+                      out float foreground,out vec2 artworkData) {
     foreground=0.0;
+    artworkData=vec2(0.0);
     float roomToMove=1.0;
-    if(mode>=2.0) {
+    if(deep||mode>=2.0) {
         vec2 at=vec2(uv.x,clamp(uv.y,0.5,size.y-0.5));
-        float ridge=textureLod(skyDepthArt,at/size,0.0).g;
-        foreground=smoothstep(0.48,0.52,ridge);
-        roomToMove=1.0-smoothstep(0.05,0.41,ridge);
+        vec4 layers=textureLod(skyDepthArt,at/size,0.0);
+        if(deep)artworkData=layers.ba;
+        if(mode>=2.0) {
+            foreground=smoothstep(0.48,0.52,layers.g);
+            roomToMove=1.0-smoothstep(0.05,0.41,layers.g);
+        }
         if(roomToMove<=0.0) {
             // Use the reconstructed sky at the cutout's lower edge. Opaque
             // foreground pixels are restored after clouds and celestial glow.
             return foreground>0.0&&foreground<1.0?depthCloudColor(uv,ivec2(size)):painted;
         }
     }
+    // The city painting contains distant facades above the primary cut.
+    // Keep the whole plate fixed and move only the separate smoke banks.
+    if(deep&&mode==3.0)return painted;
     float altitude=1.0-uv.y/size.y;
     float t=c.fog.w;
     float drift;

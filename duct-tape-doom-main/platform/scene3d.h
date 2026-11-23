@@ -156,6 +156,7 @@ struct Settings {
     int hellBloodEclipse=0;
     int artworkSkyDepth=0;
     int atmosphericCloudDepth=0;
+    int doom2DeepSky=0;
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
     int decorationInsects=2; // 0 Off, 1 Flies, 2 Flies and worms.
     int decorationDelay=1; // 0 Short, 1 Normal, 2 Long.
@@ -366,7 +367,7 @@ void settingsChanged();
 void buildCloudTexture();
 Image &wallImage(int index);
 bool skyDepthCloudOnly(SkyArtwork artwork);
-const GpuTextureRef &skyDepthTexture(const Image &sky);
+const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep=false);
 Image &lumpImage(int lump,bool flat);
 // Builds the camera, layout and (when the world is visible) all geometry and lights.
 FrameView prepareFrame(int width,int height);

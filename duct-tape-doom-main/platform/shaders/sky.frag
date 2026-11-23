@@ -17,6 +17,8 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 skyEnvironment;
     float atmosphericArtwork;
+    float deepSkyEnabled;
+    float eclipseRidge;
 };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
@@ -26,6 +28,7 @@ layout(location=0) out vec4 outColor;
 #define NO_LOCAL_FOG
 #include "lighting.glsl"
 #include "sky_storm.glsl"
+#include "sky_city.glsl"
 #include "sky_clouds.glsl"
 #include "sky_horizon.glsl"
 #include "sky_immersion.glsl"
@@ -67,9 +70,13 @@ void main() {
     color.rgb=mix(color.rgb,soft/4.0,0.6);
     float depthMode=skyEnvironment.w;
     int cloudProfile=int(atmosphericArtwork);
+    bool deep=deepSkyEnabled>0.0;
+    bool deepCity=deep&&cloudProfile==SKY_ART_BURNING_CITY;
+    bool deepStorm=deep&&cloudProfile==SKY_ART_BROWN_CLOUDS;
+    vec2 artworkData=vec2(0.0);
     float foregroundMask=0.0;
     vec3 foreground=color.rgb;
-    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,foregroundMask);
+    if(depthMode>0.0)color.rgb=artworkSkyLayers(color.rgb,uv,size,depthMode,cloudProfile>0,deep,foregroundMask,artworkData);
     else color.rgb=immersedSky(color.rgb,uv,size,ray,filtered);
     vec3 cloudArt=color.rgb;
     // The sky's own low-row color, the tint of air at the horizon.
@@ -81,16 +88,29 @@ void main() {
     // pulled toward a grey-tinted mix of that low color. Restrained overall.
     float air=0.12+0.33*(1.0-smoothstep(0.0,0.6,rise));
     color.rgb=skyAir(color.rgb,low,air);
+    if(deepCity&&foregroundMask<1.0) {
+        const vec3 farHaze=vec3(.40,.31,.23);
+        float distance=artworkData.x*(1.0-foregroundMask);
+        color.rgb=mix(color.rgb,farHaze,distance*.30);
+    }
     // High-altitude haze in the sky's own upper-row color hides the clamped,
     // stretched top rows. It begins just above the frame top when looking
     // level and is opaque a little past the painted edge.
-    float high=smoothstep(0.12,-0.08,v);
+    float high=deep?1.0-smoothstep(-0.13,0.28,v):smoothstep(0.12,-0.08,v);
     if(high>0.0) {
         vec3 cap=vec3(0);
         for(int i=0;i<8;++i)
             for(int j=0;j<2;++j)
                 cap+=indexed(image,palette,vec2((float(i)+0.5)*size.x/8.0,size.y*(0.03+0.08*float(j))),false,true).rgb;
         cap/=16.0;
+        if(deep) {
+            // The cylindrical painting runs out overhead. Blend into a
+            // broad wind-driven field on the horizontal plane, where all
+            // azimuths meet continuously at the zenith.
+            vec2 overhead=ray.xy*1.37+vec2(.17,.39)+c.fog.w*vec2(-.005,.002);
+            float field=textureLod(skyCloudPattern,overhead,0.0).r;
+            cap*=mix(.50,1.08,smoothstep(.16,.82,field));
+        }
         color.rgb=mix(color.rgb,cap,high);
         if(cloudProfile>0)cloudArt=mix(cloudArt,cap,high);
     }
@@ -147,13 +167,14 @@ void main() {
     int hfMode=int(skyEnvironment.x+0.5);
     bool eclipse=skyEnvironment.z>0.0;
     // The eclipse sits behind the existing skyline and cloud decks.
-    if(eclipse)color.rgb=hellBloodEclipse(ray,color.rgb,depthMode==4.0);
+    if(eclipse)color.rgb=hellBloodEclipse(ray,color.rgb,eclipseRidge>0.0);
     bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
-    if(cloudProfile>0&&foregroundMask<1.0) {
-        vec3 eclipseCenter=eclipse?bloodEclipseCenter(depthMode==4.0):vec3(0.0);
-        vec3 key=eclipse?eclipseCenter:c.sun.w>0.0?skySunDirection():vec3(0.56,-0.45,0.69);
+    if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&artworkData.x>.25))) {
+        vec3 eclipseCenter=eclipse?bloodEclipseCenter(eclipseRidge>0.0):vec3(0.0);
+        vec3 key=deepCity?vec3(0.0,0.0,-1.0):
+                 eclipse?eclipseCenter:c.sun.w>0.0?skySunDirection():vec3(0.56,-0.45,0.69);
         vec3 stormLight=vec3(0.0);
         if(c.weather.w>0.0) {
             // Scatter near the active strike. The existing broad flash
@@ -163,8 +184,12 @@ void main() {
                          coldElectrical?vec3(.20,.33,.41):vec3(.18,.23,.34);
             stormLight=scatter*(c.weather.w*halo*0.70);
         }
+        // City metadata changes from warm smoke to painted panes at
+        // the cutout. Pane values only reach the foreground composite.
+        vec2 cloudData=artworkData;
+        if(deepCity)cloudData.y*=1.0-foregroundMask;
         color.rgb=atmosphericCloudDecks(ray,angle/6.2831853,color.rgb,cloudArt,cloudProfile,
-                                        key,eclipseCenter,stormLight,cloudCover);
+                                        key,eclipseCenter,stormLight,deep,cloudData,cloudCover);
     } else if(hfMode>=2 && hfMode<=5 && foregroundMask<1.0) {
         if(depthMode==0.0)color.rgb=hellforgeDistantHorizon(ray,color.rgb,low,hfMode);
         if(hfMode!=5&&depthMode!=3.0)color.rgb=hellforgeCloudDecks(ray,color.rgb,low,hfMode,cloudCover);
@@ -205,7 +230,15 @@ void main() {
     }
     // Restore the fixed, painted foreground after both celestial and cloud
     // layers. Weather in front of the artwork still uses the original path.
-    if(foregroundMask>0.0)color.rgb=mix(color.rgb,foreground,foregroundMask);
+    if(foregroundMask>0.0) {
+        if(deepCity&&v<1.02) {
+            vec2 at=vec2(mod(uv.x,size.x*4.0),uv.y);
+            vec3 facade=deepCityFacade(foreground,at,artworkData.x,artworkData.y,
+                                       cloudCover,rise);
+            foreground=mix(facade,foreground,smoothstep(.88,1.02,v));
+        }
+        color.rgb=mix(color.rgb,foreground,foregroundMask);
+    }
     // Far rain: weather.cpp drops rain only in the map's open sectors near
     // the eye, and the sky (ceilings and the band over lower neighbors
     // included) hides everything past it, so the rain would end at the
@@ -279,7 +312,7 @@ void main() {
     }
     // Brief diffuse electrical illumination of the visible sky only.
     // No full-screen flash: underground rooms and closed ceilings stay dark.
-    if(c.weather.w>0.0) {
+    if(c.weather.w>0.0&&!deepStorm) {
         float pulse=clamp(c.weather.w,0.0,0.75);
         vec3 diffuse=crimson?vec3(0.85,0.23,0.14):
                      coldElectrical?vec3(0.73,0.86,1.01):vec3(0.60,0.72,0.96);

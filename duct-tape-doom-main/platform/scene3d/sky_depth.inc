@@ -4,7 +4,7 @@ struct SkyDepthCacheEntry {
     bool attempted=false;
     GpuTextureRef texture;
 };
-static std::array<SkyDepthCacheEntry,(size_t)SkyArtwork::Count> skyDepthCache;
+static std::array<std::array<SkyDepthCacheEntry,2>,(size_t)SkyArtwork::Count> skyDepthCache;
 
 static uint64_t skyFingerprint(const byte *pixels,size_t count) {
     uint64_t hash=14695981039346656037ULL;
@@ -129,18 +129,152 @@ static std::vector<int> findSkyline(const Image &sky,const byte *palette) {
     return line;
 }
 
-const GpuTextureRef &skyDepthTexture(const Image &sky) {
-    auto &cached=skyDepthCache[(size_t)sky.skyArtwork];
+static float skyLuma(const byte *rgb) {
+    return .299f*rgb[0]+.587f*rgb[1]+.114f*rgb[2];
+}
+
+// Classify the painted facades between roof steps. Shorter, brighter
+// profiles generally belong behind the tall, hard-edged black towers.
+// Walk a full wrapped interval so the last facade can cross column zero.
+static std::vector<float> cityDistances(const std::vector<int> &roof,
+                                        const std::vector<float> &facade,int h) {
+    const int w=(int)roof.size();
+    std::vector<float> depth(w,.4f);
+    std::vector<int> edges;
+    for(int x=0;x<w;++x)
+        if(std::abs(roof[x]-roof[(x+w-1)%w])>=4)edges.push_back(x);
+    if(edges.empty())return depth;
+    for(size_t i=0;i<edges.size();++i) {
+        const int start=edges[i],end=i+1<edges.size()?edges[i+1]:edges[0]+w;
+        float top=0,brightness=0;
+        for(int x=start;x<end;++x) {
+            top+=roof[x%w];
+            brightness+=facade[x%w];
+        }
+        const float span=float(end-start);
+        const float low=std::clamp((top/span-h*.33f)/(h*.29f),0.0f,1.0f);
+        const float soft=std::clamp((brightness/span-8)/25,0.0f,1.0f);
+        const float far=std::clamp(.11f+.66f*low+.24f*soft,0.11f,.92f);
+        for(int x=start;x<end;++x)depth[x%w]=far;
+    }
+    return depth;
+}
+
+static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const std::vector<int> &roof) {
+    const int w=sky.width,h=sky.height;
+    const bool city=sky.skyArtwork==SkyArtwork::BurningCity;
+    auto pixel=[&](int x,int y){
+        return palette+3*sky.pixels[2*((size_t)std::clamp(y,0,h-1)*w+(x+w)%w)];
+    };
+    auto luma=[&](int x,int y){return skyLuma(pixel(x,y));};
+    std::vector<float> fire(w),distance(w);
+    std::vector<int> distantRoof(w,h);
+    auto distantTone=[&](int x,int y) {
+        const byte *p=pixel(x,y);
+        const float lum=skyLuma(p);
+        return p[0]-p[2]>21&&p[0]-p[1]>10&&p[0]<146&&lum>=29&&lum<104;
+    };
+    if(city) {
+        std::vector<float> facade(w),heat(w);
+        for(int x=0;x<w;++x) {
+            for(int j=4;j<18;++j)facade[x]+=std::min(50.0f,luma(x,roof[x]+j))/14;
+            for(int y=roof[x]-22;y<roof[x]+34;++y) {
+                const byte *p=pixel(x,y);
+                // Bright warm paint near street level or in the smoke
+                // immediately above a rooftop. Exclude white cloud cores.
+                const float warm=std::clamp((p[0]-p[2]-36)/106.0f,0.0f,1.0f);
+                const float bright=std::clamp((luma(x,y)-65)/135,0.0f,1.0f);
+                heat[x]+=warm*bright;
+            }
+        }
+        distance=cityDistances(roof,facade,h);
+        for(int x=0;x<w;++x) {
+            for(int j=-8;j<=8;++j)fire[x]+=heat[(x+j+w)%w]*(9-std::abs(j))/81;
+            fire[x]=std::clamp((fire[x]-.85f)/6.4f,0.0f,1.0f);
+            // A distant facade needs a warm, vertically continuous
+            // body and a darker edge under brighter smoke.
+            for(int y=std::max(31,roof[x]-28);y<roof[x]-4;++y) {
+                if(!distantTone(x,y))continue;
+                int vertical=0;
+                for(int j=0;j<7;++j)vertical+=distantTone(x,y+j);
+                if(vertical<4)continue;
+                float above=(luma(x,y-2)+luma(x,y-1))*.5f;
+                float below=(luma(x,y)+luma(x,y+1)+luma(x,y+2)+luma(x,y+3))*.25f;
+                if(above-below<12)continue;
+                distantRoof[x]=y;
+                break;
+            }
+        }
+        const auto candidates=distantRoof;
+        for(int x=0;x<w;++x) {
+            int support=0;
+            for(int j=-3;j<=3;++j)
+                support+=std::abs(candidates[(x+j+w)%w]-candidates[x])<=3;
+            if(support<3)distantRoof[x]=h;
+        }
+    }
+    std::vector<byte> layers((size_t)w*h*4);
+    auto quantize=[](float value){return (byte)std::lround(255*std::clamp(value,0.0f,1.0f));};
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+        const int edge=roof.empty()?-h:y-roof[x];
+        const int source=edge<0?y:std::max(0,roof[x]-1-std::min(edge,h/12));
+        const size_t at=4*((size_t)y*w+x);
+        layers[at]=sky.pixels[2*((size_t)source*w+x)];
+        layers[at+1]=(byte)std::clamp(134+edge*12,0,255);
+        if(city) {
+            if(edge<0) {
+                // Preserve the dim painted structures already in the
+                // backdrop. Only spans supported by the art receive haze.
+                int support=0;
+                for(int j=std::max(distantRoof[x],y-2);j<std::min(y+3,roof[x]);++j)
+                    support+=distantTone(x,j);
+                if(y>=distantRoof[x]&&support>=2&&(distantTone(x,y)||luma(x,y)<70))
+                    layers[at+2]=quantize(.78f);
+                layers[at+3]=quantize(fire[x]*std::clamp(1+edge/53.0f,0.0f,1.0f));
+            } else {
+                layers[at+2]=quantize(distance[x]);
+                if(edge<5)continue;
+                const byte *p=pixel(x,y);
+                const float lit=luma(x,y);
+                const float surround=.25f*(luma(x-2,y)+luma(x+2,y)+luma(x,y-2)+luma(x,y+2));
+                if(lit>22&&lit<155&&p[0]>p[2]+12&&surround<57)
+                    layers[at+3]=quantize((lit-surround-9)/58);
+            }
+        } else if(edge<0) {
+            // Filter at artwork scale so procedural motion does not follow
+            // individual palette pixels. Clamp vertical taps above the cut.
+            float density=0;
+            for(int j=-2;j<=2;++j)for(int k=-2;k<=2;++k) {
+                int column=(x+k+w)%w;
+                int row=roof.empty()?y+j:std::min(y+j,roof[column]-1);
+                const byte *p=pixel(column,row);
+                density+=sky.skyArtwork==SkyArtwork::BloodHell?(p[0]-p[2])*.65f+skyLuma(p)*.35f:skyLuma(p);
+            }
+            layers[at+2]=quantize(1.0f-(density/25-20)/118);
+            if(!roof.empty())layers[at+2]=quantize((density/25-26)/125);
+        }
+    }
+    return layers;
+}
+
+const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep) {
+    auto &cached=skyDepthCache[(size_t)sky.skyArtwork][deep?1:0];
     if(cached.attempted)return cached.texture;
     cached.attempted=true;
     const int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     if(W_LumpLength(paletteLump)<768)return cached.texture;
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
     if(skyFingerprint(palette,768)!=0x43701a484700347fULL)return cached.texture;
-    const auto skyline=findSkyline(sky,palette);
-    if(skyline.empty())return cached.texture;
+    const bool cloudOnly=skyDepthCloudOnly(sky.skyArtwork);
+    const auto skyline=cloudOnly?std::vector<int>{}:findSkyline(sky,palette);
+    if(!cloudOnly&&skyline.empty())return cached.texture;
 
     const int w=sky.width,h=sky.height;
+    if(deep) {
+        const auto layers=buildDeepSky(sky,palette,skyline);
+        cached.texture=gpuCreateTexture(GpuFormat::RGBA8,w,h,layers.data(),w*4);
+        return cached.texture;
+    }
     std::vector<byte> layers((size_t)w*h*2);
     for(int x=0;x<w;++x)for(int y=0;y<h;++y) {
         const int distance=y-skyline[x];
