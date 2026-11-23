@@ -474,22 +474,25 @@ static void placeSplats(float x,float y,float z,float dx,float dy,int damage) {
 void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage) {
     bool sawTrace=P_IsSawLineAttack()!=0;
     bool sawTarget=target&&(target->type==MT_SERGEANT||target->type==MT_SHADOWS||target->type==MT_POSSESSED||target->type==MT_SHOTGUY||target->type==MT_CHAINGUY);
-    bool boostedSaw=sawTrace&&sawTarget&&shooter&&shooter->player&&!(target->flags&MF_NOBLOOD)&&
+    bool boostedSaw=damage>0&&sawTrace&&sawTarget&&shooter&&shooter->player&&!(target->flags&MF_NOBLOOD)&&
         p_wp_vulnerabilities&&P_WeakpointActive();
+    const bool sawCut=boostedSaw&&(target->type==MT_SERGEANT||target->type==MT_SHADOWS);
     int visualDamage=boostedSaw?std::max(damage,35):damage;
     BloodSourceScope bloodSource(target);
     shotThrough(target,fx,fy,fz,fdx,fdy,visualDamage);
     bodyHit(target,fx,fy,fz,fdx,fdy,visualDamage);
-    if(boostedSaw) {
-        if(target->type==MT_SERGEANT||target->type==MT_SHADOWS)
-            sawWoundHit(target,fx,fy,fz,fdx,fdy,slope,shooter);
-    } else woundHit(target,fx,fy,fz,fdx,fdy,slope,visualDamage,shooter);
+    float z=units(fz);
+    if(sawCut)sawWoundHit(target,shooter,z);
+    else if(!boostedSaw)woundHit(target,fx,fy,fz,fdx,fdy,slope,visualDamage,shooter);
     if(!bloodOn()||(settings.bloodSpray&&combatHeadSprayHandled(target,shooter)))return;
     checkBloodLevel();
-    float x=units(fx),y=units(fy),z=units(fz),dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
+    float x=units(fx),y=units(fy),dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
     if(length<0.001f)return;
     dx/=length;dy/=length;
-    if(settings.bloodSpray)sprayHit(target,x,y,z,dx,dy,units(slope),visualDamage);
+    if(settings.bloodSpray) {
+        if(sawCut)spraySawCut(*target,x,y,z,dx,dy);
+        else sprayHit(target,x,y,z,dx,dy,units(slope),visualDamage);
+    }
     else placeSplats(x,y,z,dx,dy,visualDamage);
 }
 // A rotated rectangle of blood clipped to its sector's floor (or ceiling)

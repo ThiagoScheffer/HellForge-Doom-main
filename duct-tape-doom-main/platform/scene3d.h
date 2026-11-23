@@ -354,7 +354,7 @@ struct FrameView {
 // frameMean's alpha packs material bits 0-3, worn-plate bit 4 and optional
 // Living Surface profile above bit 4 (surfaceBinding in scene3d/scene.cpp).
 // For a profiled nonliquid, frameMean.rgb and cycleMean.r hold the patch rectangle; cycleMean.g holds its variant.
-struct SurfaceBinding { const Image *image,*next; float blend; std::array<float,4> frameMean{},cycleMean{}; };
+struct SurfaceBinding { const Image *image,*next; float blend; std::array<float,4> frameMean{},cycleMean{}; bool poolBloom=false; };
 struct SpriteDraw { const Image *image; std::vector<Vertex> vertices; bool additive=false; };
 
 // Lifecycle: init reads options and graphics.cfg, the backend may override

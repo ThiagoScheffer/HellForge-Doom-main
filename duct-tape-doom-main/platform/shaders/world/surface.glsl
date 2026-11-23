@@ -13,6 +13,9 @@ vec4 surfaceLevel(sampler2D source,vec2 uv,vec2 pixel,int level) {
     if(c.effects.x==2.0) uv=sharpen(uv,pixel*scale+c.texFilter.x);
     return indexedAt(source,palette,uv,c.effects.x>0.0,true,level);
 }
+bool calmWaterSurface() {
+    return (vMode&(MODE_SPRITE|MODE_LIQUID))==MODE_LIQUID&&cycleMean.a>0.0&&cycleMean.a<1.0;
+}
 vec4 surfaceTexture(sampler2D source,vec2 uv,vec2 pixel,float lod) {
     int top=textureQueryLevels(source)-1;
     // Texture-space blocks remain attached to the wall while the camera moves.
@@ -23,8 +26,7 @@ vec4 surfaceTexture(sampler2D source,vec2 uv,vec2 pixel,float lod) {
         float fade=1.0-smoothstep(0.0,0.75,lod);
         return surfaceLevel(source,mix(uv,coarse,fade),pixel,0);
     }
-    bool liquid=(vMode&(MODE_SPRITE|MODE_LIQUID))==MODE_LIQUID;
-    if((c.texFilter.y==0.0&&!liquid)||lod<=0.25||top==0) return surfaceLevel(source,uv,pixel,0);
+    if((c.texFilter.y==0.0&&!calmWaterSurface())||lod<=0.25||top==0) return surfaceLevel(source,uv,pixel,0);
     lod=min(lod,float(top));
     int level=int(floor(lod));float t=smoothstep(0.25,0.75,lod-float(level));
     vec4 near=surfaceLevel(source,uv,pixel,level);

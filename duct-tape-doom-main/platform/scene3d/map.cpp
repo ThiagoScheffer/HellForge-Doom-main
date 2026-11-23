@@ -139,14 +139,12 @@ bool iceFlat(int pic) {
     if(ice[pic]<0) {char name[9];memcpy(name,lumpinfo[firstflat+pic].name,8);name[8]=0;ice[pic]=Game_IceFlat(name)?1:0;}
     return ice[pic]!=0;
 }
-// Big pools fade their flat toward its average with distance, keeping this
-// much of its contrast: water most freely, thick liquids less, lava least so
-// its glowing cracks still read.
+// Water can settle to an average color in the distance. A value of one
+// marks liquids whose animated pattern keeps full contrast.
 float liquidDetailFloor(int pic) {
     switch(liquidLook(pic)) {
     case LIQUID_LOOK_WATER: return 0.2f;
-    case LIQUID_LOOK_THICK: case LIQUID_LOOK_BLOOD: return 0.35f;
-    case LIQUID_LOOK_HOT: return 0.5f;
+    case LIQUID_LOOK_THICK: case LIQUID_LOOK_BLOOD: case LIQUID_LOOK_HOT: return 1.0f;
     default: return 0;
     }
 }

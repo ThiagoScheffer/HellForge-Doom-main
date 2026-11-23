@@ -33,7 +33,7 @@ void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool g
         textureFrame(normal,dp1,dp2,duv1,duv2,tangent,bitangent);
         bumped=normalize(bumped-living.slope.x*tangent-living.slope.y*bitangent);
     }
-    if((vMode&MODE_LIQUID)!=0u)
+    if(calmWaterSurface())
         bumped=normalize(mix(bumped,normal,0.8*smoothstep(192.0,1024.0,length(vWorld-c.eye.xyz))));
     float gloss=0.0,shininess=glassy?64.0:24.0;
     if(glassy) gloss=0.9;

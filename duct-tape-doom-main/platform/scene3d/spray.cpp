@@ -262,6 +262,17 @@ void sprayHit(const mobj_t *target,float x,float y,float z,float dx,float dy,flo
         burst(x+dx*near,y+dy*near,z,-dx,-dy,{1+(damage>=10),0,0.6f,{30,90},{0,80},{0,0},0.7f});
     }
 }
+void spraySawCut(const mobj_t &target,float x,float y,float z,float dx,float dy) {
+    checkSprayLevel();
+    // Both sides of the blade shed blood from the entry side of the torso.
+    // Use the same gravity, wall impacts and floor splats as bullet spatter.
+    const float along=(units(target.x)-x)*dx+(units(target.y)-y)*dy;
+    const float entry=std::max(0.f,along-units(target.radius)*.46f);
+    x+=dx*entry;y+=dy*entry;
+    const Burst spatter={4,1,.90f,{44,144},{-40,90},{9,16},.78f};
+    burst(x,y,z,-dy-dx*.30f, dx-dy*.30f,spatter);
+    burst(x,y,z, dy-dx*.30f,-dx-dy*.30f,spatter);
+}
 void sprayKill(const mobj_t &thing,float dx,float dy,float speed,float hitZ,bool gib,int overkill) {
     BloodSourceScope bloodSource(&thing);
     if(!sprayOn()||!bleeds(thing))return;

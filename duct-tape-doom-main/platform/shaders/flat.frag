@@ -10,7 +10,10 @@ void main() {
 #ifdef SOLID
     outColor=vec4(0.85,1,0.85,0.8);
 #elif defined(HEAT)
-    outColor=vec4(0,0,0,1.0-saturate(vLight));
+    // Far heat should stop displacing silhouettes and edges. Fade at the
+    // actual fragment so a broad pool keeps the shimmer at its near edge.
+    float localHeat=vLight*(1.0-smoothstep(180.0,480.0,length(vToEye)));
+    outColor=vec4(0,0,0,1.0-saturate(localHeat));
 #else
     if((vMode&8192u)!=0u){
         // Liquid rivulet: moving thickness, soft edges and a small wet highlight.

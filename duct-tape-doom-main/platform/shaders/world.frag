@@ -114,9 +114,10 @@ void main() {
     float lod=log2(max(min(length(duv1),length(duv2)),footprint*0.5));
     // Large liquid vistas retain their nearby animation, while distant
     // subpixel waves use the existing palette mips instead of sparkling.
-    bool liquid=!sprite&&(vMode&MODE_LIQUID)!=0u;
-    float liquidCalm=liquid?smoothstep(192.0,1024.0,length(vWorld-c.eye.xyz)):0.0;
-    if(liquid) {lod=max(lod,liquidCalm*2.0);texelPixel=max(texelPixel,vec2(1.0+liquidCalm*3.0));}
+    if(calmWaterSurface()) {
+        float calm=smoothstep(192.0,1024.0,length(vWorld-c.eye.xyz));
+        lod=max(lod,calm*2.0);texelPixel=max(texelPixel,vec2(1.0+calm*3.0));
+    }
     // Map surfaces are planar, so screen derivatives give the exact face
     // normal; orient it toward the eye because either side may be drawn.
     vec3 normal=normalize(cross(dp1,dp2));
@@ -195,7 +196,7 @@ void main() {
     // water reads as one body instead of a tiled floor and no longer pulses
     // as the frames change. Grazing views fade it sooner. poolTone varies
     // the whole body a little across calm and rough stretches.
-    if(!sprite&&cycleMean.a>0.0&&c.effects.z==0.0) {
+    if(calmWaterSurface()&&c.effects.z==0.0) {
         float facing=abs(normalize(c.eye.xyz-vWorld).z);
         float reach=vDistance*mix(2.5,1.0,saturate(facing*2.5));
         float detail=mix(1.0,cycleMean.a,smoothstep(192.0,1024.0,reach));
@@ -379,13 +380,21 @@ void main() {
     if(sprite&&(bakeFlags&(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES))==(FEATURE_CAUSTICS|FEATURE_CAUSTICS_SPRITES)&&(vMode&(MODE_SCREEN|MODE_SOFT))==0u&&c.effects.z==0.0)
         color.rgb+=albedo*(1.0-emission)*caustics(vWorld,normal,0u,true)*2.5;
     if((vMode&MODE_MIRROR_FLOOR)!=0u&&c.water.z>0.0&&c.effects.z==0.0) liquidMirror(color,albedo);
-    // Outdoor haze: preserve existing authored/Inferno colors. Deimos D2.2
-    // uses an independent frost extinction curve, fading *geometry by depth*
-    // starting within the windblown crystal field instead of beyond 256 units.
-    // Existing sky-exposure masks exclude roofs/interiors; no fullscreen tint,
-    // baked-light rebuild, additional uniforms, or fog on screen/UI passes.
-    if(mapped&&c.haze.w>0.0&&(vMode&MODE_SCREEN)==0u&&sectorInfo[sector].w>0.0) {
-        float open=clamp(1.0-outdoorShape(sector).x,0.0,1.0);
+    // Sprite mode bits can carry a wound palette index. Look up the world
+    // sector independently so decorations, wound overlays and voxels share
+    // the same outdoor frost as the geometry behind them.
+    bool worldHaze=c.haze.w>0.0&&c.effects.z==0.0&&(vMode&MODE_SCREEN)==0u;
+    bool deimos=c.style.w<=-3.0&&c.style.w>-5.0;
+    const uint noSector=65535u;
+    uint hazeSector=mapped?sector:noSector;
+    if(worldHaze&&sprite&&deimos) {
+        ivec2 cell=ivec2(floor((vWorld.xy-c.map.xy)*c.map.z));
+        if(all(greaterThanEqual(cell,ivec2(0)))&&all(lessThan(cell,textureSize(seams,0))))
+            hazeSector=uint(round(texelFetch(seams,cell,0).r*65535.0));
+    }
+    bool frostedFuzz=false;
+    if(worldHaze&&hazeSector!=noSector&&sectorInfo[hazeSector].w>0.0) {
+        float open=clamp(1.0-outdoorShape(hazeSector).x,0.0,1.0);
         if(c.style.w<=-9.0) {
             // E3: cold crimson fog starts in the same space as blood drips.
             float strength=clamp(c.haze.w,0.0,1.0);
@@ -402,13 +411,15 @@ void main() {
             float strength=clamp(c.haze.w,0.0,1.0);
             float veil=strength*(1.0-exp(-max(vDistance-85.0,0.0)/400.0));
             color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,clamp(open*veil,0.0,1.0));
-        } else if(c.style.w<=-3.0&&c.style.w>-5.0) {
+        } else if(deimos) {
             // Restrict whiteout explicitly to Deimos [-5,-3]; do not let
             // reserved E1/E2/E3 profile codes inherit Deimos fog.
             float strength=clamp(c.haze.w,0.0,1.0);
             float onset=200.0-186.0*strength;
             float extinctionRange=600.0-548.0*strength;
             float veil=strength*(1.0-exp(-max(vDistance-onset,0.0)/extinctionRange));
+            frostedFuzz=sprite&&(vMode&MODE_FUZZ)!=0u&&open*veil>0.0;
+            if(frostedFuzz)color.rgb*=0.3;
             color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,clamp(open*veil,0.0,1.0));
         } else {
             color.rgb=mix(color.rgb,c.haze.rgb*c.fx.x,
@@ -422,7 +433,7 @@ void main() {
     // Eye adaptation: a stepped exposure while the view settles to new light.
     if(c.effects.z==0.0) color.rgb*=c.fx.x;
     if(c.effects.z==32.0) color.rgb=1.0-color.rgb;
-    if((vMode&MODE_FUZZ)!=0u) {color.rgb*=0.3;color.a=0.65;}
+    if((vMode&MODE_FUZZ)!=0u) {if(!frostedFuzz)color.rgb*=0.3;color.a=0.65;}
     if(c.style.x>0.0&&c.effects.z==0.0&&(vMode&MODE_SOFT)==0u) {
         // Gentle warm finish and 6-bit-like color detail; no scanlines or blur.
         color.rgb*=vec3(1.025,1.0,0.965);

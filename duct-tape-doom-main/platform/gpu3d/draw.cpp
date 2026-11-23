@@ -214,6 +214,7 @@ void bindSurface(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,int key,U
     // The crossfade, the weapon's surroundings (unused here), then the
     // liquid's frame and cycle averages.
     float blend[36]={binding.blend};
+    if(!world) blend[1]=binding.poolBloom?1.f:0.f;
     std::copy(binding.frameMean.begin(),binding.frameMean.end(),blend+28);
     std::copy(binding.cycleMean.begin(),binding.cycleMean.end(),blend+32);
     SDL_PushGPUFragmentUniformData(command,blendSlot,blend,world?sizeof(blend):4*sizeof(float));

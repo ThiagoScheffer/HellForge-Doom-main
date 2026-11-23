@@ -126,11 +126,33 @@ static bool surfaceHit(const WoundSurface &surface,const mobj_t &shooter,float x
 static doom_wounds::Frame art(const Image &image) {
     return {image.width,image.height,image.left,image.top,image.pixels.data()};
 }
+static doom_wounds::Point sawTorso(const Image &image) {
+    // Pinky and Spectre share art. The front-facing chest is broadest above
+    // the mouth, while profile frames have more room down the flank.
+    const auto &anatomy=weakpointRegions(MT_SERGEANT,image);
+    if(!anatomy.stock)return {-1,-1};
+    doom_wounds::Point point{-1,-1};
+    float best=std::numeric_limits<float>::max();
+    for(int y=image.height/5;y<image.height*3/4;++y)
+        for(int x=image.width/4;x<image.width*3/4;++x) {
+            if(anatomy.pixels[(size_t)y*image.width+x]!=WP_BODY)continue;
+            const float across=x+.5f-image.width*.5f;
+            const float down=y+.5f-image.height*.39f;
+            int flesh=0;
+            for(int r=std::max(0,y-8);r<=std::min(image.height-1,y+9);++r)
+                for(int c=x-2;c<=x+2;++c)
+                    flesh+=anatomy.pixels[(size_t)r*image.width+c]==WP_BODY;
+            const float score=.065f*across*across+.043f*down*down-flesh;
+            if(score<best){point={x+.5f,y+.5f};best=score;}
+        }
+    return point;
+}
 static doom_wounds::Point attached(Wound &wound,const Image &image) {
     if(wound.source==&image)return wound.point;
     auto found=wound.frames.find(&image);
     if(found!=wound.frames.end())return found->second;
-    return wound.frames[&image]=doom_wounds::map(art(*wound.source),art(image),wound.point);
+    return wound.frames[&image]=wound.kind==Wound::Kind::Saw?sawTorso(image):
+        doom_wounds::map(art(*wound.source),art(image),wound.point);
 }
 // Project an attached patch from its entry side to the current billboard.
 static doom_wounds::Point projected(Wound &wound,const Image &image,bool flipped,float facing) {
@@ -341,6 +363,7 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
     auto &list=wounds[target];
     // Compare holes on this drawing, so hits on a moving limb still merge.
     auto distance=[&](Wound &w) {
+        if(w.kind!=Wound::Kind::Bullet)return 1e9f;
         float facing=std::cos(w.yaw-wound.yaw);
         if(facing<0.8f)return 1e9f;
         auto at=projected(w,image,flipped,facing);
@@ -361,36 +384,28 @@ void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_
     }
     if(list.size()>=maxWounds) {
         auto nearest=std::min_element(list.begin(),list.end(),[&](Wound &p,Wound &q) {return distance(p)<distance(q);});
+        if(nearest->kind!=Wound::Kind::Bullet)return;
         nearest->radius=std::min(maxRadius,nearest->radius+0.3f);nearest->tic=leveltime;
         return;
     }
     list.push_back(wound);
 }
-void sawWoundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,const mobj_t *shooter) {
-    if(!settings.wounds||!settings.accelerated||!target||!shooter||!shooter->player||
+bool sawWoundHit(mobj_t *target,mobj_t *shooter,float &z) {
+    if(!settings.blood||!settings.accelerated||!target||target->health<=0||!shooter||!shooter->player||
        !P_WeakpointActive()||!p_wp_vulnerabilities||
        (target->type!=MT_SERGEANT&&target->type!=MT_SHADOWS)||
-       (criticalVoxelModel&&criticalVoxelModel(*target)))return;
-    if(prepareCriticalSurface)prepareCriticalSurface(target,const_cast<mobj_t*>(shooter));
-    SpriteImpact impact;
-    if(!captureSpriteHit(target,fx,fy,fz,fdx,fdy,slope,shooter,impact))return;
-    const Image &image=*impact.image;
-    const auto &anatomy=weakpointRegions(target->type,image);
-    if(!anatomy.stock)return;
-    const auto &regions=anatomy.pixels;
-    // Anchor one wound at the center of the actual torso region. Custom or
-    // malformed sprites without a verified opaque torso simply get no mark.
-    float centerU=image.width*0.5f,centerV=image.height*0.5f;
-    int best=-1;float bestScore=std::numeric_limits<float>::max();
-    for(int y=0;y<image.height;++y)for(int x=0;x<image.width;++x) {
-        size_t i=(size_t)y*image.width+x;
-        if(!image.pixels[i*2+1]||regions[i]!=WP_BODY)continue;
-        float score=std::hypot((x+0.5f-centerU)*1.25f,y+0.5f-centerV);
-        if(score<bestScore){bestScore=score;best=(int)i;}
-    }
-    if(best<0)return;
-    doom_wounds::Point point={(best%image.width)+0.5f,(best/image.width)+0.5f};
-    bool flipped=impact.flipped;
+       (criticalVoxelModel&&criticalVoxelModel(*target)))return false;
+    if(prepareCriticalSurface)prepareCriticalSurface(target,shooter);
+    auto surface=surfaces.find(target);
+    if(surface==surfaces.end()||surface->second.viewer!=shooter||surface->second.tic!=leveltime)return false;
+    // The saw has already made a gameplay contact. Its ray can pass through
+    // transparent texels of a pain frame, so take the torso from the sprite.
+    const auto &body=surface->second;
+    const Image &image=*body.image;
+    const auto point=sawTorso(image);
+    if(point.u<0)return false;
+    z=body.top-point.v;
+    bool flipped=body.flipped;
     float height=image.top-point.v;
     float across=flipped?image.width-image.left-point.u:point.u-image.left;
     auto &list=wounds[target];
@@ -398,14 +413,16 @@ void sawWoundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fix
     if(existing!=list.end()) {
         existing->contacts=std::min<unsigned char>(5,existing->contacts+1);
         existing->stage=existing->contacts>=5?3:existing->contacts>=3?2:1;
+        existing->yaw=std::atan2(body.rx,-body.ry)-body.yaw;
         existing->tic=leveltime;
-        return;
+        return true;
     }
-    if(list.size()>=maxWounds)return;
-    Wound wound={height,across,0.8f,impact.viewYaw-impact.sourceYaw,&image,point,flipped,
-        hash32((uint32_t)(uintptr_t)target^(uint32_t)target->type*2654435761u),{},leveltime};
+    if(list.size()>=maxWounds)list.erase(std::min_element(list.begin(),list.end(),[](const Wound &a,const Wound &b){return a.tic<b.tic;}));
+    Wound wound={height,across,0.8f,std::atan2(body.rx,-body.ry)-body.yaw,&image,point,flipped,
+        hash32(uint32_t(target->x)^hash32(uint32_t(target->y))^uint32_t(leveltime)),{},leveltime};
     wound.kind=Wound::Kind::Saw;wound.stage=1;wound.contacts=1;
     list.push_back(std::move(wound));
+    return true;
 }
 void forgetWounds(const mobj_t *thing) {wounds.erase(thing);surfaces.erase(thing);bulletImpacts.erase(thing);bulletResults.erase(thing);}
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most) {
@@ -479,22 +496,23 @@ static byte woundMark(float x,float y,float radius,uint32_t seed) {
     return stain;
 }
 static byte sawMark(float x,float y,unsigned char stage,uint32_t seed) {
-    float length=stage==1?5.0f:stage==2?10.0f:16.0f;
+    float length=stage==1?9.0f:stage==2?15.0f:23.0f;
     float phase=(seed&1023u)*(2*doomPi/1024);
     float t=y+length*0.5f;
     if(t<0||t>length)return 0;
     float center=std::sin(t*0.72f+phase)*1.0f+std::sin(t*1.73f+phase*0.7f)*0.4f;
     uint32_t grain=hash32(seed^(uint32_t)(int)std::lround(x)*374761393u^(uint32_t)(int)std::lround(y)*668265263u);
-    float width=stage==1?0.85f:stage==2?1.05f:1.2f;
+    float width=(stage==1?1.25f:stage==2?1.7f:2.15f)*(0.52f+0.48f*std::sin(t*float(doomPi)/length));
     float edge=std::abs(x-center);
     if(edge<width)return edge>width*0.68f?2:((grain&7u)==0?4:3);
-    if(t>length*0.58f&&edge<width+0.8f&&(grain&3u)==0)return 5;
+    if(t>length*0.48f&&edge<width+1.55f&&(grain&3u)!=0)return 5;
+    if(t>length*0.60f&&std::abs(x-center-2.1f)<0.65f)return 3;
     return 0;
 }
 
 bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask) {
     auto found=wounds.find(&thing);
-    if(!settings.wounds||found==wounds.end()||found->second.empty()||image.pixels.empty())return false;
+    if((!settings.wounds&&!settings.blood)||found==wounds.end()||found->second.empty()||image.pixels.empty())return false;
     bool dead=thing.health<=0;
     // Death drawings face the viewer; lying ones carry the holes along the body.
     float tall=standingTop(thing);
@@ -506,14 +524,16 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
     mask.assign((size_t)w*h,0);
     bool any=false;
     for(Wound &wound:found->second) {
-        if(wound.kind==Wound::Kind::Saw&&(!p_wp_vulnerabilities||!P_WeakpointActive()))continue;
+        const bool saw=wound.kind==Wound::Kind::Saw;
+        if(saw?(!settings.blood||!p_wp_vulnerabilities||!P_WeakpointActive()):!settings.wounds)continue;
         float facing=std::sin(a+wound.yaw)*rx-std::cos(a+wound.yaw)*ry;
-        if(!dead&&std::abs(facing)<0.4f)continue;
+        if(!dead&&(saw?facing<0.18f:std::abs(facing)<0.4f))continue;
         // Procedural bends then carry these source texels through the same
         // bodyQuads/fallQuads deformation as the rest of the drawing.
-        auto point=dead?attached(wound,image):projected(wound,image,flipped,facing);
+        auto point=(dead||saw)?attached(wound,image):projected(wound,image,flipped,facing);
+        if(point.u<0||point.v<0)continue;
         float cu=point.u,cv=point.v;
-        if(lying) {
+        if(lying&&!saw) {
             float along=std::clamp(wound.height/std::max(1.0f,tall),0.05f,0.95f)*(body->last+1-body->first);
             cu=body->headRight?body->first+along:body->last+1-along;
             int column=std::clamp((int)cu,body->first,body->last);
@@ -523,20 +543,20 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
         int c0=(int)std::floor(cu),r0=(int)std::floor(cv);
         if(c0<0||r0<0||c0>=w||r0>=h||!image.pixels[((size_t)r0*w+c0)*2+1])continue;   // missed the body here
         const doom_regions::Mask *sawAnatomy=nullptr;
-        if(wound.kind==Wound::Kind::Saw) {
+        if(saw) {
             sawAnatomy=&weakpointRegions(thing.type,image);
             if(!sawAnatomy->stock)continue;
         }
-        int reach=wound.kind==Wound::Kind::Saw?3:(int)std::ceil(wound.radius+2.5f);
-        int up=wound.kind==Wound::Kind::Saw?(wound.stage==1?4:wound.stage==2?7:11):reach;
-        int down=wound.kind==Wound::Kind::Saw?up:(int)std::ceil(wound.radius+4);
+        int reach=saw?5:(int)std::ceil(wound.radius+2.5f);
+        int up=saw?12:reach;
+        int down=saw?12:(int)std::ceil(wound.radius+4);
         float direction=dead?1.0f:((wound.flipped!=flipped)?-1.0f:1.0f)*(facing<0?-1.0f:1.0f);
         for(int r=std::max(0,r0-up);r<=std::min(h-1,r0+down);++r)
             for(int c=std::max(0,c0-reach);c<=std::min(w-1,c0+reach);++c) {
                 size_t i=(size_t)r*w+c;
                 if(!image.pixels[i*2+1]||mask[i]==1)continue;
-                if(sawAnatomy&&(sawAnatomy->pixels[i]!=WP_BODY||c<w*3/10||c>w*7/10||r<h/4||r>h*4/5))continue;
-                byte mark=wound.kind==Wound::Kind::Saw?
+                if(sawAnatomy&&(sawAnatomy->pixels[i]!=WP_BODY||c<w/5||c>w*4/5||r<h/10||r>h*5/6))continue;
+                byte mark=saw?
                     sawMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.stage,wound.seed):
                     woundMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.radius,wound.seed);
                 // Nearby stains combine, but never paint over a hole or its

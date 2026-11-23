@@ -22,6 +22,7 @@ static std::string output;
 static bool visual=false;
 static bool visualEnhanced=false;
 static bool visualSevere=false;
+static bool visualSawCut=false;
 static bool acidMode=false,visualAcid=false;
 static bool visualFeedback=false;
 static bool vileMode=false,visualVile=false;
@@ -328,6 +329,40 @@ static void severeVisualFrame() {
         I_Quit();
     }
 }
+static void sawCutVisualFrame() {
+    static int frame=0;
+    static mobj_t *pinky=nullptr;
+    auto *player=players[consoleplayer].mo;
+    if(++frame==1) {
+        check(P_TeleportMove(player,0,fx(-32))!=0,"chainsaw fixture player placement");
+        player->angle=ANG90;
+        player->player->readyweapon=wp_chainsaw;
+        pinky=P_SpawnMobj(0,fx(23),ONFLOORZ,MT_SERGEANT);
+        pinky->angle=ANG270;pinky->tics=-1;pinky->health=1000;
+    }
+    if(frame==5)I_Render3DScreenshotTo((output+"/saw-stock.png").c_str());
+    if(frame>=12&&frame<=28&&frame%4==0) {
+        const int health=pinky->health;
+        P_SawLineAttack(player,ANG90,MELEERANGE+1,0,3);
+        check(health-pinky->health==6,"Pinky chainsaw vulnerability still doubles damage");
+        pinky->tics=-1;
+    }
+    if(frame==29) {
+        I_Render3DScreenshotTo((output+"/saw-cut.png").c_str());
+        WoundSpot wound;
+        check(woundSpots(pinky,&wound,1)==1,"blood-enabled chainsaw leaves a torso cut with bullet holes off");
+        const auto &sf=sprites[pinky->sprite].spriteframes[pinky->frame&FF_FRAMEMASK];
+        const auto &image=patch(firstspritelump+sf.lump[0]);
+        std::vector<byte> mask;
+        check(woundMask(*pinky,image,sf.flip[0],1,0,mask),"confirmed saw cut reaches the drawn sprite");
+        check(std::count_if(mask.begin(),mask.end(),[](byte mark){return mark>=3;})>=15,
+              "repeated saw contacts spread a visible trail across the torso");
+        settings.blood=0;
+        check(!woundMask(*pinky,image,sf.flip[0],1,0,mask),"Blood off hides the chainsaw trail");
+        settings.blood=1;
+    }
+    if(frame==38){std::puts("PASS Pinky chainsaw cut and damage");I_Quit();}
+}
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
     if(soulMode){revenantSoulIntegration();I_Quit();return;}
@@ -348,6 +383,7 @@ extern "C" void I_TestFrame() {
     if(visualFeedback){feedbackVisualFrame();return;}
     if(visualEnhanced){enhancedVisualFrame();return;}
     if(visualSevere){severeVisualFrame();return;}
+    if(visualSawCut){sawCutVisualFrame();return;}
     if(visual){visualFrame();return;}
     run();featureSwitchConfig();enhancedCoverage();cachedHitBenchmark();balanceHitCounts();realProjectiles();localizedRockets();realBFGAndMovement();realShotgunDischarges();realInjuriesAndSave();feedbackAndStatusIntegration();survivalIntegration();std::printf("PASS %d total engine integration checks\n",checks);I_Quit();
 }
@@ -355,6 +391,7 @@ int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     visualSevere=argc==5&&!std::strcmp(argv[4],"--visual-severe");
+    visualSawCut=argc==5&&!std::strcmp(argv[4],"--visual-saw-cut");
     const bool solidAcid=argc==5&&!std::strcmp(argv[4],"--acid-solid");
     acidMode=solidAcid||(argc==5&&!std::strcmp(argv[4],"--acid"));
     solidMode=solidMode||solidAcid;
@@ -369,7 +406,7 @@ int main(int argc,char **argv) {
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualAcid||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualSawCut||visualAcid||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -380,6 +417,7 @@ int main(int argc,char **argv) {
     f=std::fopen(graphics.c_str(),"w");if(!f)return 2;
     std::fputs(visual?"accelerated 1\ncritical_parts 1\nwounds 1\nvoxel_models 0\nhit_flinch 0\neye_adaptation 0\n":"accelerated 0\n",f);
     if(visualSoul)std::fputs("revenant_soul_release 1\nfps 0\n",f);
+    if(visualSawCut)std::fputs("wounds 0\nfullscreen 0\nmonster_weapon_vulnerabilities 1\nblood 1\nblood_spray 1\n",f);
     std::fclose(f);
     if(visualEnhanced) {f=std::fopen(graphics.c_str(),"a");std::fputs("enhanced_weak_points 1\nmonster_weapon_vulnerabilities 1\nlocalized_injury_effects 1\n",f);std::fclose(f);}
     if(visualSevere) {

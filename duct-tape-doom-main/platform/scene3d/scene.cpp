@@ -9,6 +9,7 @@ extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
    (prepareFrame), plus the backend-independent I_Render3D calls. */
 #include "internal.h"
+#include "../audio/ambience_spots.h"
 #include "../decoration_ambience_rules.h"
 #include "../episode_atmosphere.h"
 #include "../shaders/feature_flags.h"
@@ -405,6 +406,16 @@ static bool wornPlate(int key,int pic,bool flat) {
     else if(flat)memcpy(name,lumpinfo[firstflat+pic].name,8);
     return known[key]=name[0]&&Game_WornPlate(name,flat);
 }
+// The authored strips and falls share the pool's bloom range.
+static bool poolWallGlow(int texture) {
+    static std::unordered_map<int,bool> known;
+    auto found=known.find(texture);
+    if(found!=known.end())return found->second;
+    char name[9];R_TextureName(texture,name);
+    return known[texture]=doom_emissive_kind(name,false)==DOOM_EMISSIVE_SLIME||
+           Game_AmbientWall(name)==AMBIENT_SLIMEFALL||strncmp(name,"LAVA",4)==0||
+           strncmp(name,"BLAVA",5)==0||strncmp(name,"BFALL",5)==0;
+}
 // Binds a batch texture with its next animation frame and crossfade amount.
 // The engine switches frames before leveltime++, so the phase uses leveltime-1.
 SurfaceBinding surfaceBinding(int key) {
@@ -429,6 +440,7 @@ SurfaceBinding surfaceBinding(int key) {
     unsigned metadata=(unsigned)std::lround(surfaceMaterial(sourceKey,pic,flat));
     if(settings.wornPlates&&wornPlate(sourceKey,pic,flat)) metadata|=16u;
     float floor=flat?liquidDetailFloor(pic):0;
+    binding.poolBloom=floor==1.f||(sourceKey>=0&&sourceKey<numtextures&&poolWallGlow(sourceKey));
     // Liquid averages own RGB when present. A crossfade between different
     // artwork regions keeps its original shading.
     if(settings.livingSurfaces&&floor==0&&image.livingProfile!=LS_NONE&&image.livingProfile!=LS_SKY&&
@@ -443,7 +455,8 @@ SurfaceBinding surfaceBinding(int key) {
     static unsigned meanLevel=~0u;
     static std::unordered_map<int,std::array<float,3>> means;
     if(meanLevel!=r_levelserial){means.clear();meanLevel=r_levelserial;}
-    if(floor>0) {
+    binding.cycleMean[3]=floor;
+    if(floor>0&&floor<1) {
         // The frames' average at the crossfade, and the average over the
         // whole cycle, which stays put as the frames change.
         const auto &a=averageColor(image),&b=averageColor(const_cast<Image&>(*next));
@@ -467,7 +480,6 @@ SurfaceBinding surfaceBinding(int key) {
             binding.frameMean[c]=a[c]+(b[c]-a[c])*blend;
             binding.cycleMean[c]=found->second[c];
         }
-        binding.cycleMean[3]=floor;
     }
     return binding;
 }

@@ -533,6 +533,7 @@ void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float 
 // spray.cpp
 // What a hitscan hit throws: an exit spray past the body along the shot, a speck or two back.
 void sprayHit(const mobj_t *target,float x,float y,float z,float dx,float dy,float slope,int damage);
+void spraySawCut(const mobj_t &target,float x,float y,float z,float dx,float dy);
 // A kill's burst: along the push (dx,dy, speed units a tic) from where it struck (hitZ above
 // the feet, -1 unknown), more for overkill, all around for a gib.
 void sprayKill(const mobj_t &thing,float dx,float dy,float speed,float hitZ,bool gib,int overkill);
@@ -651,7 +652,7 @@ bool voxelMonster(const mobj_t&);
 // Holes shot through monsters' sprites. woundMask: per texel of a drawn frame,
 // 0 body, 1 hole, 2 dark rim, 3 red rim, 4 bright lip, 5 stain (false when none show).
 void woundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,int damage,const mobj_t *shooter=nullptr);
-void sawWoundHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,fixed_t slope,const mobj_t *shooter);
+bool sawWoundHit(mobj_t *target,mobj_t *shooter,float &z);
 // Remember the main view so impacts can intersect the artwork after flinch,
 // lifting, interpolation and liquid clipping, before damage changes its frame.
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
