@@ -3,6 +3,7 @@
    sliding across the floor smear it, bodies thrown into walls splash them.
    Drawing only: own random numbers, nothing the game sees. */
 #include "internal.h"
+#include "gore_policy.h"
 #include "../decoration_ambience_rules.h"
 extern "C" {
 #include "../audio/impact_synth.h"
@@ -16,10 +17,12 @@ namespace doom3d {
 // when. Its splat is laid then, shown from that moment, and the speck flies
 // until it gets there, moving at the tic rate like the debris.
 constexpr float sprayGravity=1225; // Doom's: a unit a tic, each tic.
+enum class DropVisual : uint8_t { Blood, GoreBlood, GoreDrip, Flesh, Tissue, Organ, BlueGut, Bone };
 struct Drop {
-    float x,y,z,vx,vy,vz,born,end,size;
+    float x,y,z,vx,vy,vz,born,end,size,gravity,flight;
     std::array<float,3> color;
-    bool decoration=false,flesh=false;
+    bool decoration=false;
+    DropVisual visual=DropVisual::Blood;
 };
 static std::vector<Drop> drops;
 constexpr size_t maxDrops=768;
@@ -42,13 +45,14 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
 // a second; splat: the size of what it leaves (0 none).
 static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
-                      const uint32_t *decorationSeed=nullptr,bool flesh=false) {
+                      const uint32_t *decorationSeed=nullptr,DropVisual visual=DropVisual::Blood,float gravity=sprayGravity) {
     float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
     const sector_t *start=sectorAt(x,y);
+    if(ceilZ(start)-floorZ(start)<1.f)return false;
     z=std::clamp(z,floorZ(start)+0.5f,ceilZ(start)-0.5f);
     auto fallTime=[&](float floor) {
         float d=z-floor;
-        return d<0?-1.0f:(vz+std::sqrt(vz*vz+2*sprayGravity*d))/sprayGravity;
+        return d<0?-1.0f:(vz+std::sqrt(vz*vz+2*gravity*d))/gravity;
     };
     // The floor: the start's, then the landing point's (a step's face in
     // between is found as a wall below).
@@ -66,8 +70,8 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
     // The ceiling, when it rises that high first.
     if(vz>0&&start->ceilingpic!=skyflatnum) {
         float rise=ceilZ(start)-0.5f-z;
-        if(rise>0&&vz*vz>2*sprayGravity*rise) {
-            float up=(vz-std::sqrt(vz*vz-2*sprayGravity*rise))/sprayGravity;
+        if(rise>0&&vz*vz>2*gravity*rise) {
+            float up=(vz-std::sqrt(vz*vz-2*gravity*rise))/gravity;
             const sector_t *above=sectorAt(x+vx*up,y+vy*up);
             if(up<t&&std::abs(ceilZ(above)-ceilZ(start))<1) {t=up;where=CEILING;landing=above;}
         }
@@ -75,11 +79,25 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
     // A wall in the way, along the chord of its arc.
     float h=std::hypot(vx,vy);WallHit hit;
     if(h>1) {
-        float reach=h*t,end=z+vz*t-0.5f*sprayGravity*t*t;
-        if(firstSolidWall(x,y,z,vx/h,vy/h,(end-z)/reach,reach,hit)) {t=hit.t/h;where=WALL;}
+        const int segments=visual>=DropVisual::Tissue?4:1;
+        const float step=t/segments;
+        const auto height=[&](float at){return z+vz*at-.5f*gravity*at*at;};
+        for(int i=0;i<segments;++i) {
+            const float a=step*i,reach=h*step,za=height(a),zb=height(a+step);
+            if(firstSolidWall(x+vx*a,y+vy*a,za,vx/h,vy/h,(zb-za)/reach,reach,hit)) {
+                t=a+hit.t/h;where=WALL;break;
+            }
+        }
     }
     if(t>2.5f)splat=0; // Down a pit.
-    float lx=x+vx*t,ly=y+vy*t,lz=z+vz*t-0.5f*sprayGravity*t*t,fall=vz-sprayGravity*t;
+    float lx=x+vx*t,ly=y+vy*t,lz=z+vz*t-0.5f*gravity*t*t,fall=vz-gravity*t;
+    const bool canRest=visual==DropVisual::Bone&&size>=3.f&&where==FLOOR;
+    const sector_t *endSector=where==CEILING?landing:
+        (where==FLOOR&&(splat>0||canRest))?sectorAt(lx,ly):nullptr;
+    const size_t endIndex=endSector?endSector-sectors:size_t(numsectors);
+    const bool liquid=endIndex<sectorMist.size()&&sectorMist[endIndex].liquid;
+    const bool restBone=canRest&&
+                        endIndex<(size_t)numsectors&&endSector->floorpic!=skyflatnum&&!liquid;
     bool floorSplat=false;
     if(splat>0) {
         if(where==WALL) {
@@ -92,22 +110,22 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
             if(valid){bloodWallSplat(hit,lx,ly,lz,splat,std::clamp(1/std::max(facing,0.35f),1.0f,2.4f),now+t,kind,kind==BLOOD_SPLAT&&splat>=18);
                 if(wallBudget){--*wallBudget;++combatFeedbackStats.wallSplats;}}
         } else {
-            const sector_t *s=where==CEILING?landing:sectorAt(lx,ly);
-            size_t index=s-sectors;
-            bool liquid=index<sectorMist.size()&&sectorMist[index].liquid;
-            if(where==CEILING||!liquid) {
+            const bool sky=(where==CEILING?endSector->ceilingpic:endSector->floorpic)==skyflatnum;
+            if((where==CEILING||!liquid)&&(!wallBudget||!sky)) {
                 // Drops coming in low stretch along their way.
                 float stretch=where==CEILING?1:1+std::clamp(h/std::max(60.0f,std::abs(fall))*0.6f,0.0f,1.2f);
                 const float angle=decorationSeed?doom_decor::unit(*decorationSeed)*float(2*doomPi):std::atan2(vy,vx);
-                bloodFloorSplat(lx,ly,(int)index,splat,angle,stretch,where==CEILING,now+t,kind,decorationSeed);
-                floorSplat=where==FLOOR&&s->floorpic!=skyflatnum;
+                bloodFloorSplat(lx,ly,(int)endIndex,splat,angle,stretch,where==CEILING,now+t,kind,decorationSeed);
+                floorSplat=where==FLOOR&&!sky;
             }
         }
     }
     if(decorationSeed&&!settings.bloodSpray)return floorSplat;
     if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
-    const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):randomRange(.35f,.7f);
-    drops.push_back({x,y,z,vx,vy,vz,now,now+t,size,bloodColor(shade),decorationSeed!=nullptr,flesh});
+    const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):
+                      visual==DropVisual::BlueGut?randomRange(.68f,.95f):randomRange(.35f,.7f);
+    const auto color=visual==DropVisual::Bone?paletteColor({shade+.25f,shade+.20f,shade+.12f}):bloodColor(shade);
+    drops.push_back({x,y,z,vx,vy,vz,now,now+t+(restBone?.42f:0),size,gravity,t,color,decorationSeed!=nullptr,visual});
     return floorSplat;
 }
 
@@ -142,37 +160,68 @@ static void burst(float x,float y,float z,float dx,float dy,const Burst &b) {
     }
 }
 
-// Milestone 1 heavy close-range impact. These are short-lived drawn pixel
-// clusters, never new actors/physics bodies. The existing ballistic drop
-// integrator finds walls/floors/ceilings and uses the ordinary decal caps.
-void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head) {
-    if(!settings.accelerated||settings.goreLevel!=1||!settings.blood||
-       totalkills>=200||(!settings.goreWallBlood&&!settings.goreFragments))return;
+// Styles share collision, decal ownership and the same drop vector.
+struct GoreStyle {
+    DropVisual visual;
+    int living,fatal,cores;
+    float size,coreSize,speed,spread,rise,gravity,mark;
+};
+static constexpr GoreStyle humanFlesh={DropVisual::Flesh,0,4,0,2.15f,0,92,.60f,40,sprayGravity,15};
+static constexpr GoreStyle impTissue={DropVisual::Tissue,4,6,1,2.8f,4.1f,91,.58f,52,1120,16};
+static constexpr GoreStyle revenantBone={DropVisual::Bone,3,6,1,2.1f,3.7f,98,.58f,57,1160,0};
+static constexpr GoreStyle mancubusHeavy={DropVisual::Organ,5,8,3,3.6f,6.9f,82,.52f,57,1000,23};
+static constexpr GoreStyle pinkyViscera={DropVisual::Organ,4,7,2,3.1f,5.5f,92,.51f,53,1040,20};
+static constexpr GoreStyle cacoBlueViscera={DropVisual::BlueGut,6,9,2,3.8f,8.0f,95,.48f,83,850,25};
+static const GoreStyle &goreStyle(int type) {
+    switch(type) {
+    case MT_TROOP:return impTissue;
+    case MT_UNDEAD:return revenantBone;
+    case MT_FATSO:return mancubusHeavy;
+    case MT_SERGEANT:return pinkyViscera;
+    case MT_HEAD:return cacoBlueViscera;
+    default:return humanFlesh;
+    }
+}
+void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome) {
+    if(!settings.accelerated||settings.goreLevel!=1||totalkills>=200||!bloodOn()||
+       (!settings.goreWallBlood&&!settings.goreFragments))return;
     checkSprayLevel();
     BloodSourceScope tint(&target);
+    const auto &style=goreStyle(target.type);
+    const bool fatal=target.health<=0,bone=style.visual==DropVisual::Bone;
+    const bool m1head=goreHuman(target.type)&&outcome==GoreOutcome::HeadBurst;
     const float heading=std::atan2(dy,dx);
     int wallBudget=settings.goreWallBlood?3:0;
-    // A directional cloud behind the victim makes the shot feel forceful
-    // without globally increasing normal bullet spray.
-    if(settings.goreWallBlood)for(int n=0;n<(head?4:3);++n) {
+    if(settings.goreWallBlood&&!bone)for(int n=0;n<(m1head?4:fatal?3:2);++n) {
         const float a=heading+randomRange(-.43f,.43f),speed=randomRange(68,126);
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
-            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget);
+            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::GoreBlood);
     }
     if(!settings.goreFragments)return;
-    // Max 64 live flesh clusters across the whole scene. Keep the 768-drop
-    // budget shared with normal blood instead of allocating a new particle pool.
     const float now=gameSeconds();
     int active=0;
-    for(const auto &d:drops)if(d.flesh&&d.end>now)++active;
-    const int count=std::min(head?6:3,std::max(0,64-active));
+    for(const auto &drop:drops)if(drop.visual>=DropVisual::Flesh&&drop.end>now)++active;
+    const int count=std::min(m1head?6:fatal?style.fatal:style.living,std::max(0,64-active));
+    const int cores=style.cores+(fatal&&target.type==MT_HEAD?1:0);
     for(int n=0;n<count;++n) {
-        const float a=heading+randomRange(-.60f,.60f),speed=randomRange(54,132);
-        float vZ=randomRange(-25,105);
-        // Only the existing decal system persists on the ground or wall.
-        const float splat=settings.goreWallBlood?randomRange(9,17):0;
-        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,vZ,
-                  randomRange(1.45f,2.6f),splat,BLOOD_SPLAT,&wallBudget,nullptr,true);
+        if(m1head) {
+            const float a=heading+randomRange(-.60f,.60f),speed=randomRange(54,132);
+            const float rise=randomRange(-25,105),mark=settings.goreWallBlood?randomRange(9,17):0;
+            throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,rise,randomRange(1.45f,2.6f),
+                      mark,BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::Flesh);
+            continue;
+        }
+        const bool core=n<cores;
+        const float spread=style.spread*(core?.50f:1.f);
+        const float a=heading+randomRange(-spread,spread);
+        const float speed=style.speed*randomRange(core?.84f:.70f,core?1.06f:1.31f);
+        const float rise=style.rise*randomRange(core?.75f:-.18f,1.28f);
+        const float size=(core?style.coreSize:style.size)*randomRange(.86f,1.14f)*(fatal?1.14f:1.f);
+        const float mark=settings.goreWallBlood&&!bone?style.mark*randomRange(.74f,1.25f)*(core?1.f:.64f):0;
+        const DropVisual visual=(!core&&(style.visual==DropVisual::Organ||style.visual==DropVisual::BlueGut))?
+                                DropVisual::Tissue:style.visual;
+        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,rise,size,mark,BLOOD_SPLAT,
+                  &wallBudget,nullptr,visual,style.gravity);
     }
 }
 
@@ -377,7 +426,7 @@ void spraySmear(float x,float y,float angle,float size) {
 static void drip(const mobj_t &thing) {
     BloodSourceScope bloodSource(&thing);
     WoundSpot spots[10];
-    int count=woundSpots(&thing,spots,10);
+    int count=woundSpots(&thing,spots,10,true);
     if(!count)return;
     for(int n=0;n<count;++n) {
         const WoundSpot &w=spots[n];
@@ -386,7 +435,8 @@ static void drip(const mobj_t &thing) {
         float x,y,z,yaw;
         woundOrigin(thing,w,x,y,z,yaw);
         throwDrop(x,y,z,units(thing.momx)*TICRATE+randomRange(-6,6),units(thing.momy)*TICRATE+randomRange(-6,6),0,
-                  randomRange(0.7f,1.0f),randomRange(0,1)<0.5f?randomRange(4,6):0,BLOOD_SPECK);
+                  randomRange(0.7f,1.0f),randomRange(0,1)<0.5f?randomRange(4,6):0,BLOOD_SPECK,
+                  nullptr,nullptr,w.critical?DropVisual::GoreDrip:DropVisual::Blood);
     }
 }
 void watchSpray() {
@@ -433,18 +483,49 @@ void buildSpray(const Uniforms &camera) {
     checkSprayLevel();
     float now=gameSeconds();
     const bool showDecor=horrorDecorEnabled()&&settings.blood&&settings.bloodSpray;
+    const bool showGore=settings.accelerated&&settings.goreLevel==1&&settings.blood&&totalkills<200&&
+                        !netgame&&!demoplayback&&!demorecording;
     drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){
-        return now>=d.end||now<d.born-0.1f||(d.decoration&&!showDecor);
+        return now>=d.end||now<d.born-0.1f||(d.decoration&&!showDecor)||
+               (d.visual!=DropVisual::Blood&&(!showGore||
+                  (d.visual==DropVisual::GoreBlood?!settings.goreWallBlood:d.visual==DropVisual::GoreDrip?
+                      (!settings.goreBodyDamage||!settings.bloodSpray):!settings.goreFragments)));
     }),drops.end());
     for(const Drop &d:drops) {
-        float t=std::clamp(std::floor((now-d.born)*TICRATE)/TICRATE,0.0f,d.end-d.born);
-        float x=d.x+d.vx*t,y=d.y+d.vy*t,z=d.z+d.vz*t-0.5f*sprayGravity*t*t;
-        float light=lighting(sectorAt(x,y)),tall=std::abs(d.vz-sprayGravity*t)>250?2.0f:1.0f;
+        const bool smooth=d.visual==DropVisual::BlueGut||d.visual==DropVisual::Bone;
+        const float elapsed=now-d.born;
+        const float t=std::clamp(smooth?elapsed:std::floor(elapsed*TICRATE)/TICRATE,0.f,d.flight);
+        const auto height=[&](float at){return d.z+d.vz*at-.5f*d.gravity*at*at;};
+        const float x=d.x+d.vx*t,y=d.y+d.vy*t,z=height(t);
+        const float light=lighting(sectorAt(x,y)),tall=std::abs(d.vz-d.gravity*t)>250?2.0f:1.0f;
         std::array<float,3> lit;for(int c=0;c<3;++c)lit[c]=std::min(1.0f,d.color[c]*light);
-        if(d.flesh) {
+        if(d.visual==DropVisual::BlueGut) {
+            const float speed=std::hypot(d.vx,d.vy);
+            const float sideX=-d.vy/speed*d.size*.42f,sideY=d.vx/speed*d.size*.42f;
+            pixelBlock(particleVertices,camera,x,y,z,d.size,1.03f,lit,false,&d.color,false);
+            pixelBlock(particleVertices,camera,x+sideX,y+sideY,z+d.size*.21f,d.size*.67f,.86f,lit,false,&d.color,false);
+            const float shoulder=std::max(0.f,t-.035f);
+            pixelBlock(particleVertices,camera,d.x+d.vx*shoulder-sideX*.5f,d.y+d.vy*shoulder-sideY*.5f,
+                       height(shoulder)-d.size*.15f,d.size*.61f,.86f,lit,false,&d.color,false);
+            for(int i=1;i<=2;++i) {
+                const float lag=.06f+i*.035f;
+                if(t<lag)break;
+                const float at=t-lag;
+                pixelBlock(particleVertices,camera,d.x+d.vx*at,d.y+d.vy*at,height(at),
+                           d.size*(.42f-.07f*i),.9f,lit,false,&d.color,false);
+            }
+        } else if(d.visual==DropVisual::Bone) {
+            const bool resting=elapsed>=d.flight;
+            pixelBlock(particleVertices,camera,x,y,z,d.size*.72f,resting?.75f:2.3f,lit,resting,&d.color);
+            pixelBlock(particleVertices,camera,x+d.size*.3f,y,z+(resting?0:-d.size*.4f),d.size*.5f,.85f,lit,resting,&d.color);
+        } else if(d.visual==DropVisual::Organ) {
+            pixelBlock(particleVertices,camera,x,y,z,d.size,1.25f,lit,false,&d.color);
+            pixelBlock(particleVertices,camera,x+d.size*.42f,y,z+d.size*.28f,d.size*.8f,.9f,lit,false,&d.color);
+            pixelBlock(particleVertices,camera,x-d.size*.27f,y+d.size*.25f,z-d.size*.3f,d.size*.58f,1.1f,lit,false,&d.color);
+        } else if(d.visual>=DropVisual::Flesh) {
             // A tiny uneven two-lobe cluster reads as tissue rather than a
             // perfectly spherical drop, without art or additional textures.
-            pixelBlock(particleVertices,camera,x,y,z,d.size*1.15f,tall,lit,false,&d.color);
+            pixelBlock(particleVertices,camera,x,y,z,d.size*1.15f,d.visual==DropVisual::Tissue?1.3f:tall,lit,false,&d.color);
             pixelBlock(particleVertices,camera,x+d.size*.4f,y-d.size*.25f,z+d.size*.25f,
                        d.size*.63f,tall,lit,false,&d.color);
         } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);

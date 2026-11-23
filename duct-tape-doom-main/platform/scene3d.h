@@ -122,7 +122,8 @@ struct Settings {
     int goreLevel=1; // 0 Classic, 1 Enhanced. Visual-only; never modifies combat damage.
     int goreHeads=1; // Burst on concentrated confirmed head pellets; no detached head art.
     int goreFragments=1; // Small directional procedural flesh pieces, capped globally.
-    int goreWallBlood=1; // Larger splashes and drips from lethal close-range blasts.
+    int goreWallBlood=1; // Larger collision-driven splashes and drips.
+    int goreBodyDamage=1;
     int deathFalls=0; // Optional procedural falls: 0 off, 1 by hit, 2 legs, 3 chest, 4 head.
     int deathRagdoll=0; // Rigged monsters fall as ragdolls instead: the pain drawing raised into a relief on a small skeleton the hit knocks over.
     int deathGuided=1; // With deathRagdoll: chest blasts from the front sometimes play the shot death on strings (hand rigs that fit it: the zombieman).

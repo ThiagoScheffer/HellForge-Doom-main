@@ -26,7 +26,10 @@ internal static class LauncherUpdateTests {
   File.WriteAllText(Path.Combine(Data.Profile,"doomsav0.dsg"),"keep save");
   SettingsBackup.Export(Path.Combine(root,"recovery.zip"),new XDocument(new XElement("launcher")),Data.Profile);
   Check(File.Exists(Path.Combine(root,"recovery.zip"))&&File.ReadAllText(Path.Combine(Data.Profile,"doomsav0.dsg"))=="keep save","backup does not touch saves");
-  using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("settings-schema.xml"))Check(XDocument.Load(resource).Root.Elements("option").Count()==355,"all 355 F4 and balance controls embedded");
+  using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("settings-schema.xml")){
+   var keys=XDocument.Load(resource).Root.Elements("option").Select(o=>(string)o.Attribute("key")).ToList();
+   Check(keys.Count==keys.Distinct().Count()&&keys.Contains("gore_body_damage")&&!keys.Contains("gore_limbs"),"embedded settings include supported gore options");
+  }
   using(var mascot=new WadMascot()){mascot.Load(args[0]);Check(mascot.Animated,"Arch-vile stock frames decode from user IWAD");using(var b=new Bitmap(180,200)){using(var g=Graphics.FromImage(b)){g.Clear(Palette.Background);mascot.Draw(g,new Rectangle(10,10,150,180),3);}b.Save(Path.Combine(root,"archvile.png"));}mascot.Load(null);Check(!mascot.Animated,"missing artwork fallback clears resources");}
   Check(WadMascot.Decode(new byte[8],new byte[768])==null,"malformed patch safely rejected");
   using(var dialog=new LauncherSettingsDialog(cfg,()=>{})){dialog.Show();Application.DoEvents();using(var b=new Bitmap(dialog.Width,dialog.Height)){dialog.DrawToBitmap(b,dialog.ClientRectangle);b.Save(Path.Combine(root,"settings.png"));}dialog.Close();}

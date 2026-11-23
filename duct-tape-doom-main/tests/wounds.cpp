@@ -1,7 +1,10 @@
 // Exercise the real wound capture and drawing path without a WAD or GPU.
 // The synthetic animation moves a textured body part inside a fixed outline.
 #include "../platform/scene3d/internal.h"
+#include "../platform/scene3d/gore_policy.h"
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 extern "C" {
 #include "p_local.h"
 }
@@ -18,6 +21,7 @@ static lumpinfo_t testLumps[firstTestSpriteLump+testSpriteCount]={};
 extern "C" {
 state_t states[NUMSTATES]={};
 int firstspritelump=firstTestSpriteLump;
+int numspritelumps=testSpriteCount;
 int numsprites=NUMSPRITES;
 int leveltime=0;
 int p_critical_trace=0;
@@ -25,14 +29,16 @@ spritedef_t *sprites=nullptr;
 unsigned r_levelserial=1;
 lumpinfo_t *lumpinfo=testLumps;
 int M_CheckParm(char*) {return 0;}
+void (*R_GoreShotEnd)(mobj_t*,uint64_t)=nullptr;
 }
 
 namespace doom3d {
 Settings settings;
 unsigned levelSerial=1;
-void goreBurst(const mobj_t&,float,float,float,float,float,bool) {}
 static std::array<Image,testSpriteCount> spriteImages;
 static unsigned bodyQuadCalls=0;
+static std::vector<GoreOutcome> goreBursts;
+void goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome) {goreBursts.push_back(outcome);}
 const std::vector<byte> &bloodPalette() {
     static const std::vector<byte> shades={16,32,48,64,80,96,112,128,144};
     return shades;
@@ -256,7 +262,221 @@ static void criticalParts() {
     std::puts("Critical sprite classification checks passed");
 }
 
-int main() {
+
+static void gorePolicy() {
+    using O=GoreOutcome;
+    using R=GoreReason;
+    GoreDecision shot;
+    shot.type=MT_POSSESSED;shot.headEnabled=true;shot.legacyStock=true;shot.effectiveDamage=20;
+    shot.contacts=4;shot.spriteContacts=3;shot.legacyHeads=2;
+    shot.hits[(unsigned)GoreRegion::Chest]=1;
+    check(goreCandidate(shot).outcome==O::HeadBurst,"M1 uses all admitted contacts for the head majority");
+    ++shot.contacts;
+    check(goreCandidate(shot).outcome==O::HumanFlesh,"A human torso kill keeps ordinary corpse art");
+    shot.extreme=true;shot.contacts=4;
+    check(goreCandidate(shot).outcome==O::HumanFlesh,"Extreme human death bypasses the head cut");
+
+    shot={};shot.type=MT_HEAD;shot.bodyEnabled=true;shot.maxHP=400;shot.postHP=200;
+    shot.effectiveDamage=20;shot.spriteContacts=1;
+    check(goreCandidate(shot).reason==R::Opaque,"A single Cacodemon contact requires 30 damage");
+    ++shot.spriteContacts;
+    check(goreCandidate(shot).outcome==O::CacoViscera,"Two contacts qualify at half HP and 20 health lost");
+    shot.already=true;
+    check(goreCandidate(shot).reason==R::Already,"Living Cacodemon ejections occur once");
+    shot.postHP=0;shot.effectiveDamage=25;shot.spriteContacts=1;
+    check(goreCandidate(shot).outcome==O::CacoViscera,"A separate one-contact fatal accent can follow the living burst");
+    shot.distance=129;
+    check(goreCandidate(shot).reason==R::Range,"Cacodemon gore stops beyond 128 units");
+
+    shot={};shot.type=MT_TROOP;shot.bodyEnabled=true;shot.maxHP=60;shot.postHP=24;
+    shot.spriteContacts=2;shot.hits[(unsigned)GoreRegion::Chest]=1;shot.effectiveDamage=15;
+    check(goreCandidate(shot).outcome==O::ChestCavity,"Imp torso injury requires a severe shot at 40 percent HP");
+    ++shot.postHP;
+    check(goreCandidate(shot).reason==R::Health,"Above-threshold HP blocks a living injury");
+    shot.maxHP=0;
+    check(goreCandidate(shot).reason==R::Health,"An invalid maximum HP blocks a living injury");
+    shot.postHP=0;
+    check(goreCandidate(shot).outcome==O::ImpTissue,"Fatal Imp body hits select tissue without a torso mask");
+    shot.type=MT_FATSO;shot.maxHP=600;shot.postHP=270;shot.effectiveDamage=35;
+    check(goreCandidate(shot).reason==R::Opaque,"Mancubus requires two classified torso contacts while alive");
+    ++shot.hits[(unsigned)GoreRegion::Chest];
+    check(goreCandidate(shot).outcome==O::ChestCavity,"A severely wounded low-HP Mancubus qualifies");
+    shot.postHP=0;
+    check(goreCandidate(shot).outcome==O::MancubusHeavy,"Fatal Mancubus hits select heavy tissue without a torso mask");
+    shot.type=MT_SERGEANT;shot.postHP=45;shot.maxHP=100;shot.effectiveDamage=20;
+    check(goreCandidate(shot).outcome==O::PinkyViscera,"Pinky selects only viscera");
+    shot.type=MT_SHADOWS;
+    check(goreCandidate(shot).outcome==O::None,"Spectres are excluded");
+    shot.type=MT_UNDEAD;shot.effectiveDamage=30;
+    check(goreCandidate(shot).outcome==O::RevenantBone,"A substantial surviving Revenant rib hit selects only bone");
+}
+
+static void goreShot(mobj_t &monster,float u,float v,int damage,int pellets,float distance=96,
+                     bool remove=false,bool changeLevel=false) {
+    const Image &image=spriteImages[0];
+    mobj_t shooter={};
+    player_t player={};
+    shooter.player=&player;shooter.x=monster.x;shooter.y=monster.y-fixed(distance);shooter.angle=ANG90;
+    const size_t previous=goreBursts.size();
+    P_WeakpointBeginShot(&shooter,wp_supershotgun);
+    for(int pellet=0;pellet<pellets&&monster.health>0;++pellet) {
+        goreCapture(&monster,&shooter,monster.x+fixed(u-image.left),monster.y-fixed(10),
+                    monster.z+fixed(image.top-v),0,FRACUNIT,0);
+        monster.health-=damage;
+        if(monster.health<=0)forgetGore(&monster,1);
+        goreAfterHit(&monster,&shooter,WP_SHOTGUN_PELLET,monster.health,0,damage);
+    }
+    check(goreBursts.size()==previous,"Any major effect must wait for discharge finalization");
+    const auto discharge=P_WeakpointDischarge(&shooter);
+    P_WeakpointEndShot();
+    if(remove)forgetWounds(&monster);
+    if(changeLevel)++r_levelserial;
+    R_GoreShotEnd(&shooter,discharge);
+    R_GoreShotEnd(&shooter,discharge);
+    if(changeLevel)--r_levelserial;
+    check(goreBursts.size()<=previous+1,"A discharge cannot emit twice for one victim");
+}
+static void configureGore() {
+    settings.accelerated=1;settings.goreLevel=1;settings.blood=1;
+    settings.goreBodyDamage=1;settings.goreFragments=1;settings.wounds=0;
+    totalkills=199;P_WeakpointConfigure(0,0,0);R_GoreShotEnd=goreFinishShot;
+    goreBursts.clear();
+}
+
+static Image iwadSprite(const std::vector<byte> &wad,const char *name) {
+    auto read16=[&](size_t at){return unsigned(wad.at(at))|(unsigned(wad.at(at+1))<<8);};
+    auto read32=[&](size_t at){return read16(at)|(read16(at+2)<<16);};
+    const unsigned directory=read32(8), entries=read32(4);
+    for(unsigned i=0;i<entries;++i) {
+        const size_t entry=directory+16ull*i;
+        check(entry+16<=wad.size(),"IWAD directory must fit in the file");
+        if(std::strncmp((const char*)wad.data()+entry+8,name,8))continue;
+        const unsigned offset=read32(entry);
+        const int width=read16(offset),height=read16(offset+2);
+        Image img;
+        img.width=width;img.height=height;img.left=(int16_t)read16(offset+4);img.top=(int16_t)read16(offset+6);
+        img.pixels.assign((size_t)width*height*2,0);
+        for(int x=0;x<width;++x) {
+            size_t post=offset+read32(offset+8+x*4);
+            while(wad.at(post)!=255) {
+                const int first=wad.at(post),count=wad.at(post+1);
+                for(int y=first;y<first+count&&y<height;++y) {
+                    const size_t at=((size_t)y*width+x)*2;
+                    img.pixels[at]=wad.at(post+3+y-first);img.pixels[at+1]=255;
+                }
+                post+=count+4;
+            }
+        }
+        return img;
+    }
+    check(false,"Requested stock sprite must be present in the test IWAD");
+    return {};
+}
+
+static void goreDischargeFinalization(const std::vector<byte> &wad) {
+    using O=GoreOutcome;
+    Settings previous=settings;
+    auto monster=reset();
+    configureGore();
+    if(!wad.empty())spriteImages[0]=iwadSprite(wad,"HEADA1");
+    monster.type=MT_HEAD;monsterInfo.spawnhealth=400;
+    const float u=float(spriteImages[0].width)*.5f,v=float(spriteImages[0].height)*.49f;
+    monster.health=220;
+    goreShot(monster,u,v,10,2,128);
+    check(goreBursts==std::vector<O>{O::CacoViscera},"A severe near-death Cacodemon hit emits while alive");
+    goreShot(monster,u,v,10,2);
+    check(goreBursts.size()==1,"A second severe living shot cannot repeat the ejection");
+    monster.health=24;
+    goreShot(monster,u,v,25,1);
+    check(goreBursts==std::vector<O>{O::CacoViscera,O::CacoViscera},"A separate permissive fatal burst follows the living burst");
+    std::vector<byte> mask;
+    check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Viscera never applies a corpse mask");
+
+    for(int scenario=0;scenario<7;++scenario) {
+        forgetWounds(&monster);goreBursts.clear();monster.health=24;
+        totalkills=scenario==0?200:199;
+        settings.goreLevel=scenario==4?0:1;
+        settings.blood=scenario==5?0:1;
+        settings.goreBodyDamage=scenario==6?0:1;
+        goreShot(monster,u,v,25,1,scenario==1?129:96,scenario==2,scenario==3);
+        check(goreBursts.empty(),"Population, range, removal, levels and options gate the fatal effect");
+    }
+    if(!wad.empty())std::puts("Doom II Cacodemon sprite discharge checks passed");
+    R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
+}
+
+static void goreStockLiveMasks(const std::vector<byte> &wad) {
+    using O=GoreOutcome;
+    Settings previous=settings;
+    for(int type:{MT_TROOP,MT_FATSO}) {
+        auto monster=reset();
+        configureGore();
+        const bool fat=type==MT_FATSO;
+        monster.type=(mobjtype_t)type;
+        monsterInfo.spawnhealth=fat?600:60;
+        monster.health=fat?305:39;
+        spriteImages[0]=iwadSprite(wad,fat?"FATTB1":"TROOA1");
+        spriteImages[1]=iwadSprite(wad,fat?"FATTB2B8":"TROOA2A8");
+        spriteImages[2]=spriteImages[0];
+        spriteImages[2].pixels[0]^=1;
+        const float u=fat?43.f:20.f,v=fat?28.f:19.f;
+        goreShot(monster,u,v,fat?18:15,fat?2:1);
+        check(goreBursts==std::vector<O>{O::ChestCavity},"Stock low-HP torso hit creates one living chest injury");
+        std::vector<byte> mask;
+        check(woundMask(monster,spriteImages[0],false,1,0,mask),"Living cavity applies independently of Wound Holes");
+        check(std::find(mask.begin(),mask.end(),2)!=mask.end()&&std::find(mask.begin(),mask.end(),1)==mask.end(),
+              "Living cavity paints a dark center and preserves the silhouette");
+        check(woundMask(monster,spriteImages[1],true,1,0,mask),"Verified mirrored quarter view carries the injury");
+        check(!woundMask(monster,spriteImages[2],false,1,0,mask),"Replacement pixels cannot inherit a stock overlay");
+        WoundSpot spot{};
+        check(woundSpots(&monster,&spot,1,true)==(fat?1:0),"Only a verified living Mancubus cavity contributes a budgeted drip");
+        if(fat)check(spot.critical,"The drip retains its critical wound presentation tag");
+        goreShot(monster,u,v,fat?18:15,fat?2:1);
+        check(goreBursts.size()==1,"Living cavity emits once per life");
+        goreShot(monster,u,v,monster.health,1);
+        check(goreBursts.size()==2&&goreBursts.back()==(fat?O::MancubusHeavy:O::ImpTissue),
+              "Fatal effects have independent particle presentation");
+        check(!woundMask(monster,spriteImages[0],false,1,0,mask),"A fatal discharge clears the living overlay");
+        monster.health=25;
+        check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Living overlay is gone after death even if HP returns");
+    }
+    R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
+    std::puts("Doom II Imp and Mancubus stock living mask checks passed");
+}
+
+static void goreStockPinky(const std::vector<byte> &wad) {
+    const Settings previous=settings;
+    auto monster=reset();
+    configureGore();
+    spriteImages[0]=iwadSprite(wad,"SARGA1");
+    monster.type=MT_SERGEANT;monster.health=80;monsterInfo.spawnhealth=150;
+    goreShot(monster,20,10,20,1);
+    check(goreBursts==std::vector<GoreOutcome>{GoreOutcome::PinkyViscera},"The exposed frontal Pinky torso qualifies");
+    std::vector<byte> mask;
+    check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Surviving Pinky retains its silhouette");
+    goreShot(monster,20,10,30,2);
+    check(goreBursts.size()==2&&goreBursts.back()==GoreOutcome::PinkyViscera,"Pinky gets one stronger fatal accent");
+    check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Fatal Pinky retains its silhouette");
+    monster.type=MT_SHADOWS;monster.health=80;
+    goreShot(monster,20,10,20,1);
+    check(goreBursts.size()==2,"Stock Spectre sprite matches never enter the Gore policy");
+    R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
+    std::puts("Doom II Pinky and Spectre discharge checks passed");
+}
+
+int main(int argc,char **argv) {
+    std::vector<byte> wad;
+    if(argc>1) {
+        std::ifstream file(argv[1],std::ios::binary);
+        wad.assign(std::istreambuf_iterator<char>(file),{});
+        check(wad.size()>=12&&!std::memcmp(wad.data(),"IWAD",4),"Expected a readable test IWAD");
+    }
+    gorePolicy();
+    goreDischargeFinalization(wad);
+    if(!wad.empty()) {
+        goreStockLiveMasks(wad);
+        goreStockPinky(wad);
+    }
     criticalParts();
     woundMaterials();
     mobj_t monster=reset();

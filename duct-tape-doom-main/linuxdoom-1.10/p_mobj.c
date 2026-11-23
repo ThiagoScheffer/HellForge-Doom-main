@@ -689,6 +689,7 @@ void P_RemoveMobj (mobj_t* mobj)
 #endif
     P_AcidForget(mobj);
     P_IncendiaryForget(mobj);
+    if (R_GoreForget) R_GoreForget(mobj,0);
     P_WeakpointForget(mobj);
     P_ArenaForgetMonster(mobj);
     Arcade_RemoveProjectile(mobj);

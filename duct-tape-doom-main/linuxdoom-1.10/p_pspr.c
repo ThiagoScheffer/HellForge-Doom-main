@@ -746,6 +746,14 @@ A_FirePistol
 }
 
 
+static void P_EndShotgunDischarge(mobj_t *shooter)
+{
+    const uint64_t discharge = P_WeakpointDischarge(shooter);
+    P_WeakpointEndShot();
+    if (discharge && R_GoreShotEnd)
+        R_GoreShotEnd(shooter, discharge);
+}
+
 //
 // A_FireShotgun
 //
@@ -774,7 +782,7 @@ A_FireShotgun
 	
     for (i=0 ; i<7 ; i++)
 	P_GunShot (player->mo, false);
-    P_WeakpointEndShot();
+    P_EndShotgunDischarge(player->mo);
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }
@@ -822,7 +830,7 @@ A_FireShotgun2
 		      MISSILERANGE,
 		      bulletslope + ((P_Random()-P_Random())<<5), damage);
     }
-    P_WeakpointEndShot();
+    P_EndShotgunDischarge(player->mo);
     Arcade_EndShot();
     if (R_MuzzleFlash) R_MuzzleFlash(player->mo, player->readyweapon, -1);
 }

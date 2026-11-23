@@ -643,11 +643,14 @@ bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z)
 bool hasRagdoll(const mobj_t *thing);   // a ragdoll draws it: its own contacts make its blood and slaps
 bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (ragdoll_test.cpp's -ragdollloop)
 
-// gore M1: wound-space pixel capture before hitscan damage and confirmed result after damage.
+// Capture opaque sprite contacts before damage and resolve once per shotgun discharge.
+enum class GoreOutcome : uint8_t;
 void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
                  fixed_t dx,fixed_t dy,fixed_t slope);
-void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int killed,int extreme);
-void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,bool head);
+void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int healthAfter,int extreme,int healthLoss);
+void goreFinishShot(mobj_t *shooter,uint64_t discharge);
+void forgetGore(const mobj_t *actor,int death);
+void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome);
 // wounds.cpp
 int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
 int weakpointLocate(mobj_t*,mobj_t*,wp_impact_t*);
@@ -669,8 +672,8 @@ void woundsShutdown();
 // A monster's wounds as spray.cpp drips from them: height above the feet,
 // across the drawing it was seen in, that view's turn from the monster's
 // facing (radians), the hole's size and the tic it was last shot.
-struct WoundSpot { float height,across,yaw,radius;int tic; };
-int woundSpots(const mobj_t *thing,WoundSpot *out,int most);
+struct WoundSpot { float height,across,yaw,radius;int tic;bool critical=false; };
+int woundSpots(const mobj_t *thing,WoundSpot *out,int most,bool includeCritical=false);
 bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask);
 void spriteFilteringShutdown();
 void woundVertex(Vertex &vertex,byte state);

@@ -30,6 +30,7 @@ static bool vileMode=false,visualVile=false;
 static bool soulMode=false,visualSoul=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
+static bool goreMode=false;
 static bool eyeMode=false;
 static bool elementalMode=false,visualElemental=false,elemental2Mode=false,visualElemental2=false;
 static bool visualEyes=false,e1m8Mode=false,e1m8Exit=false,e1m8Snap=false;
@@ -70,6 +71,63 @@ static void shoot(mobj_t *shooter,float x,float y,float z,bool bullet=true) {
     la_freeaim=true;
     if(bullet)P_BulletAttack(shooter,angle,2048*FRACUNIT,slope,5);
     else P_LineAttack(shooter,angle,2048*FRACUNIT,slope,5);
+}
+static void goreIntegration() {
+    auto *shooter=players[consoleplayer].mo;
+    settings.accelerated=settings.blood=settings.goreLevel=settings.goreBodyDamage=1;
+    settings.goreFragments=settings.goreWallBlood=1;
+    settings.wounds=settings.bloodSpray=settings.criticalParts=settings.voxelModels=0;
+    settings.killShotsCarry=settings.shootableLights=0;
+    P_WeakpointConfigure(0,0,0);
+    R_BloodHit=bloodHit;R_GoreHit=goreAfterHit;R_GoreShotEnd=goreFinishShot;R_GoreForget=forgetGore;
+    levelSerial=r_levelserial;floors.resize(1);
+    const auto &blood=sprites[Game_Sprite(GAME_SPRITE_BLOOD)];
+    for(int f=0;f<blood.numframes;++f)patch(firstspritelump+blood.spriteframes[f].lump[0]);
+    const auto &cacoSprites=sprites[SPR_HEAD];
+    for(int f=0;f<cacoSprites.numframes;++f)patch(firstspritelump+cacoSprites.spriteframes[f].lump[0]);
+    auto shootCaco=[&](mobj_t *caco,float z,int pellets) {
+        P_WeakpointBeginShot(shooter,wp_supershotgun);
+        for(int i=0;i<pellets;++i)shoot(shooter,0,units(caco->y),z);
+        const auto discharge=P_WeakpointDischarge(shooter);
+        P_WeakpointEndShot();R_GoreShotEnd(shooter,discharge);
+    };
+    auto blueVertices=[](float x,float y,float z,bool side) {
+        Uniforms camera={};
+        camera.eye[0]=x;camera.eye[1]=y;camera.eye[2]=z;
+        camera.forward[side?0:1]=1;camera.right[side?1:0]=1;camera.up[2]=1;
+        camera.projection[0]=camera.projection[1]=1;
+        particleVertices.clear();buildSpray(camera);
+        return int(std::count_if(particleVertices.begin(),particleVertices.end(),
+                                 [](const Vertex &v){return v.blue>v.red&&v.blue>v.green;}));
+    };
+    for(bool wall:{false,true}) {
+        const float y=wall?143.f:64.f;
+        check(P_TeleportMove(shooter,0,fx(y-96))!=0,"Gore shooter placement");
+        shooter->angle=ANG90;shooter->player->viewz=shooter->z+41*FRACUNIT;
+        auto *caco=P_SpawnMobj(0,fx(y),ONFLOORZ,MT_HEAD);
+        caco->angle=ANG270;caco->health=220;
+        const auto &sf=sprites[caco->sprite].spriteframes[caco->frame&FF_FRAMEMASK];
+        const auto &img=patch(firstspritelump+sf.lump[0]);
+        const float z=units(caco->z)+img.top-float(img.height)*.49f;
+        sprayShutdown();combatFeedbackStats.wallSplats=0;
+        shootCaco(caco,z,4);
+        check(caco->health==200,"Observed four real 5-HP Cacodemon pellet hits");
+        check(blueVertices(0,y-96,z,false)>0,"Living Cacodemon produces blue ballistic geometry");
+        leveltime+=5;
+        check(blueVertices(-75,y,z,true)>0,"The blue lobes remain visible in flight from the side");
+        check(wall?(combatFeedbackStats.wallSplats>0&&combatFeedbackStats.wallSplats<=3):
+                   combatFeedbackStats.wallSplats==0,"Cacodemon wall marks require actual reachable wall geometry");
+        sprayShutdown();
+        shootCaco(caco,z,4);
+        check(blueVertices(0,y-96,z,false)==0,"A second surviving shot does not repeat the visceral burst");
+        caco->health=24;
+        const auto &pain=sprites[caco->sprite].spriteframes[caco->frame&FF_FRAMEMASK];
+        const auto &painImage=patch(firstspritelump+pain.lump[0]);
+        shootCaco(caco,units(caco->z)+painImage.top-float(painImage.height)*.49f,5);
+        check(caco->health<=0&&blueVertices(0,y-96,z,false)>0,"The fatal accent follows a living ejection");
+        P_RemoveMobj(caco);
+    }
+    std::printf("PASS Gore M2.1 real pellet, blue geometry and wall-collision checks (%d)\n",checks);
 }
 static void run() {
     if(solidMode)p_player_surface_damage=p_monster_surface_damage=0;
@@ -372,6 +430,7 @@ static void sawCutVisualFrame() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(goreMode){goreIntegration();I_Quit();return;}
     if(soulMode){revenantSoulIntegration();I_Quit();return;}
     if(visualSoul){revenantSoulVisualFrame();return;}
     if(vileMode){vileIntegration();I_Quit();return;}
@@ -400,6 +459,7 @@ extern "C" void I_TestFrame() {
 int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
+    goreMode=argc==5&&!std::strcmp(argv[4],"--gore-m21");
     visualSevere=argc==5&&!std::strcmp(argv[4],"--visual-severe");
     visualSawCut=argc==5&&!std::strcmp(argv[4],"--visual-saw-cut");
     const bool solidAcid=argc==5&&!std::strcmp(argv[4],"--acid-solid");
@@ -458,6 +518,7 @@ int main(int argc,char **argv) {
     if(visualIncendiary)args.erase(std::find(args.begin(),args.end(),"-nosound"));
     if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
+    if(goreMode)args.emplace_back("-goredebug");
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
     if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}
     myargc=(int)pointers.size();myargv=pointers.data();singletics=true;D_DoomMain();return 0;

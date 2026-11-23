@@ -318,6 +318,9 @@ fix foggy deimos decorations not immerse into the Foggy
 
 
 
+Death GraveSystem memo - A new option for gamexx -> User can enable option to keep spot and map - small memory file that create a player corpse or a graveyard (it can be selectible) with player name in the position  where the player died, so player can see where he failed last time or up to where he died many times when playing that map or wad. it can be cleaned if player want to erase it.
+
+
 
 
 

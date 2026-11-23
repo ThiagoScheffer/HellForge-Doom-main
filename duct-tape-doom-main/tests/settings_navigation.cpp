@@ -52,11 +52,19 @@ static void run(){
  I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
  choose("living_surfaces");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);choose("living_intensity");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
  choose("speedrun_hud");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);choose("speedrun_layout");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+ choose("gore_body_damage");check(!strcmp(panel.tabs[panel.tab].title,"Combat")&&!strcmp(currentPage().title,"Gore"),"Body damage is under Combat / Gore");
+ check(*selectedOption().flag==1,"Body damage defaults on");
+ panel.draft.accelerated=1;panel.draft.blood=1;panel.draft.goreLevel=1;
+ check(selectedOption().isEnabled(panel.draft),"Body damage is editable in Enhanced mode");
+ I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
  choose("monster_weapon_drops");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_F4,0);check(!panel.open&&applied==1&&settings.artworkSkyDepth&&settings.hellBloodEclipse&&settings.livingSurfaces&&settings.livingIntensity==3&&settings.speedrunLayout==2&&settings.monsterWeaponDrops==MONSTER_DROPS_SCARCE,"F4 applies cross-category edits");
  FILE *file=tmpfile();check(file!=nullptr,"isolated profile");writeOptions(file,settings);rewind(file);Settings restored;char line[512],key[128];double value;std::set<std::string> written;while(fgets(line,sizeof(line),file))if(sscanf(line,"%127s %lf",key,&value)==2){check(written.insert(key).second,"writer keys unique");readOption(restored,key,value);}fclose(file);finishReading(restored);check(restored.artworkSkyDepth&&restored.hellBloodEclipse&&restored.livingSurfaces&&restored.livingIntensity==3&&restored.speedrunLayout==2&&restored.monsterWeaponDrops==MONSTER_DROPS_SCARCE,"profile values round-trip");
  I_Render3DSettingsMenu();choose("encounter_director_enabled");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);choose("encounter_debug");bool reset=false;for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option&&panel.lines[i].option->action==resetDirectorDraft){panel.selected=(int)i;reset=true;break;}check(reset,"director reset retained");panel.draft.fov=100;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);check(!panel.draft.encounter.enabled&&panel.draft.fov==100,"director reset isolated");I_Render3DSettingsKey(SDL_SCANCODE_F10,0);
  check(settings.atmosphericCloudDepth&&restored.atmosphericCloudDepth,"cloud depth applies and persists");
  check(settings.doom2DeepSky&&restored.doom2DeepSky,"Doom II Deep Sky applies and persists");
+ check(!settings.goreBodyDamage&&!restored.goreBodyDamage&&written.count("gore_body_damage"),
+       "Body damage applies and persists");
+ check(!registry.count("gore_limbs")&&!written.count("gore_limbs"),"Unsupported limb control is hidden");
  printf("PASS F4 rework: %d checks, %zu settings, %zu categories\n",checks,registry.size(),panel.tabs.size());fflush(stdout);std::exit(0);
 }
 int main(int argc,char**argv){if(argc!=2)return 2;char app[]="settings-navigation",iwad[]="-iwad",warp[]="-warp",one[]="1",checkmap[]="-checkbigmap",nomusic[]="-nomusic",nosound[]="-nosound",cfg[]="-config",path[]="navigation-doom.cfg";char*args[]={app,iwad,argv[1],warp,one,checkmap,nomusic,nosound,cfg,path};myargc=10;myargv=args;R_BeforeTic=run;D_DoomMain();return 0;}

@@ -785,6 +785,7 @@ P_KillMobj
         R_RevenantDeath(target);
 	
     ED_Died(target);
+    if (R_GoreForget) R_GoreForget(target,1);
     P_WeakpointDied(target);
     Arcade_Kill(source,target);
     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);

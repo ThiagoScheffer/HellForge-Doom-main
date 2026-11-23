@@ -1393,6 +1393,7 @@ void A_VileChase (mobj_t* actor)
 		    P_SetMobjState (corpsehit,info->raisestate);
 		    corpsehit->height <<= 2;
 		    corpsehit->flags = info->flags;
+		    if (R_GoreForget) R_GoreForget(corpsehit,0);
 		    P_WeakpointForget(corpsehit);
 		    corpsehit->health = info->spawnhealth;
             ED_OriginalRevived(corpsehit);
