@@ -28,7 +28,11 @@ int lastTic=-1;
 bool debug=false;
 const char *atlasStatus="atlas_unavailable";
 
-struct MarkBudget { uint64_t id=0; int walls=-1; };
+struct MarkBudget {
+    uint64_t id=0;
+    int walls=0,floors=0,extra=0;
+    unsigned floorContacts=0,wallContacts=0,rested=0,draws=0,floorMarks=0,wallMarks=0;
+};
 std::array<MarkBudget,System::MaxPieces> markBudgets;
 struct Metrics {
     uint64_t candidates=0, queryStops=0, collisionNS=0, wall=0, flat=0, rejected=0;
@@ -180,7 +184,6 @@ bool traceGiblet(Vec3 a,Vec3 b,float radius,TraceHit &out) {
     const auto stop=[&](){++metrics.queryStops;out={};return true;};
     if(!worldPoint(a)||!worldPoint(b)||!std::isfinite(radius)||radius<=0||radius>3||
        !blockmap||!blockmaplump||bmapwidth<=0||bmapheight<=0||lineSeen.size()!=size_t(numlines))return stop();
-    if(uncertainSweep(a,b,radius))return stop();
     const double ox=units(bmaporgx),oy=units(bmaporgy);
     const double bx0=std::floor((std::min(a.x,b.x)-radius-ox)/MAPBLOCKUNITS);
     const double by0=std::floor((std::min(a.y,b.y)-radius-oy)/MAPBLOCKUNITS);
@@ -212,7 +215,12 @@ bool traceGiblet(Vec3 a,Vec3 b,float radius,TraceHit &out) {
         if(last>=sweep.hit.fraction||last>=1.f)break;
         first=last;
     }
-    if(sweep.found)out=sweep.hit;
+    if(sweep.found) {
+        // Volume cuts only remove original geometry. Keep flying through
+        // known open space and stop without a mark at unverified contacts.
+        if(uncertainSweep(sweep.hit.contact,sweep.hit.contact,radius))return stop();
+        out=sweep.hit;
+    }
     return sweep.found;
 }
 
@@ -224,9 +232,31 @@ bool hostTrace(void*,Vec3 a,Vec3 b,float radius,TraceHit &out) {
     return hit;
 }
 
+MarkBudget *eventBudget(uint64_t id) {
+    const auto it=std::find_if(markBudgets.begin(),markBudgets.end(),[id](const MarkBudget &b){return b.id==id;});
+    return it==markBudgets.end()?nullptr:&*it;
+}
+void reportImpactSummary(const MarkBudget &b) {
+    if(debug&&b.id)std::fprintf(stderr,"GORE G1.2 IMPACT id=%llu floorContacts=%u wallContacts=%u floorMarks=%u wallMarks=%u rested=%u drawSubmitted=%u\n",
+        (unsigned long long)b.id,b.floorContacts,b.wallContacts,b.floorMarks,b.wallMarks,b.rested,b.draws);
+}
+void gibletContact(void*,uint64_t id,Surface surface,bool rested) {
+    if(auto *budget=eventBudget(id)) {
+        budget->floorContacts+=surface==Surface::Floor;
+        budget->wallContacts+=surface==Surface::Wall;
+        budget->rested+=rested;
+    }
+}
+bool placeFieldFloor(MarkBudget &budget,const TraceHit &hit,float size,float angle,float born) {
+    if(!budget.floors||!hit.canMark||hit.surface.type!=Surface::Floor)return false;
+    if(!bloodFloorSplat(hit.contact.x,hit.contact.y,hit.surface.sector,size,angle,1.2f,false,born,BLOOD_SPLAT,nullptr,false))
+        return false;
+    --budget.floors;++budget.floorMarks;++metrics.flat;
+    return true;
+}
 void gibletImpact(void*,const Impact &impact) {
-    auto it=std::find_if(markBudgets.begin(),markBudgets.end(),[&](const MarkBudget &entry){return entry.id==impact.eventId;});
-    if(!settings.goreWallBlood||it==markBudgets.end()||it->walls<0){++metrics.rejected;return;}
+    auto *it=eventBudget(impact.eventId);
+    if(!it){++metrics.rejected;return;}
     const auto &ref=impact.surface;
     const auto p=impact.contact;
     const float now=leveltime/float(TICRATE);
@@ -234,21 +264,41 @@ void gibletImpact(void*,const Impact &impact) {
     const BloodSourceScope tint(tintBand(impact.tint));
     if(ref.type==Surface::Wall) {
         WallSpan span;
-        if(!it->walls||ref.line<0||ref.line>=numlines||ref.side<0||ref.side>1||
+        if(!settings.goreWallBlood||!it->walls||ref.line<0||ref.line>=numlines||ref.side<0||ref.side>1||
            ref.section<0||ref.section>2||!wallSpan(lines[ref.line],ref.side,ref.section,span)||
            span.texture<=0||span.texture>=numtextures||span.texture==skytexture||p.z<span.bottom||p.z>span.top) {
             ++metrics.rejected;return;
         }
-        bloodWallSplat({ref.line,ref.side,ref.section,0},p.x,p.y,p.z,impact.markSize,
-                       impact.cling?1.5f:1.f,now,BLOOD_SPLAT,impact.cling);
-        --it->walls;++metrics.wall;++combatFeedbackStats.wallSplats;
-        metrics.maxEventWall=std::max(metrics.maxEventWall,3-it->walls);
+        if(!bloodWallSplat({ref.line,ref.side,ref.section,0},p.x,p.y,p.z,impact.markSize,
+                           impact.cling?1.5f:1.f,now,BLOOD_SPLAT,impact.cling,false)) {++metrics.rejected;return;}
+        --it->walls;++it->wallMarks;++metrics.wall;++combatFeedbackStats.wallSplats;
+        metrics.maxEventWall=std::max(metrics.maxEventWall,int(it->wallMarks));
     } else if((ref.type==Surface::Floor||ref.type==Surface::Ceiling)&&ref.sector>=0&&ref.sector<numsectors) {
         const bool ceiling=ref.type==Surface::Ceiling;
         const int pic=ceiling?sectors[ref.sector].ceilingpic:sectors[ref.sector].floorpic;
         if(pic<0||pic>=numflats||pic==skyflatnum||(!ceiling&&liquid(ref.sector))){++metrics.rejected;return;}
-        bloodFloorSplat(p.x,p.y,ref.sector,impact.markSize,0,1,ceiling,now,BLOOD_SPLAT);
-        ++metrics.flat;
+        if(ceiling) {
+            if(!settings.goreWallBlood||!it->floors||
+               !bloodFloorSplat(p.x,p.y,ref.sector,impact.markSize,0,1,true,now,BLOOD_SPLAT,nullptr,false)) {++metrics.rejected;return;}
+            --it->floors;++metrics.flat;
+            return;
+        }
+        const float angle=float(hash32(unsigned(impact.eventId)^impact.variant^it->floorMarks))*
+                          (2.f*float(doomPi)/4294967296.f);
+        TraceHit base={impact.center,p,impact.normal,1,ref,true};
+        if(!placeFieldFloor(*it,base,impact.markSize,angle,now)) {++metrics.rejected;return;}
+        // Satellites start from this real landing and use the same swept
+        // geometry. A wall, liquid or void ends the candidate without a decal.
+        if(it->extra>0&&it->floors>0) {
+            const int attempts=it->extra;
+            it->extra=0;
+            for(int i=0;i<attempts&&it->floors>0;++i) {
+                const float yaw=angle+i*2.4f, reach=10.f+7.f*i;
+                TraceHit satellite;
+                if(hostTrace(nullptr,{p.x,p.y,p.z+9},{p.x+reach*std::cos(yaw),p.y+reach*std::sin(yaw),p.z-7},.35f,satellite))
+                    placeFieldFloor(*it,satellite,impact.markSize*(i==0?.83f:.55f),yaw,now);
+            }
+        }
     } else ++metrics.rejected;
 }
 
@@ -300,8 +350,8 @@ bool loadAtlas(bool uploadTexture) {
 }
 
 const giblet_art::Frame &frameFor(const Visual &v) {
-    constexpr int pairs[4][3]={{2,3,8},{0,1,-1},{4,5,-1},{6,7,9}};
-    constexpr int sizes[]={3,2,2,3};
+    constexpr int pairs[5][3]={{2,3,8},{0,1,-1},{4,5,-1},{6,7,9},{4,5,-1}};
+    constexpr int sizes[]={3,2,2,3,2};
     const unsigned kind=unsigned(v.kind);
     return giblet_art::frames[pairs[kind][v.variant%sizes[kind]]*2+int(v.resting)];
 }
@@ -312,27 +362,35 @@ void drawVisual(void *context,const Visual &v) {
     if(!sector)return;
     if(v.resting&&(sector->floorpic==skyflatnum||liquid(v.surface.sector)))return;
     const auto &frame=frameFor(v);
-    const float size=v.size*frame.scale/float(std::max(frame.w,frame.h));
+    const float size=v.size*frame.scale*(v.resting?2.1f:1.25f)/float(std::max(frame.w,frame.h));
     const float w=frame.w*size,h=frame.h*size,c=std::cos(v.rotation),s=std::sin(v.rotation);
-    const Vec3 center=v.resting?Vec3{v.contact.x,v.contact.y,floorZ(sector)+.14f}:v.center;
-    if(v.resting&&uncertainSweep(center,center,v.size))return;
+    const Vec3 floor={v.contact.x,v.contact.y,floorZ(sector)};
+    if(v.resting&&uncertainSweep(floor,floor,std::min(v.size*.3f,3.f)))return;
+    const float rightLength=std::hypot(camera.right[0],camera.right[1]);
+    const float rx=rightLength>.001f?camera.right[0]/rightLength:1.f;
+    const float ry=rightLength>.001f?camera.right[1]/rightLength:0.f;
+    // Use the low B silhouette as an upright cutout, anchored just above
+    // the blood decals. A flat quad below their lift vanishes under stains.
+    const float base=floor.z+decalLift(floor.x,floor.y,camera)+.12f;
     const float light=lighting(sector);
     const int band=tintBand(v.tint)*giblet_art::height;
     const auto vertex=[&](float u,float t) {
         const float a=(u-frame.pivotX)*w,b=(frame.pivotY-t)*h;
         const float x=a*c-b*s,y=a*s+b*c;
-        const Vec3 p=v.resting?Vec3{center.x+x,center.y+y,center.z}:
-            Vec3{center.x+x*camera.right[0]+y*camera.up[0],center.y+x*camera.right[1]+y*camera.up[1],
-                 center.z+x*camera.right[2]+y*camera.up[2]};
+        const Vec3 p=v.resting?Vec3{floor.x+a*rx,floor.y+a*ry,base+(1.f-t)*h}:
+            Vec3{v.center.x+x*camera.right[0]+y*camera.up[0],v.center.y+x*camera.right[1]+y*camera.up[1],
+                 v.center.z+x*camera.right[2]+y*camera.up[2]};
         return Vertex{p.x,p.y,p.z,frame.x+u*frame.w,band+frame.y+t*frame.h,light,MODE_SPRITE};
     };
     // Both sprite poses use the same transparent, depth-tested texture batch.
     quad(batches[atlasKey],vertex(0,0),vertex(1,0),vertex(1,1),vertex(0,1));
     ++metrics.quads;
+    if(debug)if(auto *budget=eventBudget(v.eventId))++budget->draws;
 }
 }
 
 void clearGiblets() {
+    if(debug)for(const auto &b:markBudgets)reportImpactSummary(b);
     giblets.clear();markBudgets={};lastTic=-1;
 }
 static void prepareGibletLevel(bool uploadTexture) {
@@ -346,22 +404,35 @@ static void prepareGibletLevel(bool uploadTexture) {
 }
 void prepareGiblets() {prepareGibletLevel(true);}
 int activeGiblets() {return int(giblets.activeCount());}
+int restingGiblets() {return int(giblets.restingCount());}
+Vec3 gibletBlastOrigin(Vec3 center,float dx,float dy,float reach) {
+    const auto *sector=sectorAt(center);
+    if(!sector||ceilZ(sector)-floorZ(sector)<4)return center;
+    center.z=std::clamp(center.z,floorZ(sector)+2,ceilZ(sector)-2);
+    const Vec3 out={center.x+dx*reach,center.y+dy*reach,center.z};
+    TraceHit hit;
+    if(!traceGiblet(center,out,1.5f,hit))return out;
+    return pointAt(center,out,std::max(0.f,hit.fraction-.1f));
+}
 int emitGiblets(const Burst &request,int wallBudget,GoreBurstReport &report) {
     if(!enabled()||!images.count(atlasKey)) {
         report.path=volumeLab()?"solid_geometry":!images.count(atlasKey)?
             (std::strcmp(atlasStatus,"textured")==0?"atlas_unavailable":atlasStatus):"feature_off";
         return 0;
     }
-    if(uncertainSweep(request.origin,request.origin,3)) {report.path="edited_geometry";return 0;}
     ++metrics.atlasHits;
-    const auto budget=std::find_if(markBudgets.begin(),markBudgets.end(),[](const MarkBudget &entry){
-        return !entry.id||!giblets.hasActiveEvent(entry.id);
-    });
-    if(budget==markBudgets.end()) {report.path="event_budget";return 0;}
     const int count=giblets.emit(request);
-    if(count) {
-        *budget={request.eventId,wallBudget};
-        if(wallBudget>=0)metrics.maxEventWall=std::max(metrics.maxEventWall,3-wallBudget);
+    if(count&&request.eventId) {
+        const auto budget=std::find_if(markBudgets.begin(),markBudgets.end(),[](const MarkBudget &entry){
+            return !entry.id||!giblets.hasActiveEvent(entry.id);
+        });
+        if(budget==markBudgets.end()) {report.path="textured";return count;}
+        reportImpactSummary(*budget);
+        *budget={request.eventId,std::clamp(wallBudget,0,3),std::min<int>(9,request.floorMarks),std::min<int>(3,request.extraFloorMarks)};
+        if(settings.goreWallBlood) {
+            budget->wallMarks=unsigned(3-budget->walls);
+            metrics.maxEventWall=std::max(metrics.maxEventWall,int(budget->wallMarks));
+        }
     }
     report.path=count?"textured":"piece_budget";
     return count;
@@ -370,13 +441,14 @@ void tickGiblets(size_t bloodDrops,int proceduralFragments) {
     if(!enabled()||!images.count(atlasKey)) {if(activeGiblets())clearGiblets();return;}
     if(paused||menuactive||lastTic==leveltime)return;
     lastTic=leveltime;
-    const Host host={nullptr,hostTrace,gibletImpact};
+    const Host host={nullptr,hostTrace,gibletImpact,debug?gibletContact:nullptr};
     giblets.advance(1.f/TICRATE,host);
     if(!debug)return;
+    for(auto &b:markBudgets)if(b.id&&!giblets.hasActiveEvent(b.id)){reportImpactSummary(b);b={};}
     if(leveltime%TICRATE||!giblets.stats().spawned)return;
     const auto &stats=giblets.stats();
-    std::fprintf(stderr,"GORE G1 totals: heavy=%d drops=%zu spawned=%u traceCalls=%u candidates=%llu limited=%llu collisionUs=%llu impacts=%u rejected=%llu wall=%llu flat=%llu maxEventWall=%d atlasLoads=%u atlasHits=%u quads=%u batches=%u\n",
-        activeGiblets()+proceduralFragments,bloodDrops,stats.spawned,stats.traces,
+    std::fprintf(stderr,"GORE G1.2 totals: heavy=%d resting=%d evicted=%u drops=%zu spawned=%u traceCalls=%u candidates=%llu limited=%llu collisionUs=%llu impacts=%u rejected=%llu wall=%llu flat=%llu maxEventWall=%d atlasLoads=%u atlasHits=%u quads=%u batches=%u\n",
+        activeGiblets()+proceduralFragments,restingGiblets(),stats.evictedResting,bloodDrops,stats.spawned,stats.traces,
         (unsigned long long)metrics.candidates,(unsigned long long)metrics.queryStops,
         (unsigned long long)(metrics.collisionNS/1000),stats.emittedImpacts,
         (unsigned long long)(metrics.rejected+stats.suppressedImpacts),(unsigned long long)metrics.wall,
@@ -421,11 +493,21 @@ int testGibletQuads(const Uniforms &camera,bool blue,bool grounded) {
     for(size_t i=0;i+5<batch.size();i+=6) {
         const auto &a=batch[i];
         if(a.v<low||a.v>=high)continue;
-        const bool flat=std::all_of(batch.begin()+i,batch.begin()+i+6,[&](const Vertex &b){return a.z==b.z;});
-        if(flat==grounded)++count;
+        const auto *first=giblet_art::frames;
+        const auto *end=first+20;
+        const auto *frame=std::find_if(first,end,[&](const giblet_art::Frame &f){return a.u==f.x&&a.v-low==f.y;});
+        if(frame==end||bool(frame->pose)!=grounded)continue;
+        if(grounded) {
+            const auto &opposite=batch[i+2];
+            const Vec3 base={.5f*(a.x+opposite.x),.5f*(a.y+opposite.y),opposite.z};
+            const auto *sector=sectorAt(base);
+            if(!sector||base.z<=floorZ(sector)+decalLift(base.x,base.y,camera)||a.z-base.z<=1.f)continue;
+        }
+        ++count;
     }
     return count;
 }
 unsigned testGibletTraceCount() {return giblets.stats().traces;}
+unsigned testGibletFloorMarks() {return unsigned(metrics.flat);}
 #endif
 }

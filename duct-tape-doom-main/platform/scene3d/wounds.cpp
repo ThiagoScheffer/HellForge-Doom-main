@@ -40,7 +40,7 @@ struct GoreShot {
     std::array<bool,static_cast<unsigned>(GoreRegion::Count)> verifiedRegion{};
     GoreRegion region=GoreRegion::Unknown;
     float dx=1,dy=0;
-    bool opaque=false,livingArt=false;
+    bool opaque=false,livingArt=false,headPellet=false,ssg=false;
 };
 static std::array<GoreShot,20> goreShots;
 static uint64_t goreDischarge;
@@ -313,8 +313,8 @@ static bool goreDebug() {
 static bool goreSpriteActor(const mobj_t &target) {
     return !(target.flags&MF_NOBLOOD)&&(!criticalVoxelModel||!criticalVoxelModel(target));
 }
-static const GoreLivingFrame *goreLivingArt(int type,const Image &image) {
-    if(!goreLivingCavity(type))return nullptr;
+static const GoreLivingFrame *goreVerifiedLivingFrame(int type,const Image &image) {
+    if(!goreLivingCavity(type)&&!goreHuman(type))return nullptr;
     auto [it,inserted]=verifiedLivingFrames.try_emplace(&image,nullptr);
     if(inserted) {
         const auto hash=goreHash(image);
@@ -324,11 +324,10 @@ static const GoreLivingFrame *goreLivingArt(int type,const Image &image) {
     return it->second&&it->second->type==type?it->second:nullptr;
 }
 static std::array<float,2> goreCavityRadii(int type) {
-    if(goreHuman(type))return {3.5f,2.8f};
     return type==MT_FATSO?std::array<float,2>{8.f,5.f}:std::array<float,2>{4.f,3.4f};
 }
 static GoreRegion goreRegion(int type,const SpriteImpact &impact,const GoreLivingFrame *art) {
-    if(type==MT_HEAD||(goreHuman(type)&&!art))return GoreRegion::Unknown;
+    if(type==MT_HEAD||goreHuman(type))return GoreRegion::Unknown;
     const Image &image=*impact.image;
     const auto &anatomy=weakpointRegions(type,image);
     const int u=(int)impact.point.u,v=(int)impact.point.v;
@@ -372,7 +371,7 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
     const uint64_t discharge=P_WeakpointDischarge(source);
     if(!discharge)return;
     const float distance=std::hypot(units(target->x)-units(source->x),units(target->y)-units(source->y));
-    const bool eligible=goreActive()&&goreSpriteActor(*target)&&distance<=goreRange;
+    const bool eligible=goreActive()&&goreSpriteActor(*target)&&distance<=goreImpactRange;
     if(!eligible&&!goreDebug())return;
     if(goreDischarge!=discharge||goreShotLevel!=r_levelserial||goreShooter!=source) {
         goreShots={};goreDischarge=discharge;goreShotLevel=r_levelserial;goreShooter=source;
@@ -383,6 +382,7 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
         if(!shot)return;
         shot->target=target;
         auto &d=shot->decision;
+        shot->ssg=source->player->readyweapon==wp_supershotgun;
         d.type=target->type;d.distance=distance;d.preHP=d.postHP=target->health;
         // Monsters expose spawnhealth as their health reference.
         d.maxHP=target->info?target->info->spawnhealth:0;
@@ -392,14 +392,14 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
     shot->impact={units(x),units(y),units(z)};
     const float length=std::hypot(units(dx),units(dy));
     if(length>1e-4f){shot->dx=units(dx)/length;shot->dy=units(dy)/length;}
-    shot->opaque=false;shot->region=GoreRegion::Unknown;shot->livingArt=false;
+    shot->opaque=false;shot->region=GoreRegion::Unknown;shot->livingArt=false;shot->headPellet=false;
     SpriteImpact impact;
     if(!eligible||!captureSpriteHit(target,x,y,z,dx,dy,slope,source,impact))return;
     shot->opaque=true;shot->surface=impact.world;
-    const auto *art=goreLivingArt(target->type,*impact.image);
+    const auto *art=goreVerifiedLivingFrame(target->type,*impact.image);
     shot->region=goreRegion(target->type,impact,art);
     shot->livingArt=art!=nullptr;
-    if(goreHuman(target->type)) {
+    if(goreHuman(target->type)&&(art||weakpointRegions(target->type,*impact.image).stock)) {
         const auto &img=*impact.image;
         auto [it,inserted]=heads.try_emplace(&img);
         auto &profile=it->second;
@@ -407,7 +407,7 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
         const auto &head=profile.head;
         if(profile.found&&img.top-impact.point.v>=head.neck&&
            std::abs(impact.point.u-img.left-head.middle)<=head.width*.5f) {
-            ++d.legacyHeads;shot->legacyHead=shot->impact;
+            shot->headPellet=true;
         }
     }
 }
@@ -454,10 +454,13 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
     const bool head=outcome==GoreOutcome::HeadBurst||outcome==GoreOutcome::SkullBurst;
     if(head) {
         region=GoreRegion::Head;
-        if(goreCorpses.size()<199&&goreVerifySequence(target)) {
-            goreCorpses[&target]=outcome;
-            art="stock_death";
-            maskApplied=true;
+        const bool keepStockCorpse=d.type==MT_POSSESSED||d.type==MT_TROOP;
+        if((keepStockCorpse||goreCorpses.size()<199)&&goreVerifySequence(target)) {
+            if(!keepStockCorpse) {
+                goreCorpses[&target]=outcome;
+                art="stock_death";
+                maskApplied=true;
+            }
         } else {
             fallback="art_unverified";
             outcome=goreHuman(d.type)?GoreOutcome::HumanFlesh:
@@ -501,16 +504,23 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
     if(outcome!=GoreOutcome::None&&!maskApplied&&!burstEnabled) {
         outcome=GoreOutcome::None;reason="feature_off";
     }
-    const auto burst=outcome!=GoreOutcome::None?
-        goreBurst(target,point.x,point.y,point.z,shot.dx,shot.dy,outcome,discharge):GoreBurstReport{};
+    const bool feedback=!legacyOnly&&goreActive()&&goreSpriteActor(target)&&settings.goreFragments&&
+        d.distance<=goreImpactRange&&d.effectiveDamage>0&&d.spriteContacts>0;
+    const GoreTier tier=d.distance>goreRange?GoreTier::Medium:
+        d.fatal()?GoreTier::Fatal:outcome!=GoreOutcome::None?GoreTier::Major:GoreTier::Routine;
+    const auto burst=outcome!=GoreOutcome::None||feedback?
+        goreBurst(target,point.x,point.y,point.z,shot.dx,shot.dy,outcome,discharge,{tier}):GoreBurstReport{};
+    if(feedback&&outcome==GoreOutcome::None)reason="impact_feedback";
     if(goreDebug()) {
         const auto &h=d.hits;
-        std::fprintf(stderr,"GORE M2.1: type=%d discharge=%llu preHP=%d postHP=%d maxHP=%d damage=%lld contacts=%d opaque=%d head=%d chest=%d belly=%d distance=%.1f fatal=%d outcome=%s style=%s reason=%s art=%s fallback=%s g1Id=%llu material=%s tint=%s requested=%d admitted=%d fragmentPath=%s\n",
-            d.type,(unsigned long long)discharge,d.preHP,d.postHP,d.maxHP,(long long)d.effectiveDamage,
+        static constexpr const char *tiers[]={"medium","routine","major","fatal","extreme"};
+        std::fprintf(stderr,"GORE G1.2 cause=%s tier=%s type=%d discharge=%llu preHP=%d postHP=%d maxHP=%d damage=%lld contacts=%d opaque=%d head=%d chest=%d belly=%d distance=%.1f fatal=%d outcome=%s style=%s reason=%s art=%s fallback=%s g1Id=%llu material=%s tint=%s requested=%d admitted=%d dropped=%d fragmentPath=%s origin=%.1f,%.1f,%.1f\n",
+            shot.ssg?"ssg":"shotgun",tiers[unsigned(tier)],d.type,(unsigned long long)discharge,d.preHP,d.postHP,d.maxHP,(long long)d.effectiveDamage,
             d.contacts,d.spriteContacts,goreHuman(d.type)?d.legacyHeads:h[1],h[2],h[3],
             d.distance,int(d.fatal()),goreOutcomeName(outcome),
             outcome==GoreOutcome::None?"none":goreStyleName(d.type),reason,art,fallback,
-            (unsigned long long)burst.eventId,burst.material,burst.tint,burst.requested,burst.admitted,burst.path);
+            (unsigned long long)burst.eventId,burst.material,burst.tint,burst.requested,burst.admitted,
+            burst.requested-burst.admitted,burst.path,point.x,point.y,point.z);
     }
 }
 
@@ -523,6 +533,7 @@ void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int healthAfter,int ext
     d.postHP=healthAfter;d.extreme=extreme;
     d.effectiveDamage+=healthLoss;
     if(healthLoss>0&&shot->opaque) {
+        if(shot->headPellet) {++d.legacyHeads;shot->legacyHead=shot->surface;}
         ++d.spriteContacts;shot->confirmedSurface=shot->surface;
         const auto region=(unsigned)shot->region;
         ++d.hits[region];shot->regionImpact[region]=shot->surface;
@@ -956,7 +967,7 @@ static bool goreLiveMask(const mobj_t &actor,const Image &image,std::vector<byte
     if(!goreActive()||!settings.goreBodyDamage||actor.health<=0||(actor.flags&(MF_CORPSE|MF_NOBLOOD)))return false;
     const auto wound=goreLiving.find(&actor);
     if(wound==goreLiving.end()||wound->second.region==GoreRegion::Unknown)return false;
-    const auto *art=goreLivingArt(actor.type,image);
+    const auto *art=goreVerifiedLivingFrame(actor.type,image);
     if(!art)return false;
     const bool belly=wound->second.region==GoreRegion::Belly;
     const auto outcome=belly?GoreOutcome::BellyCavity:GoreOutcome::ChestCavity;

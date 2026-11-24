@@ -40,6 +40,7 @@ Material material(Kind k) {
         case Kind::Viscera: return {0.07f,0.42f,38.0f,3.6f,3.8f,8.5f};
         case Kind::HeavyTissue: return {0.17f,0.57f,33.0f,3.3f,2.8f,6.5f};
         case Kind::Flesh: return {0.22f,0.63f,28.0f,2.8f,1.4f,3.4f};
+        case Kind::BrainLike: return {0.16f,0.50f,34.0f,3.5f,2.8f,6.5f};
     }
     return {0.2f,0.6f,28.0f,3.0f,1.4f,3.0f};
 }
@@ -49,6 +50,7 @@ float markScale(Kind kind) {
         case Kind::HeavyTissue: return 2.6f;
         case Kind::Bone: return 0.8f;
         case Kind::Flesh: return 1.8f;
+        case Kind::BrainLike: return 2.8f;
     }
     return 1.0f;
 }
@@ -67,24 +69,33 @@ int System::emit(const Burst &request) {
     if (!request.eligible || request.mapKillCount >= 200 || request.mapKillCount < 0 ||
         !finite(request.origin) || !finite(request.direction) ||
         !std::isfinite(request.intensity) || request.pieces == 0 ||
-        request.kind>Kind::Bone || request.tint>Tint::PaleBone ||
+        request.kind>Kind::BrainLike || request.tint>Tint::PaleBone ||
         seenEvent(request.eventId)) return 0;
 
     const Vec3 forward = unit(request.direction, {1,0,0});
     const Vec3 side = unit({-forward.y, forward.x, 0}, {0,1,0});
     const Vec3 lift = unit({-forward.x*forward.z, -forward.y*forward.z,
                             forward.x*forward.x+forward.y*forward.y}, {0,0,1});
-    const Material m = material(request.kind);
     const float intensity = std::clamp(request.intensity, 0.25f, 2.0f);
     std::uint32_t rng = request.cosmeticSeed ? request.cosmeticSeed : 0x9e3779b9u;
     int added = 0;
+    size_t active=activeCount();
     const int count = std::min<int>(MaxPiecesPerBurst, request.pieces);
     for (int i = 0; i < count; ++i) {
-        Piece *free = nullptr;
-        for (auto &candidate : pieces_) if (!candidate.used) { free = &candidate; break; }
+        Piece *free=nullptr;
+        if(active<std::min<size_t>(MaxPieces,request.maxActive)) {
+            for(auto &candidate:pieces_)if(!candidate.used){free=&candidate;break;}
+            ++active;
+        } else if(request.maxActive) {
+            free=oldestResting();
+            if(free)++stats_.evictedResting;
+        }
         if (!free) { ++stats_.droppedByBudget; continue; }
+        const auto kind=request.kind==Kind::BrainLike&&i%3==2?Kind::Flesh:request.kind;
+        const Material m=material(kind);
         const float speed = between(rng, 95.0f, 215.0f)*intensity;
-        const Vec3 spread = side * between(rng,-0.50f,0.50f) +
+        const float scatter=request.radial?1.65f:.50f;
+        const Vec3 spread = side * between(rng,-scatter,scatter) +
                             lift * between(rng,-0.18f,0.65f);
         const Vec3 direction = unit(forward+spread, forward);
         free->p = request.origin + direction * between(rng,0.0f,1.2f);
@@ -95,8 +106,9 @@ int System::emit(const Burst &request) {
         free->rotation = between(rng,-kPi,kPi);
         free->angularSpeed = between(rng,-11.0f,11.0f);
         free->age = 0;
-        free->lifespan = m.lifetime + between(rng,-0.3f,0.5f);
-        free->kind = request.kind;
+        free->lifespan = request.brief?1.2f:m.lifetime + between(rng,-0.3f,0.5f);
+        free->brief=request.brief;
+        free->kind = kind;
         free->tint = request.tint;
         free->variant = std::uint8_t(random32(rng)%8);
         free->contacts = 0;
@@ -160,12 +172,10 @@ void System::step(float dt, const Host &host, int &impactBudget) {
             } else ++stats_.suppressedImpacts;
         }
         ++p.contacts;
-        // Viscera impacts a wall as a single sticky mark; the host owns the
-        // mark's lasting appearance. No sprite decal is directly generated here.
-        if (p.kind == Kind::Viscera && surface == Surface::Wall) {
-            p.used = false; continue;
-        }
+        // Wall contacts can leave a smear, then the piece falls with the
+        // material's normal bounce and drag.
         if (p.contacts >= 4 && surface != Surface::Floor) {
+            if(host.contact)host.contact(host.context,p.eventId,surface,false);
             p.used = false;
             continue;
         }
@@ -175,9 +185,16 @@ void System::step(float dt, const Host &host, int &impactBudget) {
             p.v = nvel + tvel;
         } else p.v = p.v*m.tangentialDrag;
         if (surface == Surface::Floor && (p.contacts >= 4 || length(p.v) <= m.minRestSpeed)) {
+            if(restingCount()>=MaxResting) {
+                oldestResting()->used=false;
+                ++stats_.evictedResting;
+            }
             p.resting = true; p.v = {};
             p.contact = hit.contact; p.normal = normal; p.surface = hit.surface;
+            p.restedAt=p.age;
+            p.lifespan=p.age+(p.brief?2.0f:p.kind==Kind::Flesh?15.f:p.kind==Kind::Bone?21.f:26.f);
         } else p.rotation += p.angularSpeed*dt;
+        if(host.contact)host.contact(host.context,p.eventId,surface,p.resting);
     }
 }
 
@@ -202,7 +219,7 @@ void System::forEachVisual(VisualFn draw, void *context) const {
     for (const Piece &p : pieces_) if (p.used) {
         draw(context, {p.p,p.kind,p.tint,p.size,p.rotation,
                        std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting,
-                       p.contact,p.normal,p.surface});
+                       p.contact,p.normal,p.surface,p.eventId});
     }
 }
 
@@ -223,6 +240,17 @@ std::size_t System::activeCount() const {
 bool System::hasActiveEvent(std::uint64_t id) const {
     for (const Piece &p : pieces_) if (p.used && p.eventId == id) return true;
     return false;
+}
+
+std::size_t System::restingCount() const {
+    return std::count_if(pieces_.begin(),pieces_.end(),[](const Piece &p){return p.used&&p.resting;});
+}
+
+System::Piece *System::oldestResting() {
+    Piece *oldest=nullptr;
+    for(auto &p:pieces_)
+        if(p.used&&p.resting&&(!oldest||p.age-p.restedAt>oldest->age-oldest->restedAt))oldest=&p;
+    return oldest;
 }
 
 } // namespace hellforge::giblets

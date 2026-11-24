@@ -15,6 +15,7 @@ enum class GoreReason : uint8_t { Emitted, Health, Damage, Opaque, Range, Featur
 struct GoreResult { GoreOutcome outcome; GoreReason reason; };
 
 inline constexpr float goreRange=128.f;
+inline constexpr float goreImpactRange=320.f;
 inline constexpr int livingCavityHealthPercent=50, pinkyHealthPercent=45, cacoHealthPercent=50;
 inline constexpr int mancubusFatalDamage=35, revenantDamage=30,
                      pinkyDamage=20, pinkyFatalDamage=30, cacoDamage=20,
@@ -32,7 +33,7 @@ inline const char *goreStyleName(int type) {
 }
 inline bool goreSupported(int type) {return goreStyleName(type)!=nullptr;}
 inline bool goreHuman(int type) {return type==MT_POSSESSED||type==MT_SHOTGUY;}
-inline bool goreLivingCavity(int type) {return goreHuman(type)||type==MT_TROOP||type==MT_FATSO;}
+inline bool goreLivingCavity(int type) {return type==MT_TROOP||type==MT_FATSO;}
 
 struct GoreDecision {
     int type=-1, contacts=0, spriteContacts=0, legacyHeads=0;
@@ -64,11 +65,12 @@ inline GoreResult goreCandidate(const GoreDecision &d) {
         return {chest>=belly?O::ChestCavity:O::BellyCavity,R::Emitted};
     }
     if(goreHuman(d.type)) {
+        if(!d.fatal())return {O::None,R::Health};
         if(d.legacyStock) {
             // M1 measures the head majority over all admitted pellet contacts.
             if(d.headEnabled&&!d.extreme&&d.legacyHeads>0&&d.legacyHeads*2>=d.contacts)
                 return {O::HeadBurst,R::Emitted};
-            return {O::HumanFlesh,R::Emitted};
+            return d.spriteContacts?GoreResult{O::HumanFlesh,R::Emitted}:GoreResult{O::None,R::Opaque};
         }
         if(!d.bodyEnabled)return {O::None,R::Feature};
         return d.spriteContacts?GoreResult{O::HumanFlesh,R::Emitted}:GoreResult{O::None,R::Opaque};

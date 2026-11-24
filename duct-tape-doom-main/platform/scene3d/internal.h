@@ -530,9 +530,9 @@ void buildBlood(const Uniforms &camera);
 // Splats shown from born on: a splat, a drop's speck, or a body's smear
 // (thick end forward along angle). size across, stretched along angle.
 enum { BLOOD_SPLAT,BLOOD_SPECK,BLOOD_SMEAR };
-void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr);
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true);
 // On the wall hit at (x,y,z), stretched along it; drips: one or two run down from it.
-void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips);
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true);
 
 // spray.cpp
 // What a hitscan hit throws: an exit spray past the body along the shot, a speck or two back.
@@ -647,23 +647,32 @@ bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (
 
 // Capture opaque sprite contacts before damage and resolve once per shotgun discharge.
 enum class GoreOutcome : uint8_t;
+enum class GoreTier : uint8_t { Medium, Routine, Major, Fatal, Extreme };
+struct GoreEmission {
+    GoreTier tier=GoreTier::Major;
+    int limit=12;
+    bool radial=false;
+};
 void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
                  fixed_t dx,fixed_t dy,fixed_t slope);
 void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int healthAfter,int extreme,int healthLoss);
 void goreFinishShot(mobj_t *shooter,uint64_t discharge);
 void forgetGore(const mobj_t *actor,int death);
+void goreBlast(gore_blast_op_t,const mobj_t *spot,const mobj_t *victim,int before);
 struct GoreBurstReport {
     uint64_t eventId=0;
     const char *material="none",*tint="none",*path="none";
     int requested=0,admitted=0;
 };
-GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge);
+GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge,GoreEmission emission={});
 int emitGiblets(const hellforge::giblets::Burst &request,int wallBudget,GoreBurstReport &report);
 void prepareGiblets();
 void clearGiblets();
 void tickGiblets(size_t bloodDrops,int proceduralFragments);
 void drawGiblets(const Uniforms &camera);
 int activeGiblets();
+int restingGiblets();
+hellforge::giblets::Vec3 gibletBlastOrigin(hellforge::giblets::Vec3 center,float dx,float dy,float reach);
 byte bloodTintIndex(byte index,int tint);
 #ifdef DOOM_TEST_DRIVER
 bool testPrepareGiblets();
@@ -671,6 +680,7 @@ bool testGibletTrace(hellforge::giblets::Vec3 a,hellforge::giblets::Vec3 b,float
                      hellforge::giblets::TraceHit &hit);
 int testGibletQuads(const Uniforms &camera,bool blue,bool grounded);
 unsigned testGibletTraceCount();
+unsigned testGibletFloorMarks();
 #endif
 // wounds.cpp
 int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);

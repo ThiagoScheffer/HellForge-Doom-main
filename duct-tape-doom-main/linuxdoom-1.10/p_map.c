@@ -1663,7 +1663,11 @@ boolean PIT_RadiusAttack(mobj_t *thing)
             event.source = bombsource;
             event.kind = bombspot->type == MT_ROCKET ? WP_ROCKET_SPLASH : WP_OTHER;
             event.baseDamage = bombdamage - dist;
+            const int before = thing->health;
             P_WeakpointApply(&event);
+            if (P_GoreBlast && (event.inflictor->type == MT_ROCKET || event.inflictor->type == MT_BARREL)
+                && before > thing->health)
+                P_GoreBlast(GORE_BLAST_SPLASH,event.inflictor,thing,before);
         }
     }
 
@@ -1676,6 +1680,10 @@ boolean PIT_RadiusAttack(mobj_t *thing)
 //
 static void radiusAttack(mobj_t *spot,mobj_t *source,int damage,boolean fire)
 {
+    mobj_t *previousSpot=bombspot,*previousSource=bombsource;
+    int previousDamage=bombdamage;
+    boolean previousFire=bombfire;
+    const boolean capture=!fire&&P_GoreBlast&&(spot->type==MT_ROCKET||spot->type==MT_BARREL);
     int x;
     int y;
 
@@ -1695,11 +1703,15 @@ static void radiusAttack(mobj_t *spot,mobj_t *source,int damage,boolean fire)
     bombsource = source;
     bombdamage = damage;
     bombfire = fire;
+    if (capture) P_GoreBlast(GORE_BLAST_BEGIN,spot,NULL,0);
     SV_Blast(spot, damage);
 
     for (y = yl; y <= yh; y++)
         for (x = xl; x <= xh; x++)
             P_BlockThingsIterator(x, y, PIT_RadiusAttack);
+    if (capture) P_GoreBlast(GORE_BLAST_END,spot,NULL,0);
+    bombspot=previousSpot;bombsource=previousSource;
+    bombdamage=previousDamage;bombfire=previousFire;
 }
 
 void P_RadiusAttack(mobj_t *spot,mobj_t *source,int damage)

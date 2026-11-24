@@ -46,7 +46,8 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 // Throws a drop of size (its speck, units) from (x,y,z) at (vx,vy,vz) units
 // a second; splat: the size of what it leaves (0 none).
 static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
-                      const uint32_t *decorationSeed=nullptr,DropVisual visual=DropVisual::Blood,float gravity=sprayGravity) {
+                      const uint32_t *decorationSeed=nullptr,DropVisual visual=DropVisual::Blood,float gravity=sprayGravity,
+                      int *flatBudget=nullptr) {
     float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
     const sector_t *start=sectorAt(x,y);
     if(ceilZ(start)-floorZ(start)<1.f)return false;
@@ -108,16 +109,21 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
             float facing=std::abs((vx*ey-vy*ex)/(h*el));
             WallSpan span;bool valid=!wallBudget||(*wallBudget>0&&wallSpan(line,hit.side,hit.section,span)&&span.texture>0&&span.texture!=skytexture&&lz>=span.bottom&&lz<=span.top);
             if(valid&&wallBudget&&SV_Active()&&SV_Trace(x,y,z,lx-x,ly-y,lz-z,nullptr,nullptr)<.98f)valid=false;
-            if(valid){bloodWallSplat(hit,lx,ly,lz,splat,std::clamp(1/std::max(facing,0.35f),1.0f,2.4f),now+t,kind,kind==BLOOD_SPLAT&&splat>=18);
-                if(wallBudget){--*wallBudget;++combatFeedbackStats.wallSplats;}}
+            if(valid&&bloodWallSplat(hit,lx,ly,lz,splat,std::clamp(1/std::max(facing,0.35f),1.0f,2.4f),now+t,
+                                    kind,kind==BLOOD_SPLAT&&splat>=18,!wallBudget)&&wallBudget) {
+                --*wallBudget;++combatFeedbackStats.wallSplats;
+            }
         } else {
             const bool sky=(where==CEILING?endSector->ceilingpic:endSector->floorpic)==skyflatnum;
-            if((where==CEILING||!liquid)&&(!wallBudget||!sky)) {
+            const bool edited=wallBudget&&(SV_Edited(lx,ly,lz)||SV_Edited(lx,ly,lz+(where==CEILING?2.f:-2.f)));
+            if((where==CEILING||!liquid)&&(!wallBudget||!sky)&&!edited&&(!flatBudget||*flatBudget>0)) {
                 // Drops coming in low stretch along their way.
                 float stretch=where==CEILING?1:1+std::clamp(h/std::max(60.0f,std::abs(fall))*0.6f,0.0f,1.2f);
                 const float angle=decorationSeed?doom_decor::unit(*decorationSeed)*float(2*doomPi):std::atan2(vy,vx);
-                bloodFloorSplat(lx,ly,(int)endIndex,splat,angle,stretch,where==CEILING,now+t,kind,decorationSeed);
-                floorSplat=where==FLOOR&&!sky;
+                const bool admitted=bloodFloorSplat(lx,ly,(int)endIndex,splat,angle,stretch,where==CEILING,now+t,
+                                                    kind,decorationSeed,!wallBudget);
+                if(admitted&&flatBudget)--*flatBudget;
+                floorSplat=admitted&&where==FLOOR&&!sky;
             }
         }
     }
@@ -183,7 +189,7 @@ static const GoreStyle &goreStyle(int type) {
     default:return humanFlesh;
     }
 }
-GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge) {
+GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge,GoreEmission emission) {
     using namespace hellforge::giblets;
     GoreBurstReport report;
     if(!settings.accelerated||settings.goreLevel!=1||totalkills>=200||!bloodOn()||
@@ -191,64 +197,210 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
     checkSprayLevel();
     BloodSourceScope tint(&target);
     const auto &style=goreStyle(target.type);
-    const bool fatal=target.health<=0,bone=style.visual==DropVisual::Bone;
+    const bool medium=emission.tier==GoreTier::Medium,routine=emission.tier==GoreTier::Routine;
+    const bool fatal=!medium&&!routine&&target.health<=0,bone=style.visual==DropVisual::Bone;
     const bool m1head=goreHuman(target.type)&&outcome==GoreOutcome::HeadBurst;
-    const auto kind=bone?Kind::Bone:target.type==MT_FATSO?(fatal?Kind::Viscera:Kind::HeavyTissue):
+    const auto kind=m1head?Kind::BrainLike:bone?Kind::Bone:target.type==MT_FATSO?(fatal&&!emission.radial?Kind::Viscera:Kind::HeavyTissue):
         target.type==MT_SERGEANT||target.type==MT_HEAD?Kind::Viscera:Kind::Flesh;
     const int species=monsterBloodTint(&target);
     const auto materialTint=bone?Tint::PaleBone:species==1?Tint::Blue:species==2?Tint::Green:Tint::Red;
-    static constexpr const char *names[]={"flesh","heavy_tissue","viscera","bone"};
+    static constexpr const char *names[]={"flesh","heavy_tissue","viscera","bone","brain_like"};
     static constexpr const char *tints[]={"red","blue","green","pale_bone"};
     report.eventId=(uint64_t(r_levelserial)<<32)|++goreEventOrdinal;
     report.material=names[unsigned(kind)];report.tint=tints[unsigned(materialTint)];
     const float heading=std::atan2(dy,dx);
     int wallBudget=settings.goreWallBlood?3:0;
-    if(settings.goreWallBlood&&!bone)for(int n=0;n<(m1head?4:fatal?3:2);++n) {
+    int flatBudget=emission.tier==GoreTier::Extreme?9:medium?1:routine?2:fatal?6:4;
+    if(settings.goreWallBlood&&!bone)for(int n=0;n<(medium||emission.radial?0:routine?1:m1head?4:fatal?3:2);++n) {
         const float a=heading+randomRange(-.43f,.43f),speed=randomRange(68,126);
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
-            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::GoreBlood);
+            randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget,nullptr,
+            DropVisual::GoreBlood,sprayGravity,&flatBudget);
     }
     if(!settings.goreFragments){report.path="fragments_off";return report;}
     const float now=gameSeconds();
     int active=0;
     for(const auto &drop:drops)if(drop.visual>=DropVisual::Flesh&&drop.end>now)++active;
-    report.requested=m1head?6:fatal?style.fatal:style.living;
-    const int count=std::min(report.requested,std::max(0,int(System::MaxPieces)-active-activeGiblets()));
+    report.requested=medium?1:routine?std::max(2,style.living-1):m1head?6:fatal?style.fatal:style.living;
+    if(emission.radial&&fatal)
+        report.requested=std::min(12,report.requested+(emission.tier==GoreTier::Extreme?4:2));
+    int count=std::min({report.requested,emission.limit,std::max(0,int(System::MaxPieces)-active-activeGiblets()+restingGiblets())});
     if(!count){report.path="piece_budget";return report;}
-    if(!m1head) {
+    {
         hellforge::giblets::Burst burst;
         burst.origin={x,y,z};burst.direction={dx,dy,0};
         burst.kind=kind;burst.tint=materialTint;
-        burst.intensity=target.type==MT_HEAD?(fatal?1.75f:1.48f):fatal?1.14f:1.f;
+        burst.intensity=medium?.38f:routine?.76f:m1head?.92f:target.type==MT_HEAD?(fatal?1.75f:1.48f):fatal?1.14f:1.f;
         burst.pieces=uint8_t(count);burst.mapKillCount=totalkills;burst.eligible=true;
+        burst.radial=emission.radial;
+        burst.brief=medium;
+        burst.floorMarks=uint8_t(flatBudget);
+        burst.extraFloorMarks=medium||routine?0:fatal?3:1;
+        burst.maxActive=uint8_t(std::max(0,int(System::MaxPieces)-active));
+        if(emission.radial)burst.intensity=fatal?1.65f:1.10f;
         burst.eventId=report.eventId;
         burst.cosmeticSeed=hash32(unsigned(discharge)^unsigned(discharge>>32)^goreEventOrdinal^hash32(r_levelserial));
-        report.admitted=emitGiblets(burst,settings.goreWallBlood?wallBudget:-1,report);
+        report.admitted=emitGiblets(burst,settings.goreWallBlood?wallBudget:0,report);
         if(report.admitted)return report;
-    } else report.path="m1_procedural";
+    }
+    count=std::min(count,std::max(0,int(System::MaxPieces)-active-activeGiblets()));
+    const auto *fallbackSector=sectorAt(x,y);
+    if(ceilZ(fallbackSector)-floorZ(fallbackSector)<1.f)return report;
+    const bool markFallback=settings.goreWallBlood&&std::strcmp(report.path,"solid_geometry")!=0&&
+        std::strcmp(report.path,"missing_blockmap")!=0;
+    if(!markFallback)wallBudget=0;
     const int cores=style.cores+(fatal&&target.type==MT_HEAD?1:0);
     for(int n=0;n<count;++n) {
         if(m1head) {
             const float a=heading+randomRange(-.60f,.60f),speed=randomRange(54,132);
-            const float rise=randomRange(-25,105),mark=settings.goreWallBlood?randomRange(9,17):0;
+            const float rise=randomRange(-25,105),mark=markFallback?randomRange(9,17):0;
             throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,rise,randomRange(1.45f,2.6f),
-                      mark,BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::Flesh);
+                      mark,BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::Flesh,sprayGravity,&flatBudget);
             continue;
         }
         const bool core=n<cores;
-        const float spread=style.spread*(core?.50f:1.f);
+        const float spread=emission.radial?1.35f:style.spread*(core?.50f:1.f);
         const float a=heading+randomRange(-spread,spread);
-        const float speed=style.speed*randomRange(core?.84f:.70f,core?1.06f:1.31f);
+        const float speed=style.speed*randomRange(core?.84f:.70f,core?1.06f:1.31f)*(medium?.5f:1.f);
         const float rise=style.rise*randomRange(core?.75f:-.18f,1.28f);
-        const float size=(core?style.coreSize:style.size)*randomRange(.86f,1.14f)*(fatal?1.14f:1.f);
-        const float mark=settings.goreWallBlood&&!bone?style.mark*randomRange(.74f,1.25f)*(core?1.f:.64f):0;
+        const float size=(core?style.coreSize:style.size)*randomRange(.86f,1.14f)*(medium?.6f:fatal?1.14f:1.f);
+        const float mark=markFallback&&!bone?style.mark*randomRange(.74f,1.25f)*(core?1.f:.64f):0;
         const DropVisual visual=(!core&&(style.visual==DropVisual::Organ||style.visual==DropVisual::BlueGut))?
                                 DropVisual::Tissue:style.visual;
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,rise,size,mark,BLOOD_SPLAT,
-                  &wallBudget,nullptr,visual,style.gravity);
+                  &wallBudget,nullptr,visual,style.gravity,&flatBudget);
     }
     report.admitted=count;
     return report;
+}
+
+namespace {
+struct BlastVictim {
+    uintptr_t token=0;
+    mobjtype_t type{};
+    float x=0,y=0,z=0,radius=0;
+    int before=0,after=0;
+    int64_t damage=0;
+    bool extreme=false,direct=false,splash=false;
+};
+struct Blast {
+    const mobj_t *spot=nullptr;
+    uint64_t id=0;
+    size_t count=0;
+    std::array<BlastVictim,199> victims;
+};
+struct DirectImpact {const mobj_t *rocket=nullptr; BlastVictim victim;};
+std::array<Blast,4> blasts;
+std::array<DirectImpact,8> directImpacts;
+unsigned blastLevel=0,blastOrdinal=0;
+size_t blastDepth=0;
+
+void resetBlastCapture() {
+    blastDepth=0;directImpacts={};
+}
+bool blastEnabled() {
+    return settings.accelerated&&settings.blood&&settings.goreFragments&&settings.goreLevel==1&&
+           levelSerial==r_levelserial&&totalkills<200&&!netgame&&!demoplayback&&!demorecording;
+}
+BlastVictim snapshot(const mobj_t &victim,int before,bool direct) {
+    if(!goreSupported(victim.type)||!victim.info||victim.flags&MF_NOBLOOD||
+       (criticalVoxelModel&&criticalVoxelModel(victim)))return {};
+    return {reinterpret_cast<uintptr_t>(&victim),victim.type,units(victim.x),units(victim.y),
+            units(victim.z)+units(victim.info->height)*.52f,units(victim.radius),
+            before,victim.health,int64_t(before)-victim.health,
+            victim.info->xdeathstate!=S_NULL&&victim.state==&states[victim.info->xdeathstate],direct,!direct};
+}
+void addBlastVictim(Blast &blast,const BlastVictim &victim) {
+    if(!victim.token||victim.damage<=0)return;
+    const auto end=blast.victims.begin()+blast.count;
+    const auto it=std::find_if(blast.victims.begin(),end,[&](const BlastVictim &value){return value.token==victim.token;});
+    if(it==end) {
+        if(blast.count<blast.victims.size())blast.victims[blast.count++]=victim;
+        return;
+    }
+    it->after=victim.after;it->damage+=victim.damage;it->extreme=victim.extreme;
+    it->direct|=victim.direct;it->splash|=victim.splash;
+}
+void finishBlast(Blast &blast,const mobj_t &spot) {
+    auto end=blast.victims.begin()+blast.count;
+    end=std::remove_if(blast.victims.begin(),end,[](const BlastVictim &v){return v.after>0&&v.damage<15;});
+    const float x=units(spot.x),y=units(spot.y);
+    const auto distance=[&](const BlastVictim &v){return std::hypot(v.x-x,v.y-y);};
+    const auto tier=[](const BlastVictim &v){return v.extreme?GoreTier::Extreme:v.after<=0?GoreTier::Fatal:GoreTier::Major;};
+    // Stable insertion order breaks exact ties without actor addresses or RNG.
+    std::array<size_t,199> order{};
+    const size_t eligible=size_t(end-blast.victims.begin());
+    for(size_t i=0;i<eligible;++i)order[i]=i;
+    std::sort(order.begin(),order.begin()+eligible,[&](size_t a,size_t b){
+        const auto &left=blast.victims[a],&right=blast.victims[b];
+        if(tier(left)!=tier(right))return tier(left)>tier(right);
+        const float d1=distance(left),d2=distance(right);
+        if(d1!=d2)return d1<d2;
+        if(left.damage!=right.damage)return left.damage>right.damage;
+        return a<b;
+    });
+    const bool debug=M_CheckParm((char*)"-goredebug")!=0;
+    int remaining=24,requested=0,deduped=0;
+    const size_t selected=std::min(eligible,size_t(24));
+    for(size_t i=0;i<selected&&remaining>0;++i) {
+        const auto &v=blast.victims[order[i]];
+        float dx=v.x-x,dy=v.y-y;
+        const float d=distance(v);
+        if(d>.01f){dx/=d;dy/=d;}
+        else {
+            const float radians=float(hash32(unsigned(blast.id)^unsigned(i)))*(2.f*float(doomPi)/4294967296.f);
+            dx=std::cos(radians);dy=std::sin(radians);
+        }
+        mobj_t visual{};
+        visual.type=v.type;visual.health=v.after;
+        const int share=std::max(1,remaining/int(selected-i));
+        const auto origin=gibletBlastOrigin({v.x,v.y,v.z},dx,dy,v.radius*.42f);
+        const auto result=goreBurst(visual,origin.x,origin.y,origin.z,dx,dy,
+                                    GoreOutcome::None,blast.id,{tier(v),share,true});
+        remaining-=result.admitted;requested+=result.requested;deduped+=v.direct&&v.splash;
+        if(debug)std::fprintf(stderr,"GORE G1.2 id=%llu exp=%llu cause=%s type=%d dmg=%lld hp=%d->%d tier=%u requested=%d admitted=%d dropped=%d path=%s tint=%s origin=%.1f,%.1f,%.1f\n",
+            (unsigned long long)result.eventId,(unsigned long long)blast.id,spot.type==MT_BARREL?"barrel":v.direct?"rocket_direct":"rocket_splash",
+            v.type,(long long)v.damage,v.before,v.after,unsigned(tier(v)),result.requested,result.admitted,
+            result.requested-result.admitted,result.path,result.tint,origin.x,origin.y,origin.z);
+    }
+    if(debug)std::fprintf(stderr,"GORE G1.2 EXPLOSION exp=%llu victims=%zu requested=%d admitted=%d dedupedDirectSplash=%d\n",
+        (unsigned long long)blast.id,eligible,requested,24-remaining,deduped);
+}
+}
+
+void goreBlast(gore_blast_op_t op,const mobj_t *spot,const mobj_t *victim,int before) {
+    if(blastLevel!=r_levelserial) {
+        resetBlastCapture();blastLevel=r_levelserial;blastOrdinal=0;
+    }
+    if(!blastEnabled()) {resetBlastCapture();return;}
+    const auto pending=std::find_if(directImpacts.begin(),directImpacts.end(),
+                                    [spot](const DirectImpact &p){return p.rocket==spot;});
+    if(op==GORE_BLAST_FORGET) {if(pending!=directImpacts.end())*pending={};return;}
+    if(op==GORE_BLAST_DIRECT) {
+        const auto value=snapshot(*victim,before,true);
+        if(!value.token||pending!=directImpacts.end())return;
+        const auto free=std::find_if(directImpacts.begin(),directImpacts.end(),[](const DirectImpact &p){return !p.rocket;});
+        if(free!=directImpacts.end())*free={spot,value};
+        return;
+    }
+    if(op==GORE_BLAST_COMPLETE&&pending==directImpacts.end())return;
+    if(op==GORE_BLAST_BEGIN||op==GORE_BLAST_COMPLETE) {
+        if(blastDepth++<blasts.size()) {
+            auto &blast=blasts[blastDepth-1];
+            blast.spot=spot;blast.count=0;
+            blast.id=(uint64_t(r_levelserial)<<32)|++blastOrdinal;
+            if(pending!=directImpacts.end())addBlastVictim(blast,pending->victim);
+        }
+        if(pending!=directImpacts.end())*pending={};
+        if(op==GORE_BLAST_BEGIN)return;
+    }
+    if(!blastDepth)return;
+    if(op==GORE_BLAST_SPLASH) {
+        if(blastDepth<=blasts.size()&&blasts[blastDepth-1].spot==spot)
+            addBlastVictim(blasts[blastDepth-1],snapshot(*victim,before,false));
+        return;
+    }
+    if(blastDepth--<=blasts.size()&&blasts[blastDepth].spot==spot)finishBlast(blasts[blastDepth],*spot);
 }
 
 void combatHeadBlood(const wp_damage_event_t &event) {
@@ -565,5 +717,5 @@ void buildSpray(const Uniforms &camera) {
         } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
     }
 }
-void sprayShutdown() {drops.clear();slides.clear();clearGiblets();}
+void sprayShutdown() {drops.clear();slides.clear();clearGiblets();resetBlastCapture();}
 } // namespace doom3d

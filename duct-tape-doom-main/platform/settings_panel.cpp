@@ -245,7 +245,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Independent of Wound holes and Monster Bleeding; Off by default.",
                     [](const Settings &d){return d.accelerated!=0;}),
                 choice("gore_level","Advanced Gore",&s.goreLevel,{"Classic","Enhanced"},{0,1},
-                    "Cosmetic critical injuries and fatal close-range shotgun impacts on supported monsters. "
+                    "Cosmetic shotgun impacts, critical injuries and rocket or barrel fragments on supported monsters. "
                     "Below 200 map kill-count monsters; no gameplay damage changes, no new sprites or actors.",
                     [](const Settings &d){return d.accelerated&&d.blood;}),
                 check("gore_heads","Head destruction",&s.goreHeads,
@@ -253,14 +253,14 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Uses validated stock death artwork; other art falls back to an ordinary death.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("gore_fragments","Flying flesh fragments",&s.goreFragments,
-                    "A few irregular flesh particles follow the blast, fall under gravity, and deposit blood on surfaces. "
-                    "Procedural, cosmetic and limited in number.",
+                    "Textured pieces follow the blast, scatter and settle briefly on dry floors. "
+                    "Cosmetic and limited in number.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("gore_wall_blood","Enhanced wall blood",&s.goreWallBlood,
                     "Extra directional impact splashes, wall drips and floor stains, using the existing collision and decal budgets.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("gore_body_damage","Body destruction & viscera",&s.goreBodyDamage,
-                    "Adds living torso wounds at half health for Zombiemen, Shotgun Guys, Imps and Mancubi, plus visceral bursts and skeletal fragments.",
+                    "Adds living torso wounds at half health for Imps and Mancubi, plus major visceral bursts and skeletal effects.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("wounds","Wound holes",&s.wounds,
                     "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "

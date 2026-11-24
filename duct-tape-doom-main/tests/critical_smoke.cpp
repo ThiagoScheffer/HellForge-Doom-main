@@ -15,6 +15,7 @@ extern "C" {
 #include "i_system.h"
 #include "m_argv.h"
 extern int p_player_surface_damage,p_monster_surface_damage;
+void P_ExplodeMissile(mobj_t*);
 }
 #include <SDL3/SDL_main.h>
 #include <cstdlib>
@@ -112,6 +113,7 @@ static void goreIntegration() {
     settings.killShotsCarry=settings.shootableLights=0;
     P_WeakpointConfigure(0,0,0);
     R_BloodHit=bloodHit;R_GoreHit=goreAfterHit;R_GoreShotEnd=goreFinishShot;R_GoreForget=forgetGore;
+    P_GoreBlast=goreBlast;
     levelSerial=r_levelserial;floors.resize(1);
     const auto &blood=sprites[Game_Sprite(GAME_SPRITE_BLOOD)];
     for(int f=0;f<blood.numframes;++f)patch(firstspritelump+blood.spriteframes[f].lump[0]);
@@ -148,13 +150,170 @@ static void goreIntegration() {
         check(testGibletTrace({12,64,4},{12,64,-4},2,hit)&&hit.surface.type==Surface::Liquid&&!hit.canMark,
               "Liquid terminates without leaving a conventional mark");
         sectorMist[&sector-sectors].liquid=false;
+    } else {
+        mobj_t zombie{};zombie.type=MT_POSSESSED;
+        const auto result=goreBurst(zombie,0,-128,48,0,1,GoreOutcome::HeadBurst,1);
+        check(result.admitted==6&&activeGiblets()==0&&std::strcmp(result.path,"textured")!=0,
+              "An unavailable atlas gives the head event only its approved procedural burst");
+        sprayShutdown();
     }
     auto shootCaco=[&](mobj_t *caco,float z,int pellets) {
+        const auto previous=shooter->player->readyweapon;
+        shooter->player->readyweapon=wp_supershotgun;
         P_WeakpointBeginShot(shooter,wp_supershotgun);
         for(int i=0;i<pellets;++i)shoot(shooter,0,units(caco->y),z);
         const auto discharge=P_WeakpointDischarge(shooter);
         P_WeakpointEndShot();R_GoreShotEnd(shooter,discharge);
+        shooter->player->readyweapon=previous;
     };
+    if(goreTextured) {
+        check(P_TeleportMove(shooter,0,fx(-160))!=0,"Healthy target shooter placement");
+        shooter->angle=ANG90;shooter->player->viewz=shooter->z+41*FRACUNIT;
+        for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_TROOP,MT_UNDEAD,MT_FATSO,MT_SERGEANT,MT_HEAD}) {
+            auto *target=P_SpawnMobj(0,fx(-64),ONFLOORZ,type);
+            target->angle=ANG270;
+            const auto &def=sprites[target->sprite];
+            for(int f=0;f<def.numframes;++f)patch(firstspritelump+def.spriteframes[f].lump[0]);
+            const auto &img=patch(firstspritelump+def.spriteframes[target->frame&FF_FRAMEMASK].lump[0]);
+            const auto hp=target->health;
+            sprayShutdown();
+            settings.goreBodyDamage=0;
+            shootCaco(target,units(target->z)+img.top-img.height*.47f,1);
+            settings.goreBodyDamage=1;
+            check(target->health==hp-5&&activeGiblets()>=2&&activeGiblets()<=5,
+                  "Healthy stock monster gets one modest burst independently of Body Destruction");
+            P_RemoveMobj(target);
+        }
+        settings.goreHeads=1;settings.deathRagdoll=0;
+        for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_TROOP}) {
+            sprayShutdown();
+            auto *target=P_SpawnMobj(0,fx(-64),ONFLOORZ,type);
+            target->angle=ANG270;
+            shooter->player->readyweapon=wp_supershotgun;
+            P_WeakpointBeginShot(shooter,wp_supershotgun);
+            const int pellets=target->health/5;
+            for(int i=0;i<pellets;++i) {
+                const auto &def=sprites[target->sprite];
+                const auto &img=patch(firstspritelump+def.spriteframes[target->frame&FF_FRAMEMASK].lump[0]);
+                int row,col;
+                if(type==MT_TROOP) {
+                    const auto &regions=weakpointRegionMask(type,img);
+                    const auto head=std::find(regions.begin(),regions.end(),WP_HEAD);
+                    check(head!=regions.end(),"Stock Imp frame has a verified head region");
+                    const auto index=head-regions.begin();
+                    row=int(index/img.width);col=int(index%img.width);
+                } else {
+                    doom_joints::Head head;
+                    check(doom_joints::findHead(img.pixels.data(),img.width,img.height,img.left,img.top,head),
+                          "Stock headshot fixture resolves the opaque head shape");
+                    row=img.top-int(head.neck)-3;
+                    col=img.left+int(head.middle);
+                    for(int x=0;x<img.width;++x)
+                        if(solid(img,x,row)&&std::abs(x-img.left-head.middle)<std::abs(col-img.left-head.middle)+.1f)col=x;
+                }
+                shoot(shooter,float(col-img.left)+.5f,units(target->y),units(target->z)+img.top-row-.5f);
+            }
+            const auto discharge=P_WeakpointDischarge(shooter);
+            P_WeakpointEndShot();R_GoreShotEnd(shooter,discharge);
+            check(target->health==0&&activeGiblets()==6,"One verified fatal headshot yields six textured pieces");
+            const auto first=target->info->deathstate;
+            check(target->state==&states[first],"The fatal headshot starts the stock death sequence");
+            for(auto state=first;state!=S_NULL;state=states[state].nextstate) {
+                const auto &frame=states[state];
+                const auto &sprite=sprites[frame.sprite].spriteframes[frame.frame&FF_FRAMEMASK];
+                const auto &corpse=patch(firstspritelump+sprite.lump[0]);
+                std::vector<byte> mask;
+                if(type!=MT_SHOTGUY||state==first)
+                    check(woundMask(*target,corpse,false,1,0,mask)==(type==MT_SHOTGUY),
+                          "The Imp and Zombieman keep uncut death frames and the Shotgun Guy retains his head mask");
+            }
+            const auto before=testGibletFloorMarks();
+            for(int i=0;i<45;++i){++leveltime;tickGiblets(0,0);}
+            Uniforms front={};
+            front.eye[1]=-160;front.eye[2]=42;front.right[0]=front.forward[1]=front.up[2]=1;
+            check(testGibletQuads(front,false,true)>0&&testGibletFloorMarks()>before,
+                  "The verified head burst settles above its floor stains with a visible silhouette");
+            P_RemoveMobj(target);
+        }
+        sprayShutdown();
+        const auto oldCheats=shooter->player->cheats;
+        shooter->player->cheats|=CF_GODMODE;
+        auto *heavy=P_SpawnMobj(0,fx(-64),ONFLOORZ,MT_FATSO);
+        auto *blue=P_SpawnMobj(fx(62),fx(-64),ONFLOORZ,MT_HEAD);blue->health=1;
+        auto *rocket=P_SpawnMobj(0,fx(-97),fx(38),MT_ROCKET);rocket->target=shooter;
+        P_WeakpointProjectileSpawn(rocket,shooter,WP_ROCKET_DIRECT);
+        P_WeakpointProjectileHit(rocket,heavy,20);
+        check(heavy->health==580&&activeGiblets()==0,"Rocket direct damage waits for its radius event");
+        P_ExplodeMissile(rocket);
+        check(heavy->health>0&&heavy->health<580&&blue->health<=0&&activeGiblets()==16,
+              "One direct-plus-splash burst for the Mancubus and one blue fatal splash burst");
+        Uniforms front={};
+        front.eye[1]=-160;front.eye[2]=42;front.right[0]=front.forward[1]=front.up[2]=1;
+        check(testGibletQuads(front,true,false)==11,"The real rocket kill submits eleven blue flight quads");
+        for(int i=0;i<45;++i){++leveltime;tickGiblets(0,0);}
+        check(testGibletQuads(front,true,true)>0,"Blue rocket debris settles into grounded textured quads");
+        P_RemoveMobj(rocket);P_RemoveMobj(heavy);P_RemoveMobj(blue);
+
+        sprayShutdown();
+        heavy=P_SpawnMobj(0,fx(-64),ONFLOORZ,MT_FATSO);
+        auto *barrel1=P_SpawnMobj(fx(-55),fx(-64),ONFLOORZ,MT_BARREL);barrel1->target=shooter;
+        auto *barrel2=P_SpawnMobj(fx(55),fx(-64),ONFLOORZ,MT_BARREL);
+        P_DamageMobj(barrel1,shooter,shooter,30);
+        P_SetMobjState(barrel1,S_BEXP4);
+        check(barrel2->health<=0&&activeGiblets()==5,"First barrel damages the victim and ignites the next barrel");
+        P_SetMobjState(barrel2,S_BEXP4);
+        check(heavy->health>0&&activeGiblets()==10,"Second barrel in the same tic has an independent victim event");
+        P_RemoveMobj(barrel1);P_RemoveMobj(barrel2);P_RemoveMobj(heavy);
+
+        sprayShutdown();
+        std::array<mobj_t*,3> victims;
+        for(int i=0;i<3;++i) {
+            victims[i]=P_SpawnMobj(fx(float((i-1)*70)),fx(-64),ONFLOORZ,MT_FATSO);
+            victims[i]->health=1;
+        }
+        rocket=P_SpawnMobj(0,fx(-125),fx(38),MT_ROCKET);rocket->target=shooter;
+        P_ExplodeMissile(rocket);
+        check(std::all_of(victims.begin(),victims.end(),[](auto *v){return v->health<=0;})&&activeGiblets()==24,
+              "Three lethal rocket victims share a strict 24-piece budget");
+        for(auto *victim:victims)P_RemoveMobj(victim);
+        P_RemoveMobj(rocket);
+
+        sprayShutdown();
+        heavy=P_SpawnMobj(0,fx(-64),ONFLOORZ,MT_FATSO);
+        wp_damage_event_t other{};
+        other.target=heavy;other.source=other.inflictor=shooter;other.baseDamage=40;
+        P_WeakpointApply(&other);
+        check(heavy->health==560&&activeGiblets()==0,"Generic nonexplosive damage never enters explosive gore");
+        rocket=P_SpawnMobj(fx(61),fx(-64),fx(32),MT_ROCKET);
+        P_RadiusAttack(rocket,shooter,12);
+        check(activeGiblets()==0,"Subthreshold explosive damage does not force a burst");
+        P_RemoveMobj(rocket);P_RemoveMobj(heavy);
+
+        auto *extreme=P_SpawnMobj(0,fx(-64),ONFLOORZ,MT_POSSESSED);
+        rocket=P_SpawnMobj(0,fx(-95),fx(30),MT_ROCKET);
+        rocket->target=shooter;
+        P_ExplodeMissile(rocket);
+        check(extreme->state==&states[S_POSS_XDIE1]&&activeGiblets()==8,
+              "Explosion uses the engine's existing extreme death state and eight-piece request");
+        P_RemoveMobj(rocket);P_RemoveMobj(extreme);
+        sprayShutdown();
+        shooter->player->cheats=oldCheats;
+
+        settings.goreWallBlood=0;
+        const auto floorBefore=testGibletFloorMarks();
+        blue=P_SpawnMobj(0,fx(-64),ONFLOORZ,MT_HEAD);blue->health=1;
+        blue->angle=ANG270;
+        const auto &blueDef=sprites[blue->sprite].spriteframes[blue->frame&FF_FRAMEMASK];
+        const auto &blueImg=patch(firstspritelump+blueDef.lump[0]);
+        combatFeedbackStats.wallSplats=0;
+        shootCaco(blue,units(blue->z)+blueImg.top-blueImg.height*.47f,1);
+        for(int i=0;i<45;++i){++leveltime;tickGiblets(0,0);}
+        check(restingGiblets()>0&&testGibletFloorMarks()>floorBefore&&combatFeedbackStats.wallSplats==0,
+              "Wall Blood off still allows grounded pieces and verified floor stains");
+        settings.goreWallBlood=1;
+        P_RemoveMobj(blue);
+        sprayShutdown();
+    }
     auto blueVertices=[](float x,float y,float z,bool side,bool grounded=false) {
         Uniforms camera={};
         camera.eye[0]=x;camera.eye[1]=y;camera.eye[2]=z;
@@ -183,13 +342,16 @@ static void goreIntegration() {
         check(blueVertices(-75,y,z,true)>0,"The blue lobes remain visible in flight from the side");
         if(goreTextured) {
             for(int i=0;i<34;++i){++leveltime;tickGiblets(0,0);}
-            if(!wall)check(blueVertices(-75,y,z,true,true)>0,"Landed B poses stay flat on the floor");
+            check(blueVertices(-75,y,z,true,true)>0,
+                  "Giblets settle above blood stains, including after a wall hit");
         }
         check(wall?(combatFeedbackStats.wallSplats>0&&combatFeedbackStats.wallSplats<=3):
                    combatFeedbackStats.wallSplats==0,"Cacodemon wall marks require actual reachable wall geometry");
         sprayShutdown();
         shootCaco(caco,z,4);
-        check(blueVertices(0,y-96,z,false)==0,"A second surviving shot does not repeat the visceral burst");
+        check(blueVertices(0,y-96,z,false)>0&&(!goreTextured||activeGiblets()==5),
+              "A second surviving hit gives only routine feedback");
+        sprayShutdown();
         caco->health=24;
         const auto &pain=sprites[caco->sprite].spriteframes[caco->frame&FF_FRAMEMASK];
         const auto &painImage=patch(firstspritelump+pain.lump[0]);
@@ -205,8 +367,8 @@ static void goreIntegration() {
             const char *material,*tint;
             bool fatal,procedural;
         } routes[]={
-            {MT_POSSESSED,GoreOutcome::HeadBurst,"flesh","red",true,true},
-            {MT_SHOTGUY,GoreOutcome::HeadBurst,"flesh","red",true,true},
+            {MT_POSSESSED,GoreOutcome::HeadBurst,"brain_like","red",true,false},
+            {MT_SHOTGUY,GoreOutcome::HeadBurst,"brain_like","red",true,false},
             {MT_SHOTGUY,GoreOutcome::HumanFlesh,"flesh","red",true,false},
             {MT_TROOP,GoreOutcome::ChestCavity,"flesh","red",false,false},
             {MT_UNDEAD,GoreOutcome::RevenantBone,"bone","pale_bone",true,false},

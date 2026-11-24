@@ -38,8 +38,9 @@ unsigned levelSerial=1;
 static std::array<Image,testSpriteCount> spriteImages;
 static unsigned bodyQuadCalls=0;
 static std::vector<GoreOutcome> goreBursts;
-GoreBurstReport goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome,uint64_t) {
-    goreBursts.push_back(outcome);return {};
+static GoreTier lastGoreTier;
+GoreBurstReport goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome,uint64_t,GoreEmission emission) {
+    goreBursts.push_back(outcome);lastGoreTier=emission.tier;return {};
 }
 const std::vector<byte> &bloodPalette() {
     static const std::vector<byte> shades={16,32,48,64,80,96,112,128,144};
@@ -290,7 +291,7 @@ static void gorePolicy() {
     shot.distance=129;
     check(goreCandidate(shot).reason==R::Range,"Cacodemon gore stops beyond 128 units");
 
-    for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_TROOP,MT_FATSO}) {
+    for(auto type:{MT_TROOP,MT_FATSO}) {
         shot={};shot.type=type;shot.bodyEnabled=true;shot.maxHP=60;shot.postHP=30;
         shot.spriteContacts=1;shot.hits[(unsigned)GoreRegion::Chest]=1;shot.effectiveDamage=5;
         check(goreCandidate(shot).outcome==O::ChestCavity,"One torso pellet qualifies at half health");
@@ -388,21 +389,32 @@ static void goreDischargeFinalization(const std::vector<byte> &wad) {
     goreShot(monster,u,v,10,2,128);
     check(goreBursts==std::vector<O>{O::CacoViscera},"A severe near-death Cacodemon hit emits while alive");
     goreShot(monster,u,v,10,2);
-    check(goreBursts.size()==1,"A second severe living shot cannot repeat the ejection");
+    check(goreBursts==std::vector<O>{O::CacoViscera,O::None}&&lastGoreTier==GoreTier::Routine,
+          "A second living shot gets only routine feedback");
     monster.health=24;
     goreShot(monster,u,v,25,1);
-    check(goreBursts==std::vector<O>{O::CacoViscera,O::CacoViscera},"A separate permissive fatal burst follows the living burst");
+    check(goreBursts==std::vector<O>{O::CacoViscera,O::None,O::CacoViscera},"A separate fatal burst follows the living burst");
     std::vector<byte> mask;
     check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Viscera never applies a corpse mask");
+    goreBursts.clear();monster.health=400;
+    goreShot(monster,u,v,0,1);
+    goreShot(monster,float(spriteImages[0].width)+8.f,v,5,1);
+    check(goreBursts.empty(),"Zero damage and a cylinder-only contact cannot spawn fragments");
 
-    for(int scenario=0;scenario<7;++scenario) {
+    for(int scenario=0;scenario<9;++scenario) {
         forgetWounds(&monster);goreBursts.clear();monster.health=24;
         totalkills=scenario==0?200:199;
         settings.goreLevel=scenario==4?0:1;
         settings.blood=scenario==5?0:1;
         settings.goreBodyDamage=scenario==6?0:1;
-        goreShot(monster,u,v,25,1,scenario==1?129:96,scenario==2,scenario==3);
-        check(goreBursts.empty(),"Population, range, removal, levels and options gate the fatal effect");
+        settings.goreFragments=scenario!=8;
+        settings.goreWallBlood=scenario!=8;
+        const float distance=scenario==1?320:scenario==7?321:96;
+        goreShot(monster,u,v,25,1,distance,scenario==2,scenario==3);
+        if(scenario==1||scenario==6)
+            check(goreBursts==std::vector<O>{O::None}&&lastGoreTier==(scenario==1?GoreTier::Medium:GoreTier::Fatal),
+                  "Distance and Body Destruction gates leave the eligible cosmetic tier");
+        else check(goreBursts.empty(),"Population, range, removal, levels and options gate the fatal effect");
     }
     if(!wad.empty())std::puts("Doom II Cacodemon sprite discharge checks passed");
     R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
@@ -436,10 +448,15 @@ static void goreStockLiveMasks(const std::vector<byte> &wad) {
         spriteImages[2].pixels[0]^=1;
         const float u=fixture.u,v=fixture.v;
         goreShot(monster,u,v,5,1);
-        check(goreBursts.empty(),"A torso hit above half health has no major wound");
+        check(goreBursts==std::vector<O>{O::None},"A torso hit above half health has only routine feedback");
         goreShot(monster,u,v,5,1);
-        check(goreBursts==std::vector<O>{O::ChestCavity},"Stock low-HP torso hit creates one living chest injury");
         std::vector<byte> mask;
+        if(goreHuman(fixture.type)) {
+            check(goreBursts.back()==O::None&&!woundMask(monster,spriteImages[0],false,1,0,mask),
+                  "Humans retain torso artwork at low health and still emit fragments");
+            continue;
+        }
+        check(goreBursts==std::vector<O>{O::None,O::ChestCavity},"Stock low-HP torso hit creates one living chest injury");
         check(woundMask(monster,spriteImages[0],false,1,0,mask),"Living cavity applies independently of Wound Holes");
         check(std::find(mask.begin(),mask.end(),1)!=mask.end()&&std::find(mask.begin(),mask.end(),3)!=mask.end(),
               "Living cavity cuts a small opening with a bloodied rim");
@@ -448,16 +465,16 @@ static void goreStockLiveMasks(const std::vector<byte> &wad) {
         WoundSpot spot{};
         check(woundSpots(&monster,&spot,1,true)==1&&spot.critical,"Each verified living cavity contributes a budgeted drip");
         goreShot(monster,u,v,5,1);
-        check(goreBursts.size()==1,"Living cavity emits once per life");
+        check(goreBursts.size()==3&&goreBursts.back()==O::None,"Living cavity emits once per life, followed by routine feedback");
         goreShot(monster,u,v,monster.health,1);
-        check(goreBursts.size()==2&&goreBursts.back()==fixture.fatal,
+        check(goreBursts.size()==4&&goreBursts.back()==fixture.fatal,
               "Fatal effects have independent particle presentation");
         check(!woundMask(monster,spriteImages[0],false,1,0,mask),"A fatal discharge clears the living overlay");
         monster.health=25;
         check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Living overlay is gone after death even if HP returns");
     }
     R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
-    std::puts("Doom II half-health stock living mask checks passed for all four monsters");
+    std::puts("Doom II half-health stock Imp/Mancubus mask and human routine feedback checks passed");
 }
 
 static void goreStockPinky(const std::vector<byte> &wad) {

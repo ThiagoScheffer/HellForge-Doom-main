@@ -68,6 +68,10 @@ int main() {
     Draw floor;sim.forEachVisual(draw,&floor);
     check(floor.settled>0&&a.impacts>0&&a.last.eventId==73&&a.last.contact.z==0&&
           a.last.center.z>0&&a.last.tint==Tint::Blue,"Floor impact preserves event, tint, and separate swept center");
+    for(int i=0;i<15*70;++i)sim.advance(1.f/70.f,host);
+    check(sim.restingCount()>0,"Settled viscera remain after fifteen game seconds");
+    for(int i=0;i<13*70;++i)sim.advance(1.f/70.f,host);
+    check(!sim.activeCount(),"Settled viscera expire within thirty seconds");
     sim.clear();check(!sim.activeCount()&&!sim.hasActiveEvent(73)&&!sim.stats().traces,"Clear resets history and metrics");
     check(sim.emit(burst)==8,"Map clear releases event identity");
     burst.mapKillCount=200;burst.eventId++;
@@ -78,6 +82,14 @@ int main() {
     check(sim.activeCount()==64,"Shared texture simulation cap");
     sim.advance(5,host);
     check(sim.stats().traces<=64*8&&sim.stats().emittedImpacts<=12,"Bounded catch-up work and notifications");
+    for(int i=0;i<100;++i)sim.advance(1.f/70.f,host);
+    check(sim.restingCount()==System::MaxResting&&sim.activeCount()==System::MaxResting&&sim.stats().evictedResting>0,
+          "The resting subcap evicts old debris from the same pool");
+    burst.maxActive=24;burst.pieces=12;burst.eventId++;
+    const auto oldEvictions=sim.stats().evictedResting;
+    check(sim.emit(burst)==12&&sim.activeCount()==24&&sim.restingCount()==12&&sim.stats().evictedResting==oldEvictions+12,
+          "Fresh bursts replace old grounded pieces when the shared capacity has no spare slot");
+    burst.maxActive=64;
 
     sim.clear();burst.pieces=1;
     Fixture ceiling;

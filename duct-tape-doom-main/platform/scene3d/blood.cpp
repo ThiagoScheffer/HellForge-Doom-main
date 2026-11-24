@@ -425,22 +425,29 @@ static void checkBloodLevel() {
     bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();
     bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
-void bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed) {
-    if(!bloodOn()||sector<0||sector>=numsectors)return;
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld) {
+    if(!bloodOn()||sector<0||sector>=numsectors)return false;
     checkBloodLevel();
-    if(bloodFloors.size()>=maxFloorBlood)bloodFloors.erase(bloodFloors.begin());
+    if(bloodFloors.size()>=maxFloorBlood) {
+        if(!replaceOld)return false;
+        bloodFloors.erase(bloodFloors.begin());
+    }
     const int variant=variantOf(kind,decorationSeed)+32*bloodSourceTint;
     const bool flip=kind!=BLOOD_SMEAR&&(decorationSeed?((hash32(*decorationSeed)&4u)!=0):randomRange(0,1)<.5f);
     bloodFloors.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr});
+    return true;
 }
-void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips) {
-    if(!bloodOn())return;
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld) {
+    if(!bloodOn())return false;
     checkBloodLevel();
-    WallSpan span;if(!wallSpan(lines[hit.line],hit.side,hit.section,span))return;
-    float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);if(len<1)return;
-    if(z<span.bottom||z>span.top)return;
+    WallSpan span;if(!wallSpan(lines[hit.line],hit.side,hit.section,span))return false;
+    float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);if(len<1)return false;
+    if(z<span.bottom||z>span.top)return false;
     float along=std::clamp(((x-span.a.x)*ex+(y-span.a.y)*ey)/len,0.0f,len);
-    if(bloodWalls.size()>=maxWallBlood)bloodWalls.erase(bloodWalls.begin());
+    if(bloodWalls.size()>=maxWallBlood) {
+        if(!replaceOld)return false;
+        bloodWalls.erase(bloodWalls.begin());
+    }
     BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variantOf(kind)+32*bloodSourceTint,randomRange(0,1)<0.5f,0,{},{}};
     // Runs from a heavy splat: one or two, down from its lower half.
     if(drips) {
@@ -448,6 +455,7 @@ void bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float 
         for(int n=0;n<wall.drips;++n) {wall.dripU[n]=randomRange(-0.3f,0.3f)*size;wall.dripLength[n]=randomRange(8,26);}
     }
     bloodWalls.push_back(wall);
+    return true;
 }
 // Hitscan blood without the spray: splats land on the floor a little past
 // the hit after their fall, and with harder hits on a wall close behind.

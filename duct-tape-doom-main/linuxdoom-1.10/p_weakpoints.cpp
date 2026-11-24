@@ -16,6 +16,7 @@ extern "C" {
 }
 wp_balance_t p_wp_balance={200,175,150,150,150,200,175,150,200,300,150,150,125,
     30,25,8,105,105,30,35,175,96,128,3,7,10,50,30,210,2,20,40,350,128,512,3,4,280,350,15,25,105,70,30,60,384,16,5,10,35,105,175,128,14,8,32,175,175,64,3,15,350,70,15,200,200,512,350,120,350,50,24,96};
+void (*P_GoreBlast)(gore_blast_op_t,const mobj_t*,const mobj_t*,int)=nullptr;
 int p_wp_eyes=0;
 int p_wp_enhanced=0,p_wp_vulnerabilities=0,p_wp_injuries=0;
 int p_wp_bleeding=0,p_wp_frenzy=0,p_wp_bleed_damage=0,p_wp_feeding=0;
@@ -378,7 +379,10 @@ void P_WeakpointProjectileHit(mobj_t *projectile,mobj_t *target,int damage) {
         found->second.directProcessed=true;e.kind=found->second.kind;e.dischargeId=found->second.shot;
         if(allowed(target)&&P_WeakpointLocate)P_WeakpointLocate(projectile,target,&e.impact);
     }
+    const int before=target->health;
     P_WeakpointApply(&e);
+    if(P_GoreBlast&&projectile->type==MT_ROCKET&&before>target->health)
+        P_GoreBlast(GORE_BLAST_DIRECT,projectile,target,before);
 }
 void P_WeakpointBFGTracer(mobj_t *bfg,mobj_t *target,int damage) {
     wp_damage_event_t e{};e.target=target;e.source=e.inflictor=bfg->target;e.baseDamage=damage;

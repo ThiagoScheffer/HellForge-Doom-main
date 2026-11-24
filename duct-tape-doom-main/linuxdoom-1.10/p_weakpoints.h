@@ -39,6 +39,9 @@ typedef struct {
 extern int (*P_SevereBloodTint)(const mobj_t*);
 extern void (*P_SevereBloodBurst)(const wp_severe_burst_t*);
 void P_WeakpointRecordHealthLoss(const mobj_t *target,const mobj_t *source,int before,int after);
+typedef enum { GORE_BLAST_BEGIN,GORE_BLAST_DIRECT,GORE_BLAST_SPLASH,GORE_BLAST_END,
+    GORE_BLAST_COMPLETE,GORE_BLAST_FORGET } gore_blast_op_t;
+extern void (*P_GoreBlast)(gore_blast_op_t,const mobj_t *spot,const mobj_t *victim,int before);
 typedef struct {
     int humanoidHead,heavyHead,cyberHead,facePellet,eyeBullet,brainPellet;
     int heavyPlasma,cyberPlasma,floatingPlasma,mechanicalPlasma;

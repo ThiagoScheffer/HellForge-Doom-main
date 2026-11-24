@@ -165,7 +165,7 @@ static void acceleratedView(player_t *player) {
 void applySettings() {
     if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
-    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();clearGiblets();};
+    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();sprayShutdown();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -227,6 +227,7 @@ void applySettings() {
     R_GoreHit=settings.accelerated?goreAfterHit:nullptr;
     R_GoreShotEnd=settings.accelerated?goreFinishShot:nullptr;
     R_GoreForget=forgetGore;
+    P_GoreBlast=settings.accelerated?goreBlast:nullptr;
     R_VileHurt=vileEffectsEnabled()?vileHurt:nullptr;
     R_RevenantDeath=settings.accelerated&&settings.revenantSoulRelease?revenantDeath:nullptr;
     if(!R_RevenantDeath)resetRevenantSouls();
@@ -330,6 +331,7 @@ void sceneShutdown() {
     R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_GoreHit=nullptr;R_GoreShotEnd=nullptr;R_GoreForget=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();
+    P_GoreBlast=nullptr;
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
     rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();

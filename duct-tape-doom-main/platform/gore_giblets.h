@@ -13,7 +13,7 @@ namespace hellforge::giblets {
 
 struct Vec3 { float x = 0, y = 0, z = 0; };
 
-enum class Kind : std::uint8_t { Flesh, HeavyTissue, Viscera, Bone };
+enum class Kind : std::uint8_t { Flesh, HeavyTissue, Viscera, Bone, BrainLike };
 enum class Tint : std::uint8_t { Red, Blue, Green, PaleBone };
 enum class Surface : std::uint8_t { Wall, Floor, Ceiling, Liquid, Sky, Void };
 struct SurfaceRef {
@@ -48,11 +48,13 @@ struct Impact {
 using TraceFn = bool (*)(void *context, Vec3 start, Vec3 finish,
                          float radius, TraceHit &out);
 using ImpactFn = void (*)(void *context, const Impact &event);
+using ContactFn = void (*)(void *context,std::uint64_t eventId,Surface surface,bool rested);
 
 struct Host {
     void *context = nullptr;
     TraceFn trace = nullptr;
     ImpactFn impact = nullptr;
+    ContactFn contact = nullptr;
 };
 
 struct Burst {
@@ -66,6 +68,11 @@ struct Burst {
     std::uint64_t eventId = 0; // nonzero: unique shot/victim token for deduplication
     int mapKillCount = 0; // strict '< 200' HellForge policy
     bool eligible = false; // existing gore/F4/demo/monster policy approves this event
+    bool radial = false;
+    bool brief = false;
+    std::uint8_t floorMarks = 2;
+    std::uint8_t extraFloorMarks = 0;
+    std::uint8_t maxActive = 64; // reserves slots occupied by the procedural fallback
 };
 
 struct Visual {
@@ -79,6 +86,7 @@ struct Visual {
     bool resting = false;
     Vec3 contact{}, normal{};
     SurfaceRef surface{};
+    std::uint64_t eventId=0;
 };
 
 using VisualFn = void (*)(void *context, const Visual &visual);
@@ -90,12 +98,14 @@ struct Stats {
     std::uint32_t suppressedImpacts = 0;
     std::uint32_t traces = 0;
     std::uint32_t active = 0;
+    std::uint32_t evictedResting = 0;
 };
 
 // Small, bounded, deliberately non-gameplay particle system.
 class System final {
 public:
     static constexpr std::size_t MaxPieces = 64;
+    static constexpr std::size_t MaxResting = 24;
     static constexpr int MaxPiecesPerBurst = 12;
     static constexpr int MaxImpactEventsPerAdvance = 12;
 
@@ -114,6 +124,7 @@ public:
     void forEachVisual(VisualFn draw, void *context) const;
     void clear(); // level change, shutdown, demo/replay transition
     std::size_t activeCount() const;
+    std::size_t restingCount() const;
     bool hasActiveEvent(std::uint64_t id) const;
     const Stats &stats() const { return stats_; }
 
@@ -128,6 +139,8 @@ private:
         float radius = 1, size = 1;
         float rotation = 0, angularSpeed = 0;
         float age = 0, lifespan = 0;
+        float restedAt = 0;
+        bool brief = false;
         std::uint8_t variant = 0, contacts = 0;
         bool used = false, resting = false;
     };
@@ -138,6 +151,7 @@ private:
     Stats stats_{};
 
     bool seenEvent(std::uint64_t id) const;
+    Piece *oldestResting();
     void step(float dt, const Host &host, int &impactBudget);
 };
 

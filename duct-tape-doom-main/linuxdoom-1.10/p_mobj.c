@@ -113,6 +113,7 @@ void P_ExplodeMissile (mobj_t* mo)
     mo->momx = mo->momy = mo->momz = 0;
 
     P_SetMobjState (mo, mobjinfo[mo->type].deathstate);
+    if(P_GoreBlast&&mo->type==MT_ROCKET)P_GoreBlast(GORE_BLAST_COMPLETE,mo,NULL,0);
     P_AggressiveImpact(mo);
 
     mo->tics -= P_Random()&3;
@@ -690,6 +691,7 @@ void P_RemoveMobj (mobj_t* mobj)
     P_AcidForget(mobj);
     P_IncendiaryForget(mobj);
     if (R_GoreForget) R_GoreForget(mobj,0);
+    if(P_GoreBlast&&mobj->type==MT_ROCKET)P_GoreBlast(GORE_BLAST_FORGET,mobj,NULL,0);
     P_WeakpointForget(mobj);
     P_ArenaForgetMonster(mobj);
     Arcade_RemoveProjectile(mobj);
