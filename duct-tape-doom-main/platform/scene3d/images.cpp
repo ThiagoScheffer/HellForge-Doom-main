@@ -452,17 +452,6 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
 }
 #include "sky_depth.inc"
 
-// These two fingerprints identify a single immutable indexed source. Reuse
-// the CPU profile when the map reloads and the Image resources are rebuilt.
-static SkyAtmosphereProfile stormAtmosphere;
-static bool stormAtmosphereAnalyzed=false;
-
-const SkyAtmosphereProfile *skyAtmosphereProfile(const Image &sky) {
-    if(sky.skyArtwork!=SkyArtwork::BrownClouds||sky.skyPalette!=stockSkyPalette||
-       stormAtmosphere.kind==SkyAtmosphereKind::Legacy)return nullptr;
-    return &stormAtmosphere;
-}
-
 /* Texture keys: wall index >=0, WAD lump = -1-lump. */
 Image &wallImage(int index) {
     auto found=images.find(index); if(found!=images.end()) return found->second;
@@ -486,11 +475,8 @@ Image &wallImage(int index) {
         if(W_LumpLength(lump)>=768) {
             const auto *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
             image.skyPalette=skyFingerprint(palette,768);
-            if(gamemode==commercial&&image.skyArtwork==SkyArtwork::BrownClouds&&
-               image.skyPalette==stockSkyPalette&&!stormAtmosphereAnalyzed) {
-                stormAtmosphere=analyzeSkyAtmosphere(image.pixels.data(),w,h,palette,SkyAtmosphereKind::DuskStorm);
-                stormAtmosphereAnalyzed=true;
-            }
+            if(gamemode==commercial&&image.skyArtwork==SkyArtwork::BrownClouds)
+                cacheSkyAtmosphere(image,palette);
         }
     }
     if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode==commercial) {
@@ -798,5 +784,8 @@ Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
     key=variantKey;return added.first->second;
 }
 
-void imagesShutdown() {monsterSkinReset();corpseDecayImageReset();images.clear();skyDepthCache={};cloudTexture=nullptr;}
+void imagesShutdown() {
+    monsterSkinReset();corpseDecayImageReset();images.clear();
+    skyDepthCache={};skyAtmosphereCache={};cloudTexture=nullptr;
+}
 } // namespace doom3d

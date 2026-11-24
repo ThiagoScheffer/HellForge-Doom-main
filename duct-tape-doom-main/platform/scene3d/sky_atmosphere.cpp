@@ -7,7 +7,15 @@ namespace doom3d {
 
 SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int height,
                                           const uint8_t *playpal,SkyAtmosphereKind kind) {
-    if(kind!=SkyAtmosphereKind::DuskStorm||!indexed||!playpal||width<=0||height<8)return {};
+    return analyzeMaskedSkyAtmosphere(indexed,width,height,playpal,nullptr,kind);
+}
+
+SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width,int height,
+                                                const uint8_t *playpal,const uint8_t *skyMask,
+                                                SkyAtmosphereKind kind) {
+    const bool city=kind==SkyAtmosphereKind::BurningCityDusk;
+    if((kind!=SkyAtmosphereKind::DuskStorm&&!city)||!indexed||!playpal||width<=0||height<8||
+       (city&&!skyMask))return {};
 
     using RGB=std::array<float,3>;
     struct Tone {RGB rgb;float luminance;int count=0;};
@@ -20,13 +28,16 @@ SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int h
 
     SkyAtmosphereProfile profile;
     const int bandRows=height/7;
+    auto coveredPixel=[&](const uint8_t *row,int y,int x) {
+        return row[2*x+1]==255&&(!skyMask||skyMask[std::size_t(y)*width+x]>=224);
+    };
     int total=0,varied=0,top=0,bottom=0;
     for(int y=0;y<height;++y) {
         const auto *row=indexed+std::size_t(y)*width*2;
         int covered=0;
         float mean=0;
         for(int x=0;x<width;++x) {
-            if(row[2*x+1]!=255)continue;
+            if(!coveredPixel(row,y,x))continue;
             auto &tone=tones[row[2*x]];
             ++tone.count;
             ++covered;
@@ -34,7 +45,8 @@ SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int h
             if(y<bandRows) {
                 ++top;
                 for(int c=0;c<3;++c)profile.zenith[c]+=tone.rgb[c];
-            } else if(y>=height-bandRows) {
+            } else if(city ? (y>=height*7/16&&tone.rgb[0]-tone.rgb[2]>.10f&&tone.luminance>.19f)
+                           : y>=height-bandRows) {
                 ++bottom;
                 for(int c=0;c<3;++c)profile.horizon[c]+=tone.rgb[c];
             }
@@ -43,11 +55,11 @@ SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int h
         total+=covered;
         mean/=covered;
         for(int x=0;x<width;++x) {
-            if(row[2*x+1]!=255)continue;
+            if(!coveredPixel(row,y,x))continue;
             varied+=std::abs(tones[row[2*x]].luminance-mean)>.06f;
         }
     }
-    if(!top||!bottom||double(total)<double(width)*height*.95)return {};
+    if(!top||!bottom||double(total)<double(width)*height*(city?.16:.95))return {};
     for(int c=0;c<3;++c) {
         profile.zenith[c]/=top;
         profile.horizon[c]/=bottom;
@@ -75,6 +87,25 @@ SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int h
     profile.cloudLight=percentileColor(.70f,.91f);
     if((profile.cloudLight[0]-profile.cloudDark[0])<.07f)return {};
     profile.coverage=std::clamp(float(varied)/total,.25f,.85f);
+    if(city) {
+        // Grade the sampled palette toward charcoal overhead and fire-warmed
+        // copper below. Preserve the measured tonal separation.
+        constexpr RGB zenithGrade={.67f,.57f,.52f},horizonGrade={1.08f,.84f,.70f};
+        constexpr RGB darkGrade={.37f,.31f,.28f},middleGrade={.82f,.66f,.57f},lightGrade={1.05f,.84f,.72f};
+        for(int c=0;c<3;++c) {
+            profile.zenith[c]*=zenithGrade[c];
+            profile.horizon[c]*=horizonGrade[c];
+            profile.cloudDark[c]*=darkGrade[c];
+            profile.cloudMiddle[c]*=middleGrade[c];
+            profile.cloudLight[c]*=lightGrade[c];
+        }
+        profile.nearAltitude=2500;
+        profile.nearScale=8800;
+        profile.farScale=1.12f;
+        profile.nearOpacity=.91f;
+        profile.farOpacity=.87f;
+        profile.windSpeed=63;
+    }
     profile.kind=kind;
     return profile;
 }

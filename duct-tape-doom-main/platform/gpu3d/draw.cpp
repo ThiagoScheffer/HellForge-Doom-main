@@ -9,9 +9,10 @@ namespace gpu3d {
 // Matches HellforgeSky in both sky fragment variants.
 struct alignas(16) SkyUniforms {
     float legacy[16];
-    std::array<float,4> horizon,zenith,dark,middle,light,projection,wind;
+    std::array<float,4> horizon,zenith,dark,middle,light,projection,wind,scenery;
 };
-static_assert(offsetof(SkyUniforms,horizon)==64 && sizeof(SkyUniforms)==176);
+static_assert(offsetof(SkyUniforms,horizon)==64 && offsetof(SkyUniforms,scenery)==176 &&
+              sizeof(SkyUniforms)==192);
 
 struct Arena { SDL_GPUBuffer *buffer=nullptr; Uint32 capacity=0; };
 static Arena vertexArena,blockerArena,sectorArena;
@@ -278,7 +279,6 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         const SkyAtmosphereProfile *atmosphere=nullptr;
         bool deep=false;
         if(settings.doom2DeepSky&&gamemode==commercial&&doom2Art&&skyMode>=2) {
-            atmosphere=skyAtmosphereProfile(skyArt);
             if(artwork==SkyArtwork::BurningCity) {
                 const auto &scene=skyDepthScene(skyArt);
                 if(scene.atlas) {
@@ -286,8 +286,9 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
                     depthArt=gpu(scene.atlas);
                     depthMode=3.0f;
                     deep=true;
+                    if(scene.farRadius>0.0f)atmosphere=skyAtmosphereProfile(skyArt);
                 }
-            }
+            } else atmosphere=skyAtmosphereProfile(skyArt);
             if(!deep&&!atmosphere)if(const auto &layers=skyDepthTexture(skyArt,true)) {
                 depthArt=gpu(layers);
                 depthMode=artwork==SkyArtwork::BurningCity?3.0f:artwork==SkyArtwork::BloodHell?4.0f:1.0f;
@@ -329,6 +330,7 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
             uniforms.light=pack(atmosphere->cloudLight,atmosphere->windSpeed);
             uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,0};
             uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
+            if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,0,0};
         }
         SDL_PushGPUFragmentUniformData(command,3,&uniforms,sizeof(uniforms));
         SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},

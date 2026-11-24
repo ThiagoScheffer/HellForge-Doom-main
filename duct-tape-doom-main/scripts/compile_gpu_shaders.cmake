@@ -58,6 +58,9 @@ foreach(entry IN LISTS shaders)
             list(APPEND defines "-D${define}")
         endforeach()
     endif()
+    if(SKY_COMPOSITION_DEBUG MATCHES "^[1-6]$" AND (name STREQUAL "sky_frag" OR name STREQUAL "sky_surface_frag"))
+        list(APPEND defines "-DSKY_COMPOSITION_DEBUG=${SKY_COMPOSITION_DEBUG}")
+    endif()
     # METAL renumbers storage buffers for SDL_gpu's Metal layout; MSL uses
     # the SPIR-V binding numbers directly as buffer/texture/sampler indices.
     foreach(variant spv metal)

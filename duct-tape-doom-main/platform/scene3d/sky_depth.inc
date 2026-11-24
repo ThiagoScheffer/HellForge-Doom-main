@@ -6,6 +6,14 @@ struct SkyDepthCacheEntry {
     SkyDepthScene scene;
 };
 static std::array<std::array<SkyDepthCacheEntry,2>,(size_t)SkyArtwork::Count> skyDepthCache;
+struct SkyAtmosphereCacheEntry {
+    bool attempted=false;
+    SkyAtmosphereProfile profile;
+};
+// Each kind below maps to exactly one composite fingerprint, dimensions and
+// PLAYPAL. Analyzer changes ship with the executable, so this in-memory
+// cache cannot reuse results from an older analyzer.
+static std::array<SkyAtmosphereCacheEntry,(size_t)SkyAtmosphereKind::Count> skyAtmosphereCache;
 std::array<float,3> skyDepthOrigin{};
 static constexpr uint64_t stockSkyPalette=0x43701a484700347fULL;
 
@@ -134,6 +142,36 @@ static std::vector<int> findSkyline(const Image &sky,const byte *palette) {
 
 static float skyLuma(const byte *rgb) {
     return .299f*rgb[0]+.587f*rgb[1]+.114f*rgb[2];
+}
+
+static SkyAtmosphereKind atmosphereKind(const Image &sky) {
+    if(sky.skyPalette!=stockSkyPalette)return SkyAtmosphereKind::Legacy;
+    if(sky.skyArtwork==SkyArtwork::BrownClouds)return SkyAtmosphereKind::DuskStorm;
+    if(sky.skyArtwork==SkyArtwork::BurningCity)return SkyAtmosphereKind::BurningCityDusk;
+    return SkyAtmosphereKind::Legacy;
+}
+
+const SkyAtmosphereProfile *skyAtmosphereProfile(const Image &sky) {
+    const auto &profile=skyAtmosphereCache[(size_t)atmosphereKind(sky)].profile;
+    return profile.kind==SkyAtmosphereKind::Legacy?nullptr:&profile;
+}
+
+static const SkyAtmosphereProfile &cacheSkyAtmosphere(const Image &sky,const byte *palette,
+                                                       const byte *mask=nullptr) {
+    const auto kind=atmosphereKind(sky);
+    auto &cached=skyAtmosphereCache[(size_t)kind];
+    if(cached.attempted||kind==SkyAtmosphereKind::Legacy)return cached.profile;
+    cached.profile=analyzeMaskedSkyAtmosphere(sky.pixels.data(),sky.width,sky.height,palette,mask,kind);
+    cached.attempted=true;
+    if(devparm&&kind==SkyAtmosphereKind::BurningCityDusk) {
+        const auto &p=cached.profile;
+        if(p.kind==SkyAtmosphereKind::Legacy)fprintf(stderr,"Sky A2: RSKY2 atmosphere mask rejected.\n");
+        else fprintf(stderr,"Sky A2: RSKY2 %dx%d, %zu reliable samples, coverage %.4f, "
+                     "zenith %.3f/%.3f/%.3f, horizon %.3f/%.3f/%.3f.\n",
+                     sky.width,sky.height,(size_t)std::count(mask,mask+sky.width*sky.height,byte(255)),p.coverage,
+                     p.zenith[0],p.zenith[1],p.zenith[2],p.horizon[0],p.horizon[1],p.horizon[2]);
+    }
+    return cached.profile;
 }
 
 #include "sky_depth_city.inc"

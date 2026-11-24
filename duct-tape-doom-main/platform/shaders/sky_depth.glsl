@@ -57,18 +57,20 @@ struct SkyShellSample {
 };
 
 SkyShellSample skyShell(float angle,float rise,vec3 eyeInRayBasis,vec2 radii,
-                        float layer,ivec2 size,bool filtered) {
+                        float layer,ivec2 size,bool filtered,bool crisp) {
     vec2 front=skyShellUV(angle,rise,eyeInRayBasis,radii.x,vec2(size));
     SkyShellSample surface=SkyShellSample(vec3(0.0),0.0,0.0,front,0.0);
-    vec2 p=filtered?front-.5:front;
+    vec2 sampleAt=filtered&&crisp?sharpen(front,vec2(.28)):front;
+    vec2 p=filtered?sampleAt-.5:sampleAt;
     ivec2 at=ivec2(floor(p));
     vec2 f=fract(p);
     for(int i=0;i<(filtered?4:1);++i) {
         ivec2 offset=ivec2(i&1,i>>1);
-        vec4 meta=skyShellMetadata(at+offset,size);
-        if(abs(meta.g*255.0-layer)>.5)continue;
         vec2 factor=mix(1.0-f,f,vec2(offset));
         float weight=filtered?factor.x*factor.y:1.0;
+        if(crisp&&weight<=0.0)continue;
+        vec4 meta=skyShellMetadata(at+offset,size);
+        if(abs(meta.g*255.0-layer)>.5)continue;
         surface.coverage+=weight;
         surface.window+=weight*meta.a;
         surface.color+=weight*texel(image,palette,skyDepthTexel(at+offset,size),false).rgb;
@@ -77,11 +79,12 @@ SkyShellSample skyShell(float angle,float rise,vec3 eyeInRayBasis,vec2 radii,
     if(surface.coverage<.999&&abs(eyeInRayBasis.y)>.01&&radii.y>0.0) {
         vec2 rear=skyShellUV(angle,rise,eyeInRayBasis,radii.x+radii.y,vec2(size));
         float width=abs(rear.x-front.x);
-        if(width>.015) {
+        if(width>(crisp?.04:.015)) {
             // Only expose lateral surfaces where the rear ray is inside a
             // building and the front ray has crossed its side in longitude.
             // Testing at the rear row excludes bands caused by roof height.
-            float x=rear.x-.5;
+            float x=crisp&&!filtered?floor(rear.x):
+                (crisp?sharpen(rear,vec2(.28)).x:rear.x)-.5;
             int row=int(rear.y);
             int column=skyDepthTexel(ivec2(int(floor(front.x)),0),size).x;
             float frontObject=texelFetch(skyDepthArt,ivec2(column,size.y*2),0).r;
@@ -105,6 +108,16 @@ SkyShellSample skyShell(float angle,float rise,vec3 eyeInRayBasis,vec2 radii,
         surface.window/=surface.coverage;
     }
     return surface;
+}
+
+// The final four atlas tiles make one panorama. Longitude wraps across
+// the whole turn, while elevation stays within its own tile.
+vec4 skyDistantScenery(vec2 uv,ivec2 size) {
+    int column=int(mod(floor(uv.x),float(size.x)*skyRepeats));
+    int tile=column/size.x;
+    int row=clamp(int(floor(uv.y)),0,size.y-1);
+    vec2 sampleData=texelFetch(skyDepthArt,ivec2(column%size.x,(2+tile)*size.y+1+row),0).rg;
+    return sampleData.y>0.0?vec4(skyDepthPalette(sampleData.x),sampleData.y):vec4(0.0);
 }
 
 // The legacy derived RG texture stores a reconstructed background palette index

@@ -28,6 +28,7 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 atmosphereLight; // RGB, wind speed in map units per second
     vec4 atmosphereProjection; // near height, near scale, far scale
     vec4 atmosphereWind; // fixed per-level wind heading in XY
+    vec4 sceneryProjection; // far radius, normalized far skyline top
 };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
@@ -77,6 +78,75 @@ vec3 skyForegroundAir(vec3 color,vec3 low,float air,float v,float height) {
         color=mix(color,low,0.55*(1.0-smoothstep(-0.05,0.3,height)));
     return color;
 }
+struct SkyLayerSample {
+    vec3 color;
+    float alpha;
+};
+
+vec3 skyCompositeOver(vec3 behind,SkyLayerSample foreground) {
+    return mix(behind,foreground.color,clamp(foreground.alpha,0.0,1.0));
+}
+
+struct SkyScenerySamples {
+    SkyShellSample middle;
+    SkyShellSample near;
+    SkyLayerSample far;
+};
+
+SkyScenerySamples sampleSkyScenery(bool visible,float angle,float rise,vec2 axis,vec2 uv,
+                                   float v,ivec2 size,bool filtered) {
+    SkyShellSample empty=SkyShellSample(vec3(0.0),0.0,0.0,uv,0.0);
+    SkyScenerySamples scenery=SkyScenerySamples(empty,empty,SkyLayerSample(vec3(0.0),0.0));
+    bool farVisible=sceneryProjection.x>0.0&&v>=sceneryProjection.y-.032;
+    if(!visible&&!farVisible)return scenery;
+    vec3 delta=skyDepthEye(c.eye.xyz,depthOrigin.xyz,min(depthShells.x,depthShells.y));
+    vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
+    bool crisp=sceneryProjection.x>0.0;
+    if(visible) {
+        scenery.near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,size,filtered,crisp);
+        if(scenery.near.coverage<.999)
+            scenery.middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,size,filtered,crisp);
+    }
+    bool needFar=scenery.near.coverage<1.0&&scenery.middle.coverage<1.0;
+#if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG == 4
+    needFar=true;
+#endif
+    if(farVisible&&needFar) {
+        vec2 farUV=skyShellUV(angle,rise,eyeInRayBasis,sceneryProjection.x,vec2(size));
+        vec4 distant=skyDistantScenery(farUV,size);
+        scenery.far=SkyLayerSample(distant.rgb,distant.a);
+    }
+    return scenery;
+}
+
+vec3 sceneryAir(vec3 facade,vec3 horizon,float haze,float row) {
+    float distance=haze+(1.0-haze)*smoothstep(.91,1.09,row);
+    vec3 subdued=mix(facade,vec3(dot(facade,vec3(.299,.587,.114))),distance*.24);
+    return mix(subdued,horizon*.56,distance);
+}
+
+vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,float row) {
+    // Effects between facades can be composited at either of these depth
+    // boundaries. Foreground coverage never depends on cloud transmission.
+    if(scenery.far.alpha>0.0) {
+        scenery.far.color=sceneryAir(scenery.far.color,horizon,.58,row);
+        background=skyCompositeOver(background,scenery.far);
+    }
+    // Intermediate effects between distant and middle scenery.
+    if(scenery.middle.coverage>0.0) {
+        vec3 paint=scenery.middle.color+vec3(.085,.042,.014)*scenery.middle.window;
+        vec3 facade=sceneryAir(paint,horizon,.26,row);
+        background=skyCompositeOver(background,SkyLayerSample(facade,scenery.middle.coverage));
+    }
+    // Intermediate effects between middle and near scenery.
+    if(scenery.near.coverage>0.0) {
+        vec3 paint=scenery.near.color+vec3(.15,.074,.025)*scenery.near.window;
+        vec3 facade=sceneryAir(paint,horizon,.06,row);
+        background=skyCompositeOver(background,SkyLayerSample(facade,scenery.near.coverage));
+    }
+    return background;
+}
+
 void main() {
     vec2 size=vec2(textureSize(image,0));
 #ifdef SURFACE
@@ -100,13 +170,18 @@ void main() {
     bool useAtmosphere=atmosphereZenith.w>0.0;
     bool deepStorm=useAtmosphere||(deep&&cloudProfile==SKY_ART_BROWN_CLOUDS);
     bool depthScene=depthShells.x>0.0;
+    bool composedScenery=sceneryProjection.x>0.0;
     // Keep the cutoff outside the maximum vertical shift and filter reach.
     bool depthBand=depthScene&&v>=depthOrigin.w-.09;
-    SkyShellSample middle=SkyShellSample(vec3(0.0),0.0,0.0,uv,0.0);
-    SkyShellSample near=middle;
+    SkyScenerySamples scenery=sampleSkyScenery(depthBand,angle,rise,ray.xy/horizontal,uv,v,ivec2(size),filtered);
+    SkyShellSample middle=scenery.middle,near=scenery.near;
     vec4 color;
     vec2 artworkData=vec2(0.0);
-    float foregroundMask=0.0;
+    float foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
+    bool obscured=composedScenery&&(foregroundMask>=1.0||scenery.far.alpha>=1.0);
+#if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG == 1
+    if(composedScenery)obscured=false;
+#endif
     vec3 foreground=vec3(0.0);
     vec3 cloudArt,low;
     float air=0.12+0.33*(1.0-smoothstep(0.0,0.6,rise));
@@ -119,14 +194,6 @@ void main() {
             vec2 at=vec2(uv.x,clamp(uv.y,.5,size.y-.5));
             artworkData=textureLod(skyDepthArt,at/vec2(textureSize(skyDepthArt,0)),0.0).ba;
             if(depthBand) {
-                vec3 delta=skyDepthEye(c.eye.xyz,depthOrigin.xyz,min(depthShells.x,depthShells.y));
-                vec2 axis=ray.xy/horizontal;
-                vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
-                near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,ivec2(size),filtered);
-                if(near.coverage<.999) {
-                    middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,ivec2(size),filtered);
-                }
-                foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
 #ifdef SKY_DEPTH_DEBUG
                 // 1: solid mask, 2: object IDs, 3: depth, 4: backdrop, 5: sides.
                 color=vec4(skyBackdrop(uv,ivec2(size),filtered),1.0);
@@ -218,7 +285,7 @@ void main() {
     }
     // Lightning is behind the three virtual horizon layers and clouds.
     // The skyline therefore masks the bolt rather than being lit on top.
-    if(c.style.z>0.0) {
+    if(!obscured&&c.style.z>0.0) {
         float stroke=hellforgeBoltMask(angle,rise,c.style.y,boltSeed);
         float halo=hellforgeBoltHalo(angle,rise,c.style.y);
         // Clearer bolt cores without increasing the full-sky flash amplitude.
@@ -240,16 +307,18 @@ void main() {
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
     if(useAtmosphere) {
-        // Celestial light enters the atmosphere from behind both layers.
-        if(!eclipse&&c.fx2.w>0.0)color.rgb=skyVisibleSun(color.rgb,ray,1.0);
-        vec3 key=c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
-        vec3 stormLight=vec3(0.0);
-        if(c.weather.w>0.0) {
-            float halo=hellforgeBoltHalo(angle,rise,c.style.y);
-            stormLight=vec3(.51,.55,.68)*c.weather.w*(.06+.54*halo);
+        if(!obscured) {
+            // Celestial light enters the atmosphere from behind both layers.
+            if(!eclipse&&c.fx2.w>0.0)color.rgb=skyVisibleSun(color.rgb,ray,1.0);
+            vec3 key=c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
+            vec3 stormLight=vec3(0.0);
+            if(c.weather.w>0.0) {
+                float halo=hellforgeBoltHalo(angle,rise,c.style.y);
+                stormLight=vec3(.51,.55,.68)*c.weather.w*(.06+.54*halo);
+            }
+            SkyAtmosphereResult atmosphere=renderSkyAtmosphere(color.rgb,ray,angle,key,stormLight);
+            color.rgb=atmosphere.color;
         }
-        SkyAtmosphereResult atmosphere=renderSkyAtmosphere(color.rgb,ray,angle,key,stormLight);
-        color.rgb=atmosphere.color;
     } else if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&(depthScene?middle.coverage>0.0:artworkData.x>.25)))) {
         vec3 eclipseCenter=eclipse?bloodEclipseCenter(eclipseRidge>0.0):vec3(0.0);
         vec3 key=deepCity?vec3(0.0,0.0,-1.0):
@@ -303,7 +372,17 @@ void main() {
         color.rgb=skyVisibleSun(color.rgb,ray,1.0-0.80*cloudCover);
     }
     // Resolve the shells back to front, over the existing smoke and celestial layers.
-    if(depthBand) {
+    if(composedScenery) {
+#if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG != 5
+        if(SKY_COMPOSITION_DEBUG==2)color.rgb=vec3(foregroundMask);
+        if(SKY_COMPOSITION_DEBUG==3)color.rgb=vec3(near.coverage,middle.coverage,scenery.far.alpha);
+        if(SKY_COMPOSITION_DEBUG==4)color.rgb=skyCompositeOver(vec3(0.0),scenery.far);
+        if(SKY_COMPOSITION_DEBUG==6)color.rgb=vec3(near.side,0.0,middle.side);
+        outColor=color;
+        return;
+#endif
+        color.rgb=composeSkyScenery(color.rgb,scenery,low,v);
+    } else if(depthBand) {
         for(int layer=0;layer<2;++layer) {
             SkyShellSample surface=layer==0?middle:near;
             if(surface.coverage<=0.0)continue;
@@ -313,7 +392,7 @@ void main() {
                 vec3 lit=deepCityFacade(facade,at,layer==0?.64:.15,surface.window,cloudCover,rise);
                 facade=mix(lit,facade,smoothstep(.88,1.02,v));
             }
-            color.rgb=mix(color.rgb,facade,surface.coverage);
+            color.rgb=skyCompositeOver(color.rgb,SkyLayerSample(facade,surface.coverage));
         }
     } else if(foregroundMask>0.0) {
         if(deepCity&&v<1.02) {
@@ -322,7 +401,7 @@ void main() {
                                        cloudCover,rise);
             foreground=mix(facade,foreground,smoothstep(.88,1.02,v));
         }
-        color.rgb=mix(color.rgb,foreground,foregroundMask);
+        color.rgb=skyCompositeOver(color.rgb,SkyLayerSample(foreground,foregroundMask));
     }
     // Far rain: weather.cpp drops rain only in the map's open sectors near
     // the eye, and the sky (ceilings and the band over lower neighbors

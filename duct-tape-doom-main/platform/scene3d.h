@@ -380,6 +380,7 @@ struct SkyDepthScene {
     GpuTextureRef atlas;
     std::array<float,4> shells{}; // middle/near radii, then their radial thicknesses
     float firstRow=0;             // normalized source row of the highest solid texel
+    float farRadius=0,farFirstRow=0; // optional distant scenery in the same atlas
 };
 const SkyDepthScene &skyDepthScene(const Image &sky);
 extern std::array<float,3> skyDepthOrigin;

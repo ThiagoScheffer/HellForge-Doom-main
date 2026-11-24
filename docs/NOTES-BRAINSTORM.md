@@ -321,6 +321,46 @@ fix foggy deimos decorations not immerse into the Foggy
 Death GraveSystem memo - A new option for gamexx -> User can enable option to keep spot and map - small memory file that create a player corpse or a graveyard (it can be selectible) with player name in the position  where the player died, so player can see where he failed last time or up to where he died many times when playing that map or wad. it can be cleaned if player want to erase it.
 
 
+Monsters can suffer from Acid and Lava places as the player - so they try to avoid sometimes if they are already hurt. if monster die from Acid, it will melt suing the deco POL5 with green color effect to match ACID.
+
+
+
+//rework
+
+We had applied  Texture Immersion for these texture file:
+body_1  body_2 - wall with a dead body half smashed, only upper part torax,arms and head are nailed to the wall 
+wall50_1 wall50_2 wall51_2 wall51_3 - wall marble with a bodies hanged or chained on it
+ 
+first remove all morph or moving effect of it to fix. - make it like original default.
+
+
+new updated idea: 
+body_1  body_2 = give a immersion effect as wall blood part still slowly bleeding - we can use same blood fx as monster if it can be optmized for it, so if player is near the wall it will trigger the bleeding like matching the red texture of the image.
+
+wall50_1 wall50_2 wall51_2 wall51_3 - immersion  add some flies near the wall, spiders and some maggots on it - similiar to the GOR5 leg.
+
+
+
+
+Cacodemon and painelemental - if hit eye and blinded - improve it by making the eye part closed or like a woundblood - it restaure if it recovery health
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
