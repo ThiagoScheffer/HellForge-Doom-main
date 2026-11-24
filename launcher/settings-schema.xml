@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="80f1ac2f02870e0561458ea768c7c17b150d69d7a27a0516ed2dc01e7c2ab444">
+<settings source="platform/settings_panel.cpp" source_sha256="e0ebc65dabd9352e51506ae3fd9c3468eb76e5ce64f097eb17d72b0293c65537">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />

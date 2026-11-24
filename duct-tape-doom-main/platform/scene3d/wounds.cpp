@@ -314,7 +314,7 @@ static bool goreSpriteActor(const mobj_t &target) {
     return !(target.flags&MF_NOBLOOD)&&(!criticalVoxelModel||!criticalVoxelModel(target));
 }
 static const GoreLivingFrame *goreLivingArt(int type,const Image &image) {
-    if(type!=MT_TROOP&&type!=MT_FATSO)return nullptr;
+    if(!goreLivingCavity(type))return nullptr;
     auto [it,inserted]=verifiedLivingFrames.try_emplace(&image,nullptr);
     if(inserted) {
         const auto hash=goreHash(image);
@@ -324,15 +324,16 @@ static const GoreLivingFrame *goreLivingArt(int type,const Image &image) {
     return it->second&&it->second->type==type?it->second:nullptr;
 }
 static std::array<float,2> goreCavityRadii(int type) {
+    if(goreHuman(type))return {3.5f,2.8f};
     return type==MT_FATSO?std::array<float,2>{8.f,5.f}:std::array<float,2>{4.f,3.4f};
 }
 static GoreRegion goreRegion(int type,const SpriteImpact &impact,const GoreLivingFrame *art) {
-    if(type==MT_HEAD||goreHuman(type))return GoreRegion::Unknown;
+    if(type==MT_HEAD||(goreHuman(type)&&!art))return GoreRegion::Unknown;
     const Image &image=*impact.image;
     const auto &anatomy=weakpointRegions(type,image);
     const int u=(int)impact.point.u,v=(int)impact.point.v;
     const auto region=anatomy.pixels[(size_t)v*image.width+u];
-    if(art&&region!=WP_HEAD) {
+    if(art&&region==WP_BODY) {
         const auto &c=art->cavities;
         const auto radii=goreCavityRadii(type);
         const auto distance=[&](int x,int y) {
@@ -395,6 +396,9 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
     SpriteImpact impact;
     if(!eligible||!captureSpriteHit(target,x,y,z,dx,dy,slope,source,impact))return;
     shot->opaque=true;shot->surface=impact.world;
+    const auto *art=goreLivingArt(target->type,*impact.image);
+    shot->region=goreRegion(target->type,impact,art);
+    shot->livingArt=art!=nullptr;
     if(goreHuman(target->type)) {
         const auto &img=*impact.image;
         auto [it,inserted]=heads.try_emplace(&img);
@@ -405,10 +409,6 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
            std::abs(impact.point.u-img.left-head.middle)<=head.width*.5f) {
             ++d.legacyHeads;shot->legacyHead=shot->impact;
         }
-    } else {
-        const auto *art=goreLivingArt(target->type,*impact.image);
-        shot->region=goreRegion(target->type,impact,art);
-        shot->livingArt=art!=nullptr;
     }
 }
 
@@ -479,7 +479,8 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
         const bool verified=cavity&&shot.verifiedRegion[index];
         if(cavity&&!verified) {
             fallback="art_unverified";
-            outcome=d.type==MT_TROOP?GoreOutcome::ImpTissue:GoreOutcome::MancubusHeavy;
+            outcome=goreHuman(d.type)?GoreOutcome::HumanFlesh:
+                    d.type==MT_TROOP?GoreOutcome::ImpTissue:GoreOutcome::MancubusHeavy;
         }
         if(!verified&&!settings.goreFragments&&!settings.goreWallBlood) {
             outcome=GoreOutcome::None;reason="feature_off";
@@ -769,10 +770,10 @@ void forgetWounds(const mobj_t *thing) {
 }
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most,bool includeCritical) {
     int count=0;
-    if(includeCritical&&most>0&&thing->type==MT_FATSO&&thing->health>0&&
-       goreActive()&&settings.goreBodyDamage&&goreSpriteActor(*thing)) {
+    if(includeCritical&&most>0&&thing->health>0&&goreLivingCavity(thing->type)&&
+       goreActive()&&settings.goreBodyDamage) {
         const auto wound=goreLiving.find(thing);
-        if(wound!=goreLiving.end()&&wound->second.region!=GoreRegion::Unknown) {
+        if(wound!=goreLiving.end()&&wound->second.region!=GoreRegion::Unknown&&goreSpriteActor(*thing)) {
             out[count]=wound->second.drip;out[count++].critical=true;
         }
     }
@@ -967,14 +968,20 @@ static bool goreLiveMask(const mobj_t &actor,const Image &image,std::vector<byte
         const int cy=belly?art->cavities.bellyY:art->cavities.chestY;
         const auto radii=goreCavityRadii(actor.type);
         const auto &anatomy=weakpointRegions(actor.type,image);
+        const auto torso=[&](int x,int y) {
+            if(x<0||x>=w||y<0||y>=h)return false;
+            const size_t i=(size_t)y*w+x;
+            return image.pixels[i*2+1]&&anatomy.pixels[i]==WP_BODY;
+        };
         for(int r=0;r<h;++r)for(int c=0;c<w;++c) {
             const size_t i=(size_t)r*w+c;
-            if(!image.pixels[i*2+1]||anatomy.pixels[i]!=WP_BODY)continue;
+            if(!torso(c,r))continue;
             const float dx=(c+.5f-cx)/radii[0],dy=(r+.5f-cy)/radii[1];
             const uint32_t grain=hash32((uint32_t)i^art->pixels.hash);
             const float distance=dx*dx+dy*dy+(grain&7u)*.032f;
-            // Paint a dark interior with an irregular edge on the living texels.
-            if(distance<.69f)cut[i]=2;
+            // Keep the opening inside the torso and paint a dark recess around it.
+            if(distance<.26f&&torso(c-2,r)&&torso(c+2,r)&&torso(c,r-2)&&torso(c,r+2))cut[i]=1;
+            else if(distance<.69f)cut[i]=2;
             else if(distance<1.f)cut[i]=(grain%5u==0)?4:3;
             else if(distance<1.25f&&(grain&1u))cut[i]=5;
         }

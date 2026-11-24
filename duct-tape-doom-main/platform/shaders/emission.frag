@@ -38,17 +38,20 @@ void main() {
     // halo before blurring so thin strips do not smear over neighboring art.
     float poolHalo=1.0-smoothstep(96.0,300.0,length(vToEye));
     if(!sprite&&poolBloom>0.0)e*=poolHalo;
+    // Large luminous faces already have full-bright texels in the world pass.
+    // A restrained halo leaves the palette detail visible in the final image.
+    float bloomStrength=sprite||poolBloom>0.0?2.5:0.85;
     if(!sprite&&(vMode>>MODE_SECTOR_SHIFT)>0u&&(uint(c.flashlightTint.w)&FEATURE_GLOW_EDGES)!=0u) {
         vec3 normal=normalize(cross(dFdx(vWorld),dFdy(vWorld)));
         if(dot(normal,c.eye.xyz-vWorld)<0.0) normal=-normal;
         vec3 paint;float glow;
         if(poolHalo>0.0&&abs(normal.z)<=0.5&&edgeStrip(vWorld,normal,paint,glow)>0.0&&glow*poolHalo>e) {
-            color.rgb=paint;e=glow*poolHalo;
+            color.rgb=paint;e=glow*poolHalo;bloomStrength=2.5;
         }
     }
     // White strips glow in every channel at once and wash the view out up
-    // close; colored bulbs keep their full bloom.
+    // close; attenuate the neutral part of each source.
     float hi=max(color.r,max(color.g,color.b)),lo=min(color.r,min(color.g,color.b));
     float neutral=1.0-saturate((hi-lo)/max(hi,0.001)*2.0);
-    outColor=vec4(color.rgb*e*2.5*(1.0-0.6*neutral),1);
+    outColor=vec4(color.rgb*e*bloomStrength*(1.0-0.6*neutral),1);
 }

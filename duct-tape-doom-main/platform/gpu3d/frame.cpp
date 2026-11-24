@@ -388,19 +388,21 @@ static void drawBloom(SDL_GPUCommandBuffer *render,const FrameView &view,const U
         SDL_BindGPUGraphicsPipeline(blurPass,blurPipeline);
         SDL_GPUTextureSamplerBinding source={axis?bloomScratch:(pass?bloomTexture:emissionTexture),linearClamp};
         SDL_BindGPUFragmentSamplers(blurPass,0,&source,1);
-        // Radius scales with resolution, retaining a similar halo at 50–100%.
-        float dx=0.0035f,dy=0.0056f;
-        if(blurPasses>2 && pass<4){
-            float texels=pass<2?1.0f:2.0f;
-            dx=texels/bw;dy=texels/bh;
-        }
-        float direction[4]={axis?0:dx,axis?dy:0,0,0};
-        SDL_PushGPUFragmentUniformData(render,0,direction,sizeof(direction));
+        // Pair adjacent texels with linear sampling. Scale the weights with
+        // resolution while keeping the taps contiguous to avoid repeated edges.
+        float sigma=std::clamp(axis?bh*0.009f:bw*0.0056f,1.0f,2.2f);
+        if(blurPasses>2&&pass<4)sigma=pass<2?1.0f:1.6f;
+        float falloff=-0.5f/(sigma*sigma);
+        float w1=std::exp(falloff),w2=std::exp(4*falloff);
+        float w3=std::exp(9*falloff),w4=std::exp(16*falloff);
+        float inner=w1+w2,outer=w3+w4,total=1+2*(inner+outer);
+        float kernel[8]={axis?0.f:1.f/bw,axis?1.f/bh:0.f,1+w2/inner,3+w4/outer,
+                         1/total,inner/total,outer/total,0};
+        SDL_PushGPUFragmentUniformData(render,0,kernel,sizeof(kernel));
         SDL_DrawGPUPrimitives(blurPass,3,1,0,0);
         SDL_EndGPURenderPass(blurPass);
-
-         SDL_GenerateMipmapsForGPUTexture(render,bloomTexture);
     }
+    SDL_GenerateMipmapsForGPUTexture(render,bloomTexture);
 }
 // Profiling: submits the scene's own command buffer and times it.
 static void submitProfiled(SDL_GPUCommandBuffer *render,uint64_t frameStart) {

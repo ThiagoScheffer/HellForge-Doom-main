@@ -15,9 +15,8 @@ enum class GoreReason : uint8_t { Emitted, Health, Damage, Opaque, Range, Featur
 struct GoreResult { GoreOutcome outcome; GoreReason reason; };
 
 inline constexpr float goreRange=128.f;
-inline constexpr int impHealthPercent=40, mancubusHealthPercent=45,
-                     pinkyHealthPercent=45, cacoHealthPercent=50;
-inline constexpr int impDamage=15, mancubusDamage=35, revenantDamage=30,
+inline constexpr int livingCavityHealthPercent=50, pinkyHealthPercent=45, cacoHealthPercent=50;
+inline constexpr int mancubusFatalDamage=35, revenantDamage=30,
                      pinkyDamage=20, pinkyFatalDamage=30, cacoDamage=20,
                      cacoSingleContactDamage=30, cacoFatalDamage=25;
 inline const char *goreStyleName(int type) {
@@ -33,6 +32,7 @@ inline const char *goreStyleName(int type) {
 }
 inline bool goreSupported(int type) {return goreStyleName(type)!=nullptr;}
 inline bool goreHuman(int type) {return type==MT_POSSESSED||type==MT_SHOTGUY;}
+inline bool goreLivingCavity(int type) {return goreHuman(type)||type==MT_TROOP||type==MT_FATSO;}
 
 struct GoreDecision {
     int type=-1, contacts=0, spriteContacts=0, legacyHeads=0;
@@ -56,8 +56,14 @@ inline GoreResult goreCandidate(const GoreDecision &d) {
     if(d.effectiveDamage<=0)return {O::None,R::Damage};
     const int head=d.count(GoreRegion::Head), chest=d.count(GoreRegion::Chest), belly=d.count(GoreRegion::Belly);
     const int torso=chest+belly;
+    if(!d.fatal()&&goreLivingCavity(d.type)) {
+        if(!d.bodyEnabled)return {O::None,R::Feature};
+        if(!d.lowHealth(livingCavityHealthPercent))return {O::None,R::Health};
+        if(d.already)return {O::None,R::Already};
+        if(!d.spriteContacts||!torso)return {O::None,R::Opaque};
+        return {chest>=belly?O::ChestCavity:O::BellyCavity,R::Emitted};
+    }
     if(goreHuman(d.type)) {
-        if(!d.fatal())return {O::None,R::Health};
         if(d.legacyStock) {
             // M1 measures the head majority over all admitted pellet contacts.
             if(d.headEnabled&&!d.extreme&&d.legacyHeads>0&&d.legacyHeads*2>=d.contacts)
@@ -82,17 +88,10 @@ inline GoreResult goreCandidate(const GoreDecision &d) {
     if(!d.fatal()&&d.already)return {O::None,R::Already};
     switch(d.type) {
     case MT_TROOP:
-        if(d.fatal())return {O::ImpTissue,R::Emitted};
-        if(!d.lowHealth(impHealthPercent))return {O::None,R::Health};
-        if(d.effectiveDamage<impDamage)return {O::None,R::Damage};
-        if(torso<1)return {O::None,R::Opaque};
-        break;
+        return {O::ImpTissue,R::Emitted};
     case MT_FATSO:
-        if(!d.fatal()&&!d.lowHealth(mancubusHealthPercent))return {O::None,R::Health};
-        if(d.effectiveDamage<mancubusDamage)return {O::None,R::Damage};
-        if(d.fatal())return {O::MancubusHeavy,R::Emitted};
-        if(torso<2)return {O::None,R::Opaque};
-        break;
+        if(d.effectiveDamage<mancubusFatalDamage)return {O::None,R::Damage};
+        return {O::MancubusHeavy,R::Emitted};
     case MT_SERGEANT:
         if(!d.fatal()&&!d.lowHealth(pinkyHealthPercent))return {O::None,R::Health};
         if(d.effectiveDamage<(d.fatal()?pinkyFatalDamage:pinkyDamage))return {O::None,R::Damage};
@@ -105,7 +104,6 @@ inline GoreResult goreCandidate(const GoreDecision &d) {
         return {O::CacoViscera,R::Emitted};
     default:return {O::None,R::Feature};
     }
-    return {chest>=belly?O::ChestCavity:O::BellyCavity,R::Emitted};
 }
 }
 #endif

@@ -2,13 +2,14 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 layout(set=2,binding=0) uniform sampler2D image;
-layout(std140,set=3,binding=0) uniform Direction { vec2 direction; };
+layout(std140,set=3,binding=0) uniform BlurKernel { vec4 axis; vec4 weights; };
 layout(location=0) out vec4 outColor;
 void main() {
-    vec3 glow=textureLod(image,vUV,0.0).rgb*0.227027;
-    glow+=(textureLod(image,vUV+direction*1.384615,0.0).rgb+
-           textureLod(image,vUV-direction*1.384615,0.0).rgb)*0.316216;
-    glow+=(textureLod(image,vUV+direction*3.230769,0.0).rgb+
-           textureLod(image,vUV-direction*3.230769,0.0).rgb)*0.070270;
+    vec2 inner=axis.xy*axis.z,outer=axis.xy*axis.w;
+    vec3 glow=textureLod(image,vUV,0.0).rgb*weights.x;
+    glow+=(textureLod(image,vUV+inner,0.0).rgb+
+           textureLod(image,vUV-inner,0.0).rgb)*weights.y;
+    glow+=(textureLod(image,vUV+outer,0.0).rgb+
+           textureLod(image,vUV-outer,0.0).rgb)*weights.z;
     outColor=vec4(glow,1);
 }

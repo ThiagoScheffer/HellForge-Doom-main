@@ -166,7 +166,7 @@ struct GoreStyle {
     int living,fatal,cores;
     float size,coreSize,speed,spread,rise,gravity,mark;
 };
-static constexpr GoreStyle humanFlesh={DropVisual::Flesh,0,4,0,2.15f,0,92,.60f,40,sprayGravity,15};
+static constexpr GoreStyle humanFlesh={DropVisual::Flesh,3,4,0,2.15f,0,92,.60f,40,sprayGravity,15};
 static constexpr GoreStyle impTissue={DropVisual::Tissue,4,6,1,2.8f,4.1f,91,.58f,52,1120,16};
 static constexpr GoreStyle revenantBone={DropVisual::Bone,3,6,1,2.1f,3.7f,98,.58f,57,1160,0};
 static constexpr GoreStyle mancubusHeavy={DropVisual::Organ,5,8,3,3.6f,6.9f,82,.52f,57,1000,23};

@@ -260,7 +260,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Extra directional impact splashes, wall drips and floor stains, using the existing collision and decal budgets.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("gore_body_damage","Body destruction & viscera",&s.goreBodyDamage,
-                    "Adds severe living torso injuries for Imps and Mancubi, visceral bursts and skeletal fragments.",
+                    "Adds living torso wounds at half health for Zombiemen, Shotgun Guys, Imps and Mancubi, plus visceral bursts and skeletal fragments.",
                     [](const Settings &d){return d.accelerated&&d.blood&&d.goreLevel!=0;}),
                 check("wounds","Wound holes",&s.wounds,
                     "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "

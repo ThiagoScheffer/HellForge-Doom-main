@@ -288,20 +288,21 @@ static void gorePolicy() {
     shot.distance=129;
     check(goreCandidate(shot).reason==R::Range,"Cacodemon gore stops beyond 128 units");
 
-    shot={};shot.type=MT_TROOP;shot.bodyEnabled=true;shot.maxHP=60;shot.postHP=24;
-    shot.spriteContacts=2;shot.hits[(unsigned)GoreRegion::Chest]=1;shot.effectiveDamage=15;
-    check(goreCandidate(shot).outcome==O::ChestCavity,"Imp torso injury requires a severe shot at 40 percent HP");
-    ++shot.postHP;
-    check(goreCandidate(shot).reason==R::Health,"Above-threshold HP blocks a living injury");
-    shot.maxHP=0;
-    check(goreCandidate(shot).reason==R::Health,"An invalid maximum HP blocks a living injury");
+    for(auto type:{MT_POSSESSED,MT_SHOTGUY,MT_TROOP,MT_FATSO}) {
+        shot={};shot.type=type;shot.bodyEnabled=true;shot.maxHP=60;shot.postHP=30;
+        shot.spriteContacts=1;shot.hits[(unsigned)GoreRegion::Chest]=1;shot.effectiveDamage=5;
+        check(goreCandidate(shot).outcome==O::ChestCavity,"One torso pellet qualifies at half health");
+        ++shot.postHP;
+        check(goreCandidate(shot).reason==R::Health,"Above-threshold HP blocks a living injury");
+        shot.maxHP=0;
+        check(goreCandidate(shot).reason==R::Health,"An invalid maximum HP blocks a living injury");
+    }
+    shot.type=MT_TROOP;
     shot.postHP=0;
     check(goreCandidate(shot).outcome==O::ImpTissue,"Fatal Imp body hits select tissue without a torso mask");
-    shot.type=MT_FATSO;shot.maxHP=600;shot.postHP=270;shot.effectiveDamage=35;
-    check(goreCandidate(shot).reason==R::Opaque,"Mancubus requires two classified torso contacts while alive");
-    ++shot.hits[(unsigned)GoreRegion::Chest];
-    check(goreCandidate(shot).outcome==O::ChestCavity,"A severely wounded low-HP Mancubus qualifies");
-    shot.postHP=0;
+    shot.type=MT_FATSO;
+    check(goreCandidate(shot).reason==R::Damage,"The Mancubus retains its fatal severity gate");
+    shot.effectiveDamage=35;
     check(goreCandidate(shot).outcome==O::MancubusHeavy,"Fatal Mancubus hits select heavy tissue without a torso mask");
     shot.type=MT_SERGEANT;shot.postHP=45;shot.maxHP=100;shot.effectiveDamage=20;
     check(goreCandidate(shot).outcome==O::PinkyViscera,"Pinky selects only viscera");
@@ -408,40 +409,53 @@ static void goreDischargeFinalization(const std::vector<byte> &wad) {
 static void goreStockLiveMasks(const std::vector<byte> &wad) {
     using O=GoreOutcome;
     Settings previous=settings;
-    for(int type:{MT_TROOP,MT_FATSO}) {
+    struct Fixture {
+        mobjtype_t type;
+        int health;
+        const char *front,*quarter;
+        float u,v;
+        O fatal;
+    };
+    const Fixture fixtures[]={
+        {MT_POSSESSED,20,"POSSA1","POSSA2A8",16,14,O::HumanFlesh},
+        {MT_SHOTGUY,30,"SPOSA1","SPOSA2A8",16,14,O::HumanFlesh},
+        {MT_TROOP,60,"TROOA1","TROOA2A8",20,19,O::ImpTissue},
+        {MT_FATSO,600,"FATTB1","FATTB2B8",43,28,O::MancubusHeavy},
+    };
+    for(const auto &fixture:fixtures) {
         auto monster=reset();
         configureGore();
-        const bool fat=type==MT_FATSO;
-        monster.type=(mobjtype_t)type;
-        monsterInfo.spawnhealth=fat?600:60;
-        monster.health=fat?305:39;
-        spriteImages[0]=iwadSprite(wad,fat?"FATTB1":"TROOA1");
-        spriteImages[1]=iwadSprite(wad,fat?"FATTB2B8":"TROOA2A8");
+        monster.type=fixture.type;
+        monsterInfo.spawnhealth=fixture.health;
+        monster.health=fixture.health/2+10;
+        spriteImages[0]=iwadSprite(wad,fixture.front);
+        spriteImages[1]=iwadSprite(wad,fixture.quarter);
         spriteImages[2]=spriteImages[0];
         spriteImages[2].pixels[0]^=1;
-        const float u=fat?43.f:20.f,v=fat?28.f:19.f;
-        goreShot(monster,u,v,fat?18:15,fat?2:1);
+        const float u=fixture.u,v=fixture.v;
+        goreShot(monster,u,v,5,1);
+        check(goreBursts.empty(),"A torso hit above half health has no major wound");
+        goreShot(monster,u,v,5,1);
         check(goreBursts==std::vector<O>{O::ChestCavity},"Stock low-HP torso hit creates one living chest injury");
         std::vector<byte> mask;
         check(woundMask(monster,spriteImages[0],false,1,0,mask),"Living cavity applies independently of Wound Holes");
-        check(std::find(mask.begin(),mask.end(),2)!=mask.end()&&std::find(mask.begin(),mask.end(),1)==mask.end(),
-              "Living cavity paints a dark center and preserves the silhouette");
+        check(std::find(mask.begin(),mask.end(),1)!=mask.end()&&std::find(mask.begin(),mask.end(),3)!=mask.end(),
+              "Living cavity cuts a small opening with a bloodied rim");
         check(woundMask(monster,spriteImages[1],true,1,0,mask),"Verified mirrored quarter view carries the injury");
         check(!woundMask(monster,spriteImages[2],false,1,0,mask),"Replacement pixels cannot inherit a stock overlay");
         WoundSpot spot{};
-        check(woundSpots(&monster,&spot,1,true)==(fat?1:0),"Only a verified living Mancubus cavity contributes a budgeted drip");
-        if(fat)check(spot.critical,"The drip retains its critical wound presentation tag");
-        goreShot(monster,u,v,fat?18:15,fat?2:1);
+        check(woundSpots(&monster,&spot,1,true)==1&&spot.critical,"Each verified living cavity contributes a budgeted drip");
+        goreShot(monster,u,v,5,1);
         check(goreBursts.size()==1,"Living cavity emits once per life");
         goreShot(monster,u,v,monster.health,1);
-        check(goreBursts.size()==2&&goreBursts.back()==(fat?O::MancubusHeavy:O::ImpTissue),
+        check(goreBursts.size()==2&&goreBursts.back()==fixture.fatal,
               "Fatal effects have independent particle presentation");
         check(!woundMask(monster,spriteImages[0],false,1,0,mask),"A fatal discharge clears the living overlay");
         monster.health=25;
         check(!woundMask(monster,spriteImages[0],false,1,0,mask),"Living overlay is gone after death even if HP returns");
     }
     R_GoreShotEnd=nullptr;totalkills=0;settings=previous;
-    std::puts("Doom II Imp and Mancubus stock living mask checks passed");
+    std::puts("Doom II half-health stock living mask checks passed for all four monsters");
 }
 
 static void goreStockPinky(const std::vector<byte> &wad) {
