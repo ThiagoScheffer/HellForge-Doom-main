@@ -90,7 +90,11 @@ void updateFlashlightTint(Uniforms &camera) {
         float nearest=900,nearestSurface=900;Vec reflected={};Bounce hit={};
         for(const auto &batch:batches) {
             if(batch.second.empty())continue;
-            const auto &image=images.at(batch.first);const auto &vertices=batch.second;
+            const auto found=images.find(batch.first);
+            if(found==images.end())continue;
+            const auto &image=found->second;
+            if(image.width<=0||image.height<=0||image.pixels.size()<size_t(image.width)*image.height*2)continue;
+            const auto &vertices=batch.second;
             for(size_t i=0;i+2<vertices.size();i+=3) {
                 const auto &a=vertices[i],&b=vertices[i+1],&c=vertices[i+2];
                 Vec ab={b.x-a.x,b.y-a.y,b.z-a.z},ac={c.x-a.x,c.y-a.y,c.z-a.z};

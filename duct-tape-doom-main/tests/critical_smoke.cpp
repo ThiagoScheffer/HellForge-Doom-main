@@ -1,11 +1,13 @@
 // Real Doom simulation + stock sprite patches, isolated configs and no GPU.
 // Usage: doom-critical-smoke <DOOM2.WAD> <ragdoll-arena.wad> <output-dir>
 #include "../platform/scene3d/internal.h"
+#include "../platform/scene3d/gore_policy.h"
 #include "../platform/scene3d/modern_hud.h"
 #include "../platform/death_joints.h"
 #include "../platform/monster_regions_stock.h"
 #include "../platform/monster_regions.h"
 #include "../platform/settings_panel.h"
+#include "../../map_world.h"
 extern "C" {
 #include "p_local.h"
 #include "p_acid.h"
@@ -17,6 +19,7 @@ extern int p_player_surface_damage,p_monster_surface_damage;
 #include <SDL3/SDL_main.h>
 #include <cstdlib>
 namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); }
+extern const lab::MapWorld *SV_MapWorld();
 using namespace doom3d;
 static std::string output;
 static bool visual=false;
@@ -30,7 +33,7 @@ static bool vileMode=false,visualVile=false;
 static bool soulMode=false,visualSoul=false;
 static bool visualSurvival=false;
 static bool solidMode=false;
-static bool goreMode=false;
+static bool goreMode=false,goreTextured=false;
 static bool eyeMode=false;
 static bool elementalMode=false,visualElemental=false,elemental2Mode=false,visualElemental2=false;
 static bool visualEyes=false,e1m8Mode=false,e1m8Exit=false,e1m8Snap=false;
@@ -72,6 +75,35 @@ static void shoot(mobj_t *shooter,float x,float y,float z,bool bullet=true) {
     if(bullet)P_BulletAttack(shooter,angle,2048*FRACUNIT,slope,5);
     else P_LineAttack(shooter,angle,2048*FRACUNIT,slope,5);
 }
+static void flashlightWithoutCpuPixels() {
+    constexpr int gpuOnlyKey=-0x45000001, wallKey=-0x45000002;
+    Image gpuOnly,wall;
+    gpuOnly.width=wall.width=4;
+    gpuOnly.height=wall.height=4;
+    wall.pixels.resize(32,255);
+    for(size_t i=0;i<wall.pixels.size();i+=2)wall.pixels[i]=4;
+    images.emplace(gpuOnlyKey,std::move(gpuOnly));
+    images.emplace(wallKey,std::move(wall));
+    const auto panel=[](float y,unsigned mode) {
+        return std::vector<Vertex>{{-8,y,-8,0,0,1,mode},{8,y,-8,4,0,1,mode},{8,y,8,4,4,1,mode},
+                                   {-8,y,-8,0,0,1,mode},{8,y,8,4,4,1,mode},{-8,y,8,0,4,1,mode}};
+    };
+    batches[gpuOnlyKey]=panel(16,MODE_SPRITE);
+    batches[wallKey]=panel(32,0);
+    Uniforms camera={};
+    camera.forward[1]=1;
+    flashlightOn=true;
+    const float oldGain=settings.flashlightTintGain;
+    settings.flashlightTintGain=1;
+    exposureShutdown();
+    updateFlashlightTint(camera);
+    check(camera.flashlightTint[0]>0,"Flashlight skips a GPU-only fragment and still samples the wall behind it");
+    exposureShutdown();
+    flashlightOn=false;
+    settings.flashlightTintGain=oldGain;
+    batches.erase(gpuOnlyKey);batches.erase(wallKey);
+    images.erase(gpuOnlyKey);images.erase(wallKey);
+}
 static void goreIntegration() {
     auto *shooter=players[consoleplayer].mo;
     settings.accelerated=settings.blood=settings.goreLevel=settings.goreBodyDamage=1;
@@ -85,23 +117,56 @@ static void goreIntegration() {
     for(int f=0;f<blood.numframes;++f)patch(firstspritelump+blood.spriteframes[f].lump[0]);
     const auto &cacoSprites=sprites[SPR_HEAD];
     for(int f=0;f<cacoSprites.numframes;++f)patch(firstspritelump+cacoSprites.spriteframes[f].lump[0]);
+    if(goreTextured) {
+        flashlightWithoutCpuPixels();
+        using namespace hellforge::giblets;
+        check(testPrepareGiblets(),"Embedded atlas decodes to distinct Doom II red and blue bands");
+        TraceHit hit;
+        check(testGibletTrace({12,173,32},{12,178,32},2,hit)&&hit.surface.type==Surface::Wall&&
+              std::abs(hit.contact.y-176)<.01f&&std::abs(hit.center.y-174)<.01f&&hit.canMark,
+              "Wall sweep returns the radius-offset center, contact and decal handle");
+        check(!testGibletTrace({-4,64,32},{4,64,32},2,hit),"Equal-height sector portal remains open");
+        auto *raised=R_PointInSubsector(fx(4),fx(64))->sector;
+        const auto oldFloor=raised->floorheight;
+        raised->floorheight=fx(16);
+        check(testGibletTrace({-4,64,8},{4,64,8},2,hit)&&hit.surface.type==Surface::Wall&&
+              hit.surface.section==2,"Radius sweep hits the face of a raised step");
+        check(!testGibletTrace({-4,64,32},{4,64,32},2,hit),"The same step stays open above its edge");
+        raised->floorheight=oldFloor;
+        check(testGibletTrace({12,64,4},{12,64,-4},2,hit)&&hit.surface.type==Surface::Floor&&
+              std::abs(hit.fraction-.25f)<.01f&&hit.center.z==2&&hit.contact.z==0,"Radius-aware floor contact");
+        check(testGibletTrace({12,64,252},{12,64,260},2,hit)&&hit.surface.type==Surface::Ceiling&&
+              hit.center.z==254&&hit.contact.z==256,"Radius-aware ceiling contact");
+        auto &sector=sectors[hit.surface.sector];
+        const auto oldSky=sector.ceilingpic;
+        sector.ceilingpic=skyflatnum;
+        check(testGibletTrace({12,64,252},{12,64,260},2,hit)&&hit.surface.type==Surface::Sky&&!hit.canMark,
+              "Sky terminates without leaving a mark");
+        sector.ceilingpic=oldSky;
+        sectorMist.resize(numsectors);
+        sectorMist[&sector-sectors].liquid=true;
+        check(testGibletTrace({12,64,4},{12,64,-4},2,hit)&&hit.surface.type==Surface::Liquid&&!hit.canMark,
+              "Liquid terminates without leaving a conventional mark");
+        sectorMist[&sector-sectors].liquid=false;
+    }
     auto shootCaco=[&](mobj_t *caco,float z,int pellets) {
         P_WeakpointBeginShot(shooter,wp_supershotgun);
         for(int i=0;i<pellets;++i)shoot(shooter,0,units(caco->y),z);
         const auto discharge=P_WeakpointDischarge(shooter);
         P_WeakpointEndShot();R_GoreShotEnd(shooter,discharge);
     };
-    auto blueVertices=[](float x,float y,float z,bool side) {
+    auto blueVertices=[](float x,float y,float z,bool side,bool grounded=false) {
         Uniforms camera={};
         camera.eye[0]=x;camera.eye[1]=y;camera.eye[2]=z;
         camera.forward[side?0:1]=1;camera.right[side?1:0]=1;camera.up[2]=1;
         camera.projection[0]=camera.projection[1]=1;
+        if(goreTextured)return testGibletQuads(camera,true,grounded);
         particleVertices.clear();buildSpray(camera);
         return int(std::count_if(particleVertices.begin(),particleVertices.end(),
                                  [](const Vertex &v){return v.blue>v.red&&v.blue>v.green;}));
     };
     for(bool wall:{false,true}) {
-        const float y=wall?143.f:64.f;
+        const float y=wall?143.f:goreTextured?-64.f:64.f;
         check(P_TeleportMove(shooter,0,fx(y-96))!=0,"Gore shooter placement");
         shooter->angle=ANG90;shooter->player->viewz=shooter->z+41*FRACUNIT;
         auto *caco=P_SpawnMobj(0,fx(y),ONFLOORZ,MT_HEAD);
@@ -113,8 +178,13 @@ static void goreIntegration() {
         shootCaco(caco,z,4);
         check(caco->health==200,"Observed four real 5-HP Cacodemon pellet hits");
         check(blueVertices(0,y-96,z,false)>0,"Living Cacodemon produces blue ballistic geometry");
-        leveltime+=5;
+        if(goreTextured)check(activeGiblets()==6,"Exactly one six-piece textured burst");
+        for(int i=0;i<5;++i){++leveltime;if(goreTextured)tickGiblets(0,0);}
         check(blueVertices(-75,y,z,true)>0,"The blue lobes remain visible in flight from the side");
+        if(goreTextured) {
+            for(int i=0;i<34;++i){++leveltime;tickGiblets(0,0);}
+            if(!wall)check(blueVertices(-75,y,z,true,true)>0,"Landed B poses stay flat on the floor");
+        }
         check(wall?(combatFeedbackStats.wallSplats>0&&combatFeedbackStats.wallSplats<=3):
                    combatFeedbackStats.wallSplats==0,"Cacodemon wall marks require actual reachable wall geometry");
         sprayShutdown();
@@ -127,7 +197,82 @@ static void goreIntegration() {
         check(caco->health<=0&&blueVertices(0,y-96,z,false)>0,"The fatal accent follows a living ejection");
         P_RemoveMobj(caco);
     }
-    std::printf("PASS Gore M2.1 real pellet, blue geometry and wall-collision checks (%d)\n",checks);
+    if(goreTextured) {
+        using namespace hellforge::giblets;
+        const struct {
+            mobjtype_t type;
+            GoreOutcome outcome;
+            const char *material,*tint;
+            bool fatal,procedural;
+        } routes[]={
+            {MT_POSSESSED,GoreOutcome::HeadBurst,"flesh","red",true,true},
+            {MT_SHOTGUY,GoreOutcome::HeadBurst,"flesh","red",true,true},
+            {MT_SHOTGUY,GoreOutcome::HumanFlesh,"flesh","red",true,false},
+            {MT_TROOP,GoreOutcome::ChestCavity,"flesh","red",false,false},
+            {MT_UNDEAD,GoreOutcome::RevenantBone,"bone","pale_bone",true,false},
+            {MT_FATSO,GoreOutcome::BellyCavity,"heavy_tissue","red",false,false},
+            {MT_FATSO,GoreOutcome::MancubusHeavy,"viscera","red",true,false},
+            {MT_SERGEANT,GoreOutcome::PinkyViscera,"viscera","red",false,false},
+            {MT_HEAD,GoreOutcome::CacoViscera,"viscera","blue",false,false},
+        };
+        uint64_t previous=0;
+        for(const auto &route:routes) {
+            sprayShutdown();
+            mobj_t actor{};
+            actor.type=route.type;actor.health=route.fatal?0:1;
+            const auto result=goreBurst(actor,0,-128,48,0,1,route.outcome,90);
+            check(result.eventId>previous&&result.admitted>0&&std::strcmp(result.material,route.material)==0&&
+                  std::strcmp(result.tint,route.tint)==0&&
+                  std::strcmp(result.path,route.procedural?"m1_procedural":"textured")==0&&
+                  activeGiblets()==(route.procedural?0:result.admitted),
+                  "Each roster event has a separate ID, expected material, and one fragment route");
+            previous=result.eventId;
+        }
+        sprayShutdown();
+        hellforge::giblets::Burst burst;
+        burst.origin={0,-128,48};burst.pieces=12;burst.kind=Kind::Bone;
+        burst.tint=Tint::PaleBone;burst.mapKillCount=199;burst.eligible=true;
+        const int originalKills=totalkills;
+        totalkills=200;
+        GoreBurstReport crowded;
+        check(!emitGiblets(burst,3,crowded)&&activeGiblets()==0,"Crowded maps reject textured bursts");
+        totalkills=199;
+        settings.goreWallBlood=0;
+        for(unsigned i=0;i<6;++i) {
+            burst.eventId=(uint64_t(1)<<63)+i;
+            burst.cosmeticSeed=i+1;
+            GoreBurstReport report;
+            check(emitGiblets(burst,-1,report)==(i<5?12:4),"Fragments stay active without Wall Blood and cap at 64");
+        }
+        settings.goreWallBlood=1;
+        totalkills=originalKills;
+        check(activeGiblets()==64,"All material kinds share the textured pool");
+        const auto start=SDL_GetTicksNS();
+        paused=true;tickGiblets(0,0);paused=false;
+        menuactive=true;tickGiblets(0,0);menuactive=false;
+        check(!testGibletTraceCount(),"Pause and menus do not advance textured physics");
+        ++leveltime;tickGiblets(0,0);
+        const auto traces=testGibletTraceCount();
+        tickGiblets(0,0);
+        check(traces==128&&testGibletTraceCount()==traces,"A full pool takes two substeps and only advances once per tic");
+        for(int i=0;i<34;++i){++leveltime;tickGiblets(0,0);}
+        std::printf("G1 stress: 64 initial pieces, 35 tics, %u traces, %.3f ms wall time\n",
+                    testGibletTraceCount(),double(SDL_GetTicksNS()-start)/1e6);
+        settings.goreFragments=0;
+        ++leveltime;tickGiblets(0,0);
+        check(activeGiblets()==0,"Disabling Fragments removes active textured pieces");
+        if(solidMode) {
+            const auto *world=SV_MapWorld();
+            check(world!=nullptr,"G1 uses the launcher solid-map mode");
+            check(const_cast<lab::MapWorld*>(world)->blast({12,176,32},8),"Fixture opens a real volume cut");
+            TraceHit hit;
+            check(testGibletTrace({12,173,32},{12,178,32},2,hit)&&hit.surface.type==Surface::Void&&!hit.canMark,
+                  "An edited volume cannot claim the original wall for a decal");
+            check(testGibletTrace({12,64,4},{12,64,-4},2,hit)&&hit.surface.type==Surface::Floor&&hit.canMark,
+                  "An unrelated floor still supplies its original decal handle");
+        }
+    }
+    std::printf("PASS Gore %s real pellet, blue geometry and wall-collision checks (%d)\n",goreTextured?"G1":"M2.1",checks);
 }
 static void run() {
     if(solidMode)p_player_surface_damage=p_monster_surface_damage=0;
@@ -459,7 +604,10 @@ extern "C" void I_TestFrame() {
 int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
-    goreMode=argc==5&&!std::strcmp(argv[4],"--gore-m21");
+    const bool goreSolid=argc==5&&!std::strcmp(argv[4],"--gore-g1-solid");
+    solidMode=solidMode||goreSolid;
+    goreTextured=goreSolid||(argc==5&&!std::strcmp(argv[4],"--gore-g1"));
+    goreMode=goreTextured||(argc==5&&!std::strcmp(argv[4],"--gore-m21"));
     visualSevere=argc==5&&!std::strcmp(argv[4],"--visual-severe");
     visualSawCut=argc==5&&!std::strcmp(argv[4],"--visual-saw-cut");
     const bool solidAcid=argc==5&&!std::strcmp(argv[4],"--acid-solid");

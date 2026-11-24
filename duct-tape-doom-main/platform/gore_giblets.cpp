@@ -17,7 +17,7 @@ float dot(Vec3 a, Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 float length(Vec3 a) { return std::sqrt(dot(a,a)); }
 Vec3 unit(Vec3 a, Vec3 fallback) {
     const float d = length(a);
-    return d > 0.0001f ? a*(1.0f/d) : fallback;
+    return std::isfinite(d) && d > 0.0001f ? a*(1.0f/d) : fallback;
 }
 bool finite(Vec3 a) {
     return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
@@ -67,6 +67,7 @@ int System::emit(const Burst &request) {
     if (!request.eligible || request.mapKillCount >= 200 || request.mapKillCount < 0 ||
         !finite(request.origin) || !finite(request.direction) ||
         !std::isfinite(request.intensity) || request.pieces == 0 ||
+        request.kind>Kind::Bone || request.tint>Tint::PaleBone ||
         seenEvent(request.eventId)) return 0;
 
     const Vec3 forward = unit(request.direction, {1,0,0});
@@ -87,6 +88,7 @@ int System::emit(const Burst &request) {
                             lift * between(rng,-0.18f,0.65f);
         const Vec3 direction = unit(forward+spread, forward);
         free->p = request.origin + direction * between(rng,0.0f,1.2f);
+        free->eventId = request.eventId;
         free->v = direction*speed + Vec3{0,0,between(rng,5.0f,70.0f)};
         free->size = between(rng,m.sizeLow,m.sizeHigh)*std::sqrt(intensity);
         free->radius = std::clamp(free->size*0.3f,0.5f,3.0f);
@@ -119,15 +121,18 @@ void System::step(float dt, const Host &host, int &impactBudget) {
         // Semi-implicit Euler: integrate gravity before tracing the displacement.
         p.v.z -= kGravity*dt;
         const Vec3 next = p.p + p.v*dt;
+        if (!finite(next)) { p.used = false; continue; }
         TraceHit hit{};
         ++stats_.traces;
         if (!host.trace(host.context,p.p,next,p.radius,hit)) {
             p.p = next; p.rotation += p.angularSpeed*dt; continue;
         }
-        if (!finite(hit.center) || !finite(hit.normal) ||
-            !std::isfinite(hit.fraction) || hit.fraction < 0 || hit.fraction > 1 ||
-            hit.surface == Surface::Sky || hit.surface == Surface::Void ||
-            hit.surface == Surface::Liquid) { p.used = false; continue; }
+        const auto surface=hit.surface.type;
+        const bool solid=surface==Surface::Wall?
+            hit.surface.line>=0&&hit.surface.side>=0&&hit.surface.side<=1&&hit.surface.section>=0&&hit.surface.section<=2:
+            (surface==Surface::Floor||surface==Surface::Ceiling)&&hit.surface.sector>=0;
+        if (!solid || !finite(hit.center) || !finite(hit.contact) || !finite(hit.normal) || length(hit.normal)<0.01f ||
+            !std::isfinite(hit.fraction) || hit.fraction < 0 || hit.fraction > 1) { p.used = false; continue; }
 
         const Vec3 normal = unit(hit.normal, {0,0,1});
         const float incoming = length(p.v);
@@ -136,10 +141,12 @@ void System::step(float dt, const Host &host, int &impactBudget) {
         const Material m = material(p.kind);
         // Only apply impact callbacks to geometrically valid, explicitly markable
         // surfaces. Host applies F4 wall-blood and shared decal budgets again.
-        if (hit.canMark && incoming >= 48.0f && p.contacts < 2) {
+        if (hit.canMark && p.kind!=Kind::Bone && inward < 0 && incoming >= 48.0f && p.contacts < 2) {
             if (impactBudget > 0 && host.impact) {
                 Impact e;
-                e.position = hit.center;
+                e.eventId = p.eventId;
+                e.center = hit.center;
+                e.contact = hit.contact;
                 e.normal = normal;
                 e.kind = p.kind;
                 e.tint = p.tint;
@@ -147,7 +154,7 @@ void System::step(float dt, const Host &host, int &impactBudget) {
                 e.strength = std::clamp(incoming/300.0f,0.0f,1.0f);
                 e.markSize = std::clamp(p.size*markScale(p.kind),2.0f,32.0f);
                 e.variant = p.variant;
-                e.cling = (hit.surface == Surface::Wall && p.kind == Kind::Viscera);
+                e.cling = (surface == Surface::Wall && p.kind == Kind::Viscera);
                 host.impact(host.context,e);
                 --impactBudget; ++stats_.emittedImpacts;
             } else ++stats_.suppressedImpacts;
@@ -155,12 +162,11 @@ void System::step(float dt, const Host &host, int &impactBudget) {
         ++p.contacts;
         // Viscera impacts a wall as a single sticky mark; the host owns the
         // mark's lasting appearance. No sprite decal is directly generated here.
-        if (p.kind == Kind::Viscera && hit.surface == Surface::Wall) {
+        if (p.kind == Kind::Viscera && surface == Surface::Wall) {
             p.used = false; continue;
         }
-        if (p.contacts >= 4) {
-            if (hit.surface == Surface::Floor) { p.resting = true; p.v = {}; }
-            else p.used = false;
+        if (p.contacts >= 4 && surface != Surface::Floor) {
+            p.used = false;
             continue;
         }
         if (inward < 0) {
@@ -168,9 +174,9 @@ void System::step(float dt, const Host &host, int &impactBudget) {
             const Vec3 tvel = (p.v-normal*inward)*m.tangentialDrag;
             p.v = nvel + tvel;
         } else p.v = p.v*m.tangentialDrag;
-        if ((hit.surface == Surface::Floor || hit.surface == Surface::Ceiling) &&
-            length(p.v) <= m.minRestSpeed) {
+        if (surface == Surface::Floor && (p.contacts >= 4 || length(p.v) <= m.minRestSpeed)) {
             p.resting = true; p.v = {};
+            p.contact = hit.contact; p.normal = normal; p.surface = hit.surface;
         } else p.rotation += p.angularSpeed*dt;
     }
 }
@@ -195,7 +201,8 @@ void System::forEachVisual(VisualFn draw, void *context) const {
     if (!draw) return;
     for (const Piece &p : pieces_) if (p.used) {
         draw(context, {p.p,p.kind,p.tint,p.size,p.rotation,
-                       std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting});
+                       std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting,
+                       p.contact,p.normal,p.surface});
     }
 }
 
@@ -211,6 +218,11 @@ std::size_t System::activeCount() const {
     std::size_t total = 0;
     for (const Piece &p : pieces_) if (p.used) ++total;
     return total;
+}
+
+bool System::hasActiveEvent(std::uint64_t id) const {
+    for (const Piece &p : pieces_) if (p.used && p.eventId == id) return true;
+    return false;
 }
 
 } // namespace hellforge::giblets

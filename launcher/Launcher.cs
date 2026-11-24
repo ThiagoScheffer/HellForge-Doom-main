@@ -47,6 +47,13 @@ internal static class Data {
         }
         b.Append('\\',slashes*2);b.Append('"');return b.ToString();
     }
+    internal static string StartupEngineArguments(IEnumerable<string> arguments) {
+#if HELLFORGE_EXPERIMENTAL
+        arguments=arguments.Where(a=>!a.Equals("--classic-geometry",StringComparison.OrdinalIgnoreCase)
+            &&!a.Equals("--ambush-sight-reuse",StringComparison.OrdinalIgnoreCase));
+#endif
+        return String.Join(" ",arguments.Select(a=>a.Length==0||a.Any(char.IsWhiteSpace)||a.Contains("\"")?Quote(a):a));
+    }
     internal static bool Iwad(string path) {
         try {
             using(var f=File.OpenRead(path)) using(var r=new BinaryReader(f)) {
@@ -393,6 +400,76 @@ internal sealed class Surface : Panel {
     }
 }
 
+internal sealed class ThemedTabs : TabControl {
+    internal ThemedTabs() {
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
+        BackColor=Palette.Background;
+        ForeColor=Palette.Text;
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        e.Graphics.Clear(Palette.Background);
+        var page=DisplayRectangle;
+        page.Inflate(1,1);
+        using(var border=new Pen(Palette.Border)) {
+            e.Graphics.DrawRectangle(border,page);
+            for(int i=0;i<TabCount;i++) {
+                bool selected=i==SelectedIndex;
+                var bounds=GetTabRect(i);
+                using(var fill=new SolidBrush(selected?Palette.AccentDark:Palette.Card))
+                    e.Graphics.FillRectangle(fill,bounds);
+                e.Graphics.DrawRectangle(border,bounds.X,bounds.Y,bounds.Width-1,bounds.Height-1);
+                TextRenderer.DrawText(e.Graphics,TabPages[i].Text,Font,bounds,selected?Palette.Accent:Palette.Subtle,
+                    TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix);
+                if(selected&&Focused&&ShowFocusCues) {
+                    bounds.Inflate(-3,-3);
+                    ControlPaint.DrawFocusRectangle(e.Graphics,bounds,Palette.Accent,Palette.AccentDark);
+                }
+            }
+        }
+    }
+    protected override void OnSelectedIndexChanged(EventArgs e) {base.OnSelectedIndexChanged(e);Invalidate();}
+    protected override void OnGotFocus(EventArgs e) {base.OnGotFocus(e);Invalidate();}
+    protected override void OnLostFocus(EventArgs e) {base.OnLostFocus(e);Invalidate();}
+}
+
+internal sealed class IwadPicker : ComboBox {
+    internal IwadPicker() {
+        DropDownStyle=ComboBoxStyle.DropDownList;
+        DrawMode=DrawMode.OwnerDrawFixed;
+        FlatStyle=FlatStyle.Flat;
+        BackColor=Palette.Input;
+        ForeColor=Palette.Text;
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
+    }
+    protected override void OnDrawItem(DrawItemEventArgs e) {
+        if((e.State&DrawItemState.ComboBoxEdit)!=0)return;
+        bool selected=(e.State&DrawItemState.Selected)!=0;
+        using(var fill=new SolidBrush(selected?Palette.Selection:Palette.Input))e.Graphics.FillRectangle(fill,e.Bounds);
+        DrawPath(e.Graphics,e.Bounds,e.Index);
+        e.DrawFocusRectangle();
+    }
+    void DrawPath(Graphics graphics,Rectangle bounds,int index) {
+        if(index<0||index>=Items.Count)return;
+        TextRenderer.DrawText(graphics,(string)Items[index],Font,bounds,Enabled?Palette.Text:Palette.Subtle,
+            TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.PathEllipsis|TextFormatFlags.NoPrefix);
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        var g=e.Graphics;
+        g.Clear(BackColor);
+        int arrowWidth=SystemInformation.VerticalScrollBarWidth;
+        var textBounds=new Rectangle(2,0,Math.Max(0,Width-arrowWidth-4),Height);
+        DrawPath(g,textBounds,SelectedIndex);
+        using(var fill=new SolidBrush(Palette.AccentDark))g.FillRectangle(fill,Width-arrowWidth,0,arrowWidth,Height);
+        int x=Width-arrowWidth/2,y=Height/2;
+        using(var arrow=new Pen(Enabled?Palette.Accent:Palette.Subtle))
+            g.DrawLines(arrow,new[]{new Point(x-4,y-2),new Point(x,y+2),new Point(x+4,y-2)});
+        using(var border=new Pen(Focused?Palette.Accent:Palette.Border))g.DrawRectangle(border,0,0,Width-1,Height-1);
+    }
+    protected override void OnSelectedIndexChanged(EventArgs e) {base.OnSelectedIndexChanged(e);Invalidate();}
+    protected override void OnGotFocus(EventArgs e) {base.OnGotFocus(e);Invalidate();}
+    protected override void OnLostFocus(EventArgs e) {base.OnLostFocus(e);Invalidate();}
+}
+
 internal sealed class ModernButton : Button {
     private bool hovered;
     private Control backgroundParent;
@@ -571,10 +648,12 @@ internal sealed class ParallaxHero : Control {
 }
 
 internal sealed class Launcher : Form {
-    private readonly ComboBox games=new ComboBox();
+    private readonly IwadPicker games=new IwadPicker();
     private readonly ListBox mods=new ListBox();
     private readonly ListBox maps=new ListBox();
-    private readonly TabControl loadoutTabs=new TabControl();
+    private readonly ThemedTabs loadoutTabs=new ThemedTabs();
+    private readonly TextBox launchArguments=new TextBox();
+    private readonly Label launchArgumentsLabel=new Label();
     private readonly Label emptyMaps=new Label();
     private readonly Label mapHint=new Label();
     private readonly Label status=new Label();
@@ -595,10 +674,12 @@ internal sealed class Launcher : Form {
     private bool scanning,launching,gameRunning;
     private CancellationTokenSource scanCancellation;
 
-    [STAThread] static void Main() {
+    [STAThread] static void Main(string[] args) {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
         Application.ThreadException+=(s,e)=>MessageBox.Show(e.Exception.Message,Data.ProductName,MessageBoxButtons.OK,MessageBoxIcon.Error);
-        Application.Run(new Launcher());
+        var launcher=new Launcher();
+        launcher.launchArguments.Text=Data.StartupEngineArguments(args);
+        Application.Run(launcher);
     }
     static Label TextLabel(string text,Font font,Color color) {
         return new Label {Text=text,Font=font,ForeColor=color,BackColor=Color.Transparent,AutoSize=false};
@@ -610,7 +691,7 @@ internal sealed class Launcher : Form {
 
     public Launcher() {
         Text=Data.ProductName+"  •  "+Data.BuildVersion.Split('|')[0].Trim();
-        ClientSize=new Size(1150,830);MinimumSize=new Size(940,770);
+        ClientSize=new Size(1150,844);MinimumSize=new Size(940,784);
         using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("hellforge.ico"))if(stream!=null)using(var icon=new Icon(stream))Icon=(Icon)icon.Clone();
         StartPosition=FormStartPosition.CenterScreen;AutoScaleMode=AutoScaleMode.Dpi;
         Font=new Font("Segoe UI",9.5f);BackColor=Palette.Background;ForeColor=Palette.Text;
@@ -619,7 +700,7 @@ internal sealed class Launcher : Form {
         var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(18),BackColor=Palette.Background,ColumnCount=1,RowCount=3};
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,252));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute,140));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,154));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));Controls.Add(root);
         hero=new ParallaxHero { Dock=DockStyle.Fill,Margin=new Padding(0,0,0,14) };root.Controls.Add(hero,0,0);
         var two=new TableLayoutPanel {Dock=DockStyle.Fill,Margin=Padding.Empty,ColumnCount=2,RowCount=1};
@@ -660,9 +741,12 @@ internal sealed class Launcher : Form {
         libraryCard.Controls.Add(TextLabel("01  /  GAME LIBRARY",sectionFont,Palette.Text));
         libraryCard.Controls.Add(TextLabel("Choose the IWAD used as your base game.",Font,Palette.Subtle));
         libraryCard.Controls.Add(TextLabel("BASE GAME  /  IWAD",tagFont,Palette.Accent));
-        games.DropDownStyle=ComboBoxStyle.DropDownList;games.FlatStyle=FlatStyle.Flat;
-        games.Font=new Font("Segoe UI",10f);games.BackColor=Palette.Input;games.ForeColor=Palette.Text;
-        games.DropDownWidth=900;games.SelectedIndexChanged+=(s,e)=>UpdateInfo();libraryCard.Controls.Add(games);
+        games.Font=new Font("Segoe UI",10f);
+        games.SelectedIndexChanged+=(s,e)=>{
+            tips.SetToolTip(games,games.SelectedItem as string);
+            UpdateInfo();
+        };
+        libraryCard.Controls.Add(games);
         browseGame=CreateButton("BROWSE FOR IWAD",BrowseGame);libraryCard.Controls.Add(browseGame);
         scan=CreateButton("SCAN LIBRARY",()=>Scan(null));libraryCard.Controls.Add(scan);
         scanFolder=CreateButton("SCAN FOLDER",()=>{using(var d=new FolderBrowserDialog()){d.Description="Scan this folder and its subfolders for Doom IWADs";if(d.ShowDialog(this)==DialogResult.OK)Scan(new[]{d.SelectedPath});}});libraryCard.Controls.Add(scanFolder);
@@ -678,6 +762,7 @@ internal sealed class Launcher : Form {
         var labels=libraryCard.Controls.OfType<Label>().Where(c=>c!=libraryInfo).ToArray();
         if(labels.Length>=3){labels[0].SetBounds(22,20,inner,28);labels[1].SetBounds(22,54,inner,20);labels[2].SetBounds(22,100,inner,20);}
         games.SetBounds(22,126,inner,34);
+        games.DropDownWidth=games.Width;
         browseGame.SetBounds(22,172,inner,38);
         int gap=8,half=(inner-gap)/2;
         scan.SetBounds(22,220,half,36);scanFolder.SetBounds(22+half+gap,220,inner-half-gap,36);
@@ -793,6 +878,13 @@ internal sealed class Launcher : Form {
         resetAll=CreateButton("CLEAR ALL / FRESH START",ResetAll,quiet:true);
         foreach(var button in new[]{openLog,openConfig,gameSettings,resetAll})footer.Controls.Add(button);
         tips.SetToolTip(resetAll,"Back up and reset settings and add-ons. Save games and installed IWADs are kept.");
+        launchArgumentsLabel.Text="ENGINE ARGUMENTS";launchArgumentsLabel.Font=tagFont;
+        launchArgumentsLabel.ForeColor=Palette.Accent;footer.Controls.Add(launchArgumentsLabel);
+        launchArguments.AccessibleName="Engine arguments";
+        launchArguments.BackColor=Palette.Input;launchArguments.ForeColor=Palette.Text;
+        launchArguments.BorderStyle=BorderStyle.FixedSingle;
+        tips.SetToolTip(launchArguments,"Optional arguments for this launcher session, such as -goredebug. Quote values with spaces. Engine output appears in Open Last Log.");
+        footer.Controls.Add(launchArguments);
         AcceptButton=play;
     }
     void LayoutFooter() {
@@ -804,6 +896,8 @@ internal sealed class Launcher : Form {
         export.SetBounds(18,78,138,30);import.SetBounds(166,78,138,30);
         lowFx.SetBounds(318,80,Math.Max(150,w-720),25);
         lan.SetBounds(w-380,54,142,50);play.SetBounds(w-226,54,208,50);
+        launchArgumentsLabel.SetBounds(18,113,146,23);
+        launchArguments.SetBounds(166,111,w-184,25);
     }
     void UpdateInfo() {
         if(libraryInfo==null || IsDisposed)return;
@@ -976,7 +1070,7 @@ internal sealed class Launcher : Form {
     }
     void SetLaunching(bool value) {
         launching=value;
-        foreach(Control control in new Control[]{games,mods,maps,addMaps,removeMap,baseMaps,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll,lowFx,lan,play})
+        foreach(Control control in new Control[]{games,mods,maps,launchArguments,addMaps,removeMap,baseMaps,browseGame,scan,scanFolder,screenshots,addMods,removeMod,upMod,downMod,export,import,clearCache,openLog,openConfig,gameSettings,resetAll,lowFx,lan,play})
             control.Enabled=!value;
         if(!value){scan.Enabled=!scanning;scanFolder.Enabled=!scanning;removeMod.Enabled=upMod.Enabled=downMod.Enabled=mods.SelectedIndex>=0;UpdateInfo();}
     }
@@ -1008,6 +1102,8 @@ internal sealed class Launcher : Form {
             Directory.CreateDirectory(Data.Profile);
             string graphics=GraphicsPerformance.PrepareConfig(Path.Combine(Data.Profile,"graphics.cfg"),Data.BundledResource("graphics.cfg"),performance);
             args+=" -graphics "+Data.Quote(graphics);
+            string extra=launchArguments.Text.Trim();
+            if(extra.Length>0)args+=" "+extra;
             Save();status.Text="Launching game…";
             var start=new ProcessStartInfo(engine,args){WorkingDirectory=Data.Home,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
             start.EnvironmentVariables["HELLFORGE_SCREENSHOTS"]=Data.Screenshots;
@@ -1099,7 +1195,7 @@ internal sealed class LauncherSettingsDialog : Form {
         var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=3,ColumnCount=1,Padding=new Padding(12)};
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,65));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,48));Controls.Add(layout);
         layout.Controls.Add(new Label{Dock=DockStyle.Fill,Text="Edit values, then Apply. Blank removes an override; legacy keys may still apply. Choices show numeric codes.\nChanges apply on the next game launch; engine validation and compatibility restrictions still apply. A settings backup is created before writing.",ForeColor=Palette.Subtle},0,0);
-        var tabs=new TabControl{Dock=DockStyle.Fill,Multiline=true};layout.Controls.Add(tabs,0,1);
+        var tabs=new ThemedTabs{Dock=DockStyle.Fill,Multiline=true};layout.Controls.Add(tabs,0,1);
         foreach(string line in original.Split('\n')) {
             string clean=line.TrimStart('\uFEFF').Split('#',';')[0].Trim();
             string[] pair=clean.Split(new[]{' ','\t'},StringSplitOptions.RemoveEmptyEntries);
@@ -1134,14 +1230,14 @@ internal sealed class LauncherSettingsDialog : Form {
         }
         foreach(string name in new[]{"doom.cfg","heretic.cfg"}) {
             string file=Path.Combine(Data.Profile,name);if(!File.Exists(file))continue;
-            var page=new TabPage(name);tabs.TabPages.Add(page);
-            var open=new Button{Text="Open "+name+" in text editor (advanced controls / bindings)",Dock=DockStyle.Top,Height=42};
+            var page=new TabPage(name){BackColor=Palette.Card};tabs.TabPages.Add(page);
+            var open=new ModernButton("Open "+name+" in text editor (advanced controls / bindings)"){Dock=DockStyle.Top,Height=42};
             open.Click+=(s,e)=>{try{Process.Start(new ProcessStartInfo("notepad.exe",Data.Quote(file)){UseShellExecute=true});}catch(Exception ex){MessageBox.Show(this,ex.Message);}};
             page.Controls.Add(new Label{Text="This native configuration uses its own text format. Save in the editor before starting the game.",Dock=DockStyle.Top,Height=48});page.Controls.Add(open);
         }
         var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft};layout.Controls.Add(buttons,0,2);
-        var cancel=new Button{Text="CANCEL",DialogResult=DialogResult.Cancel,Width=110,Height=32};buttons.Controls.Add(cancel);CancelButton=cancel;
-        var apply=new Button{Text="APPLY SETTINGS",Width=150,Height=32};buttons.Controls.Add(apply);apply.Click+=(s,e)=>Apply();
+        var cancel=new ModernButton("CANCEL"){Quiet=true,DialogResult=DialogResult.Cancel,Width=110,Height=32};buttons.Controls.Add(cancel);CancelButton=cancel;
+        var apply=new ModernButton("APPLY SETTINGS"){Width=150,Height=32};buttons.Controls.Add(apply);apply.Click+=(s,e)=>Apply();
     }
     void Apply() {
         try {

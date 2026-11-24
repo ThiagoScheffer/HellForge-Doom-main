@@ -33,6 +33,14 @@ windows do not animate or repaint. It is cosmetic and creates no game actors.
 These controls are disabled during launch/game execution. Missing log/config
 shortcuts explain that the file has not yet been created.
 
+## Engine arguments
+
+Type a flag such as `-goredebug` into **Engine Arguments** before choosing
+**Play Game** or **LAN / Co-op**. To prefill the field, start the launcher from
+PowerShell with `./DOOM-Hellforge.exe -goredebug`. Quote any argument value
+that contains spaces. The field lasts for the current launcher session, and
+**Open Last Log** opens the engine output from the most recent run.
+
 ## Settings editor and limits
 
 The checked-in catalogue exposes **355 F4 and balance controls**, grouped into

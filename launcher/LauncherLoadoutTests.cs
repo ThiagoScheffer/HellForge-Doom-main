@@ -26,6 +26,15 @@ internal static class LauncherLoadoutTests {
             new XElement("mod",addon),new XElement("mod",map1),new XElement("mod",map2))).Save(Path.Combine(Data.Home,"launcher.xml"));
         using(var f=new Launcher()) {
             var mods=Field<ListBox>(f,"mods");var maps=Field<ListBox>(f,"maps");var tabs=Field<TabControl>(f,"loadoutTabs");
+            var games=Field<ComboBox>(f,"games");var launchArguments=Field<TextBox>(f,"launchArguments");
+            Check(Data.StartupEngineArguments(new[]{"-goredebug","-record","my demo"})=="-goredebug -record \"my demo\"",
+                "startup arguments preserve flags and quoted values");
+            Check(launchArguments.Text==""&&launchArguments.Parent.ClientRectangle.Contains(launchArguments.Bounds),
+                "optional engine arguments fit the launcher footer");
+            Check(games.DropDownWidth==games.Width,"IWAD list is the same width as its field");
+            f.Size=f.MinimumSize;f.PerformLayout();
+            Check(games.DropDownWidth==games.Width&&launchArguments.Parent.ClientRectangle.Contains(launchArguments.Bounds),
+                "IWAD list and engine arguments still fit at minimum size");
             Check(tabs.TabPages.Count==2&&tabs.TabPages[0].Text=="ADD-ON LOADOUT"&&tabs.TabPages[1].Text=="MAP WADS","separate loadout and map tabs");
             Check(mods.Items.Count==1&&(string)mods.Items[0]==addon&&maps.Items.Count==2,"legacy mixed loadout migrates to independent lists");
             maps.SelectedItem=map1;

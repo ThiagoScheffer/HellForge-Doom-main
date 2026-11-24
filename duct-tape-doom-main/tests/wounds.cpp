@@ -38,7 +38,9 @@ unsigned levelSerial=1;
 static std::array<Image,testSpriteCount> spriteImages;
 static unsigned bodyQuadCalls=0;
 static std::vector<GoreOutcome> goreBursts;
-void goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome) {goreBursts.push_back(outcome);}
+GoreBurstReport goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome,uint64_t) {
+    goreBursts.push_back(outcome);return {};
+}
 const std::vector<byte> &bloodPalette() {
     static const std::vector<byte> shades={16,32,48,64,80,96,112,128,144};
     return shades;

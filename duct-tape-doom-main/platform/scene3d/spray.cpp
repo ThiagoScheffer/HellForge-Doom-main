@@ -30,10 +30,11 @@ constexpr size_t maxDrops=768;
 struct Slide { float x,y,speed,dx,dy,since;bool slammed,seen; };
 static std::unordered_map<const mobj_t*,Slide> slides;
 static unsigned sprayLevelSerial;
+static unsigned goreEventOrdinal;
 
 static void checkSprayLevel() {
     if(sprayLevelSerial==r_levelserial)return;
-    drops.clear();slides.clear();sprayLevelSerial=r_levelserial;
+    drops.clear();slides.clear();clearGiblets();goreEventOrdinal=0;sprayLevelSerial=r_levelserial;
 }
 static const sector_t *sectorAt(float x,float y) {return R_PointInSubsector((fixed_t)(x*FRACUNIT),(fixed_t)(y*FRACUNIT))->sector;}
 static bool bleeds(const mobj_t &thing) {
@@ -182,14 +183,24 @@ static const GoreStyle &goreStyle(int type) {
     default:return humanFlesh;
     }
 }
-void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome) {
+GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge) {
+    using namespace hellforge::giblets;
+    GoreBurstReport report;
     if(!settings.accelerated||settings.goreLevel!=1||totalkills>=200||!bloodOn()||
-       (!settings.goreWallBlood&&!settings.goreFragments))return;
+       (!settings.goreWallBlood&&!settings.goreFragments))return report;
     checkSprayLevel();
     BloodSourceScope tint(&target);
     const auto &style=goreStyle(target.type);
     const bool fatal=target.health<=0,bone=style.visual==DropVisual::Bone;
     const bool m1head=goreHuman(target.type)&&outcome==GoreOutcome::HeadBurst;
+    const auto kind=bone?Kind::Bone:target.type==MT_FATSO?(fatal?Kind::Viscera:Kind::HeavyTissue):
+        target.type==MT_SERGEANT||target.type==MT_HEAD?Kind::Viscera:Kind::Flesh;
+    const int species=monsterBloodTint(&target);
+    const auto materialTint=bone?Tint::PaleBone:species==1?Tint::Blue:species==2?Tint::Green:Tint::Red;
+    static constexpr const char *names[]={"flesh","heavy_tissue","viscera","bone"};
+    static constexpr const char *tints[]={"red","blue","green","pale_bone"};
+    report.eventId=(uint64_t(r_levelserial)<<32)|++goreEventOrdinal;
+    report.material=names[unsigned(kind)];report.tint=tints[unsigned(materialTint)];
     const float heading=std::atan2(dy,dx);
     int wallBudget=settings.goreWallBlood?3:0;
     if(settings.goreWallBlood&&!bone)for(int n=0;n<(m1head?4:fatal?3:2);++n) {
@@ -197,11 +208,24 @@ void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,Go
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
             randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget,nullptr,DropVisual::GoreBlood);
     }
-    if(!settings.goreFragments)return;
+    if(!settings.goreFragments){report.path="fragments_off";return report;}
     const float now=gameSeconds();
     int active=0;
     for(const auto &drop:drops)if(drop.visual>=DropVisual::Flesh&&drop.end>now)++active;
-    const int count=std::min(m1head?6:fatal?style.fatal:style.living,std::max(0,64-active));
+    report.requested=m1head?6:fatal?style.fatal:style.living;
+    const int count=std::min(report.requested,std::max(0,int(System::MaxPieces)-active-activeGiblets()));
+    if(!count){report.path="piece_budget";return report;}
+    if(!m1head) {
+        hellforge::giblets::Burst burst;
+        burst.origin={x,y,z};burst.direction={dx,dy,0};
+        burst.kind=kind;burst.tint=materialTint;
+        burst.intensity=target.type==MT_HEAD?(fatal?1.75f:1.48f):fatal?1.14f:1.f;
+        burst.pieces=uint8_t(count);burst.mapKillCount=totalkills;burst.eligible=true;
+        burst.eventId=report.eventId;
+        burst.cosmeticSeed=hash32(unsigned(discharge)^unsigned(discharge>>32)^goreEventOrdinal^hash32(r_levelserial));
+        report.admitted=emitGiblets(burst,settings.goreWallBlood?wallBudget:-1,report);
+        if(report.admitted)return report;
+    } else report.path="m1_procedural";
     const int cores=style.cores+(fatal&&target.type==MT_HEAD?1:0);
     for(int n=0;n<count;++n) {
         if(m1head) {
@@ -223,6 +247,8 @@ void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,Go
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,rise,size,mark,BLOOD_SPLAT,
                   &wallBudget,nullptr,visual,style.gravity);
     }
+    report.admitted=count;
+    return report;
 }
 
 void combatHeadBlood(const wp_damage_event_t &event) {
@@ -441,8 +467,15 @@ static void drip(const mobj_t &thing) {
 }
 void watchSpray() {
     const bool goreOnly=settings.accelerated&&settings.goreLevel&&settings.blood&&totalkills<200;
-    if((!sprayOn()&&!goreOnly)||levelSerial!=r_levelserial) {drops.clear();slides.clear();return;}
+    if((!sprayOn()&&!goreOnly)||levelSerial!=r_levelserial) {drops.clear();slides.clear();clearGiblets();return;}
     checkSprayLevel();
+    if(activeGiblets()) {
+        const float now=gameSeconds();
+        const int procedural=int(std::count_if(drops.begin(),drops.end(),[&](const Drop &d){
+            return d.visual>=DropVisual::Flesh&&d.end>now;
+        }));
+        tickGiblets(drops.size(),procedural);
+    }
     if(!sprayOn()){slides.clear();return;}
     for(auto &entry:slides)entry.second.seen=false;
     float now=gameSeconds();
@@ -481,6 +514,7 @@ void watchSpray() {
 }
 void buildSpray(const Uniforms &camera) {
     checkSprayLevel();
+    drawGiblets(camera);
     float now=gameSeconds();
     const bool showDecor=horrorDecorEnabled()&&settings.blood&&settings.bloodSpray;
     const bool showGore=settings.accelerated&&settings.goreLevel==1&&settings.blood&&totalkills<200&&
@@ -531,5 +565,5 @@ void buildSpray(const Uniforms &camera) {
         } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
     }
 }
-void sprayShutdown() {drops.clear();slides.clear();}
+void sprayShutdown() {drops.clear();slides.clear();clearGiblets();}
 } // namespace doom3d

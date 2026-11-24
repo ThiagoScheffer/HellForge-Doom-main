@@ -3,6 +3,7 @@
 #ifndef DOOM_SCENE3D_INTERNAL_H
 #define DOOM_SCENE3D_INTERNAL_H
 #include "../shadow_lights.h"
+#include "../gore_giblets.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -519,7 +520,8 @@ void corpseDecayImageReset();
 extern int bloodSourceTint;
 struct BloodSourceScope {
     int previous;
-    explicit BloodSourceScope(const mobj_t *thing):previous(bloodSourceTint){bloodSourceTint=monsterBloodTint(thing);}
+    explicit BloodSourceScope(int tint):previous(bloodSourceTint){bloodSourceTint=tint;}
+    explicit BloodSourceScope(const mobj_t *thing):BloodSourceScope(monsterBloodTint(thing)){}
     ~BloodSourceScope(){bloodSourceTint=previous;}
 };
 std::array<float,3> bloodColor(float shade);
@@ -650,7 +652,26 @@ void goreCapture(mobj_t *target,mobj_t *source,fixed_t x,fixed_t y,fixed_t z,
 void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int healthAfter,int extreme,int healthLoss);
 void goreFinishShot(mobj_t *shooter,uint64_t discharge);
 void forgetGore(const mobj_t *actor,int death);
-void goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome);
+struct GoreBurstReport {
+    uint64_t eventId=0;
+    const char *material="none",*tint="none",*path="none";
+    int requested=0,admitted=0;
+};
+GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge);
+int emitGiblets(const hellforge::giblets::Burst &request,int wallBudget,GoreBurstReport &report);
+void prepareGiblets();
+void clearGiblets();
+void tickGiblets(size_t bloodDrops,int proceduralFragments);
+void drawGiblets(const Uniforms &camera);
+int activeGiblets();
+byte bloodTintIndex(byte index,int tint);
+#ifdef DOOM_TEST_DRIVER
+bool testPrepareGiblets();
+bool testGibletTrace(hellforge::giblets::Vec3 a,hellforge::giblets::Vec3 b,float radius,
+                     hellforge::giblets::TraceHit &hit);
+int testGibletQuads(const Uniforms &camera,bool blue,bool grounded);
+unsigned testGibletTraceCount();
+#endif
 // wounds.cpp
 int criticalBegin(mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t);
 int weakpointLocate(mobj_t*,mobj_t*,wp_impact_t*);

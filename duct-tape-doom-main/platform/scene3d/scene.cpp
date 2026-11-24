@@ -163,8 +163,9 @@ static void acceleratedView(player_t *player) {
     }
 }
 void applySettings() {
+    if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
-    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();};
+    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();clearGiblets();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -371,6 +372,7 @@ static void startLevel() {
     prepareFalls();
     prepareRagdolls();
     levelSerial=r_levelserial;
+    prepareGiblets();
 }
 static bool levelPending() {return levelSerial!=r_levelserial||floors.empty();}
 bool bakesPending() {

@@ -364,6 +364,8 @@ if(DOOM_BUILD_SDL)
         platform/scene3d/incendiary.cpp
         platform/scene3d/decoration_ambience.cpp
         platform/scene3d/spray.cpp
+        platform/gore_giblets.cpp
+        platform/scene3d/giblet_scene.cpp
         platform/scene3d/body_motion.cpp
         platform/scene3d/death_director.cpp
         platform/scene3d/death_falls.cpp
@@ -559,6 +561,13 @@ if(DOOM_BUILD_SDL)
                 target_compile_options(doom-wounds-tests PRIVATE -Wno-unknown-pragmas)
             endif()
             add_test(NAME wound-hit-placement COMMAND doom-wounds-tests)
+            add_executable(doom-giblet-foundation-tests tests/gore_giblets_foundation_tests.cpp platform/gore_giblets.cpp)
+            target_compile_features(doom-giblet-foundation-tests PRIVATE cxx_std_17)
+            add_test(NAME gore-giblet-foundation COMMAND doom-giblet-foundation-tests)
+            find_package(Python3 QUIET COMPONENTS Interpreter)
+            if(Python3_Interpreter_FOUND)
+                add_test(NAME gore-giblet-art COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/pack_giblets.py" --check)
+            endif()
             add_executable(doom-settings-navigation-tests tests/settings_navigation.cpp platform/settings_panel.cpp)
             target_compile_features(doom-settings-navigation-tests PRIVATE cxx_std_17)
             target_link_libraries(doom-settings-navigation-tests PRIVATE doom_headless_platform SDL3::SDL3)

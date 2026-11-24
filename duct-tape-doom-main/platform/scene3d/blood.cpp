@@ -15,7 +15,7 @@ int monsterBloodTint(const mobj_t *thing) {
     if(!thing)return 0;
     return thing->type==MT_HEAD?1:(thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?2:0;
 }
-static byte bloodTintIndex(byte index,int tint) {
+byte bloodTintIndex(byte index,int tint) {
     if(!tint)return index;
     const byte *pal=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
     static std::array<std::array<byte,256>,2> tables;

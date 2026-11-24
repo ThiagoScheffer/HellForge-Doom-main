@@ -16,6 +16,10 @@ struct Vec3 { float x = 0, y = 0, z = 0; };
 enum class Kind : std::uint8_t { Flesh, HeavyTissue, Viscera, Bone };
 enum class Tint : std::uint8_t { Red, Blue, Green, PaleBone };
 enum class Surface : std::uint8_t { Wall, Floor, Ceiling, Liquid, Sky, Void };
+struct SurfaceRef {
+    Surface type = Surface::Void;
+    int line = -1, side = -1, section = -1, sector = -1;
+};
 
 // The host performs a swept collision test for a small sphere travelling
 // from 'start' to 'finish'. The result is the sphere CENTER at first contact;
@@ -23,19 +27,18 @@ enum class Surface : std::uint8_t { Wall, Floor, Ceiling, Liquid, Sky, Void };
 // means the trajectory is unobstructed. The host must reject sky/invalid
 // geometry and must not return a gameplay mobj collision.
 struct TraceHit {
-    Vec3 center{};
-    Vec3 normal{};
+    Vec3 center{}, contact{}, normal{};
     float fraction = 1.0f;
-    Surface surface = Surface::Void;
+    SurfaceRef surface{};
     bool canMark = false; // valid textured wall / solid non-liquid floor / ceiling
 };
 
 struct Impact {
-    Vec3 position{};
-    Vec3 normal{};
+    std::uint64_t eventId = 0;
+    Vec3 center{}, contact{}, normal{};
     Kind kind = Kind::Flesh;
     Tint tint = Tint::Red;
-    Surface surface = Surface::Floor;
+    SurfaceRef surface{};
     float strength = 0; // visual-only [0, 1]
     float markSize = 0; // suggested Doom units, not a guaranteed decal
     std::uint8_t variant = 0;
@@ -72,8 +75,10 @@ struct Visual {
     float size = 1;
     float rotation = 0;
     float age01 = 0;
-    std::uint8_t variant = 0; // placeholder visual identity for future custom atlas
+    std::uint8_t variant = 0;
     bool resting = false;
+    Vec3 contact{}, normal{};
+    SurfaceRef surface{};
 };
 
 using VisualFn = void (*)(void *context, const Visual &visual);
@@ -109,11 +114,15 @@ public:
     void forEachVisual(VisualFn draw, void *context) const;
     void clear(); // level change, shutdown, demo/replay transition
     std::size_t activeCount() const;
+    bool hasActiveEvent(std::uint64_t id) const;
     const Stats &stats() const { return stats_; }
 
 private:
     struct Piece {
         Vec3 p{}, v{};
+        Vec3 contact{}, normal{};
+        SurfaceRef surface{};
+        std::uint64_t eventId = 0;
         Kind kind = Kind::Flesh;
         Tint tint = Tint::Red;
         float radius = 1, size = 1;

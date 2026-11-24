@@ -501,16 +501,17 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
     if(outcome!=GoreOutcome::None&&!maskApplied&&!burstEnabled) {
         outcome=GoreOutcome::None;reason="feature_off";
     }
+    const auto burst=outcome!=GoreOutcome::None?
+        goreBurst(target,point.x,point.y,point.z,shot.dx,shot.dy,outcome,discharge):GoreBurstReport{};
     if(goreDebug()) {
         const auto &h=d.hits;
-        std::fprintf(stderr,"GORE M2.1: type=%d discharge=%llu preHP=%d postHP=%d maxHP=%d damage=%lld contacts=%d opaque=%d head=%d chest=%d belly=%d distance=%.1f fatal=%d outcome=%s style=%s reason=%s art=%s fallback=%s\n",
+        std::fprintf(stderr,"GORE M2.1: type=%d discharge=%llu preHP=%d postHP=%d maxHP=%d damage=%lld contacts=%d opaque=%d head=%d chest=%d belly=%d distance=%.1f fatal=%d outcome=%s style=%s reason=%s art=%s fallback=%s g1Id=%llu material=%s tint=%s requested=%d admitted=%d fragmentPath=%s\n",
             d.type,(unsigned long long)discharge,d.preHP,d.postHP,d.maxHP,(long long)d.effectiveDamage,
             d.contacts,d.spriteContacts,goreHuman(d.type)?d.legacyHeads:h[1],h[2],h[3],
             d.distance,int(d.fatal()),goreOutcomeName(outcome),
-            outcome==GoreOutcome::None?"none":goreStyleName(d.type),reason,art,fallback);
+            outcome==GoreOutcome::None?"none":goreStyleName(d.type),reason,art,fallback,
+            (unsigned long long)burst.eventId,burst.material,burst.tint,burst.requested,burst.admitted,burst.path);
     }
-    if(outcome!=GoreOutcome::None)
-        goreBurst(target,point.x,point.y,point.z,shot.dx,shot.dy,outcome);
 }
 
 void goreAfterHit(mobj_t *target,mobj_t *source,int kind,int healthAfter,int extreme,int healthLoss) {
