@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="8a772c60892b26ab22e2725c4ef1269d468e918eb4b0a3b2da7e3f48b640b3d1">
+<settings source="platform/settings_panel.cpp" source_sha256="bd0a0b25a2e59b12507fd17419b15a8d9965d38467778811b47e1eaabf181383">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -166,6 +166,7 @@
   <option key="moving_relight" title="Moving doors re-light" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="eye_adaptation" title="Eye adaptation" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="flashlight_tint" title="Flashlight tint" category="Lighting" kind="slider" min="0" max="2" step="0.5" />
+  <option key="flashlight_monster_awareness" title="Flashlight Alerts Monsters" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="classic_flashlight" title="Classic flashlight" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="stippled_shadows" title="Stippled shadow edges" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="flashlight_shadows" title="Flashlight silhouettes" category="Lighting" kind="check" choices="0=Off|1=On" />

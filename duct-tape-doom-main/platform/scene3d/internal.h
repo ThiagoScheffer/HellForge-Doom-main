@@ -374,6 +374,8 @@ extern float lampGroupFlicker[flickerGroups];
 void updateLampGroups(const float eye[3]);
 BakeLight decorationSource(const mobj_t &thing);
 extern std::vector<StaticFog> staticFog;
+struct FlashlightBeam { float origin[3]{},direction[3]{};float radius=0,strength=0,cone=0;bool valid=false; };
+FlashlightBeam computeFlashlightBeam(const Uniforms &camera,float bob,float time,bool classic,bool simulation=false);
 void collectFlashes(float fraction,const Uniforms &camera);
 float flashAt(float x,float y,float z,const Flash &f);
 void findDoors();

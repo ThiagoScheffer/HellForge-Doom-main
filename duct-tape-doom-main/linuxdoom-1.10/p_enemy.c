@@ -693,6 +693,22 @@ void A_Look(mobj_t *actor) {
 #endif
     WA_LookEnd();
 }
+static mobj_t *P_FlashlightAwarenessTarget(mobj_t *actor,const look_sight_t *previous)
+{
+    player_t *player;
+    mobj_t *target;
+    if (!R_FlashlightIlluminates || !actor || !actor->info || actor->health<=0 || actor->player ||
+        !(actor->flags&MF_SHOOTABLE) || !actor->info->seestate ||
+        (!(actor->flags&MF_COUNTKILL) && actor->type!=MT_SKULL) ||
+        netgame || deathmatch || demoplayback || demorecording ||
+        consoleplayer<0 || consoleplayer>=MAXPLAYERS || !playeringame[consoleplayer]) return NULL;
+    player=&players[consoleplayer];target=player->mo;
+    if(player->playerstate!=PST_LIVE || player->health<=0 || !target || target->health<=0 ||
+       !(target->flags&MF_SHOOTABLE) || P_Unseen(target))return NULL;
+    if(!R_FlashlightIlluminates(actor) || !P_AISight(actor,target,WA_PLAYERS,previous))return NULL;
+    return target;
+}
+
 static void P_LookAction (mobj_t* actor)
 {
     if(P_WeakpointBlind(actor)){
@@ -729,6 +745,10 @@ static void P_LookAction (mobj_t* actor)
     }
 	
 	
+    {
+        mobj_t *flashlightTarget=P_FlashlightAwarenessTarget(actor,previous);
+        if(flashlightTarget){actor->target=flashlightTarget;P_SwarmForget(actor);goto seeyou;}
+    }
     if(P_SwarmIdleSkip(actor))return;
     {int previousLook=actor->lastlook;
     if (!P_LookForPlayersChecked (actor, false,previous) ){

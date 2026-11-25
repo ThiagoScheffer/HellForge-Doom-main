@@ -469,6 +469,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("eye_adaptation","Eye adaptation",&s.eyeAdaptation,"Brief stepped over- or underexposure when you move between bright and dark areas.")}},
             {"Flashlight and shadows",{
                 slider("flashlight_tint","Flashlight tint",&s.flashlightTintGain,0,2,0.5,"Subtle target-color tint: left is off, middle is the default, right is stronger.",hasFlashlight),
+                check("flashlight_monster_awareness","Flashlight Alerts Monsters",&s.flashlightMonsterAwareness,
+                    "Idle monsters illuminated directly by your flashlight can detect you, even facing away. Single-player accelerated mode only.",
+                    [](const Settings &d){return d.accelerated&&Game_HasEffect(GAME_EFFECT_FLASHLIGHT);}),
                 check("classic_flashlight","Classic flashlight",&s.classicFlashlight,
                     "A shorter, warmer beam that works like Doom's own light levels: it brightens what it hits in "
                     "hard steps to a little past full brightness and no further, so monsters keep their palette colors.",hasFlashlight),

@@ -218,6 +218,7 @@ void MP_BODY(P_Ticker) (void)
 			
     P_ArenaTick();
     SV_Tick();
+    if(R_UpdateFlashlightAwareness) R_UpdateFlashlightAwareness();
     if(leveltime<3)MP_STAGE("initial_thinkers_begin");
     P_RunThinkers ();
     if(leveltime<3)MP_STAGE("initial_thinkers_end");

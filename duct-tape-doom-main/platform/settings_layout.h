@@ -29,7 +29,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
     if(!strcmp(k,"sprite_frustum_filter"))return {"Performance","Visibility"};
     if(!strcmp(tab,"Performance"))return {"Performance","Lights"};
     if(!strcmp(tab,"Display"))return {"Display",!strcmp(section,"Retro look")?"Filters":settingIs(k,{"fov","widescreen"})?"View":"Video"};
-    if(!strcmp(k,"monster_recovery")||!strcmp(tab,"Monster AI"))return {"Monsters","AI"};
+    if(settingIs(k,{"monster_recovery","flashlight_monster_awareness"})||!strcmp(tab,"Monster AI"))return {"Monsters","AI"};
     if(settingIs(k,{"monster_feeding","headshot_frenzy"}))return {"Monsters","Survival"};
     if(!strcmp(k,"glowing_eyes"))return {"Monsters","Appearance"};
     if(!strcmp(tab,"Gameplay"))return {"Gameplay",!strcmp(section,"Balance")?"Balance":settingIs(k,{"key_arena","arena_radius"})?"Arenas":"Weapons"};

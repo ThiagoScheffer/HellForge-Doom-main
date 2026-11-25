@@ -18,6 +18,10 @@ extern "C" int Menu_BrandOpen(void);
 #include "modern_hud.h"
 #include "weapon_wheel.h"
 #include "corner_peek.h"
+#include "../wad_probe.h"
+extern "C" {
+#include "p_solid.h"
+}
 #include "key_notice.h"
 #include "key_hand.h"
 #include "toasty.h"
@@ -162,6 +166,80 @@ static void acceleratedView(player_t *player) {
         memset(v_overlaymask+y*SCREENWIDTH+viewwindowx,0,scaledviewwidth);
     }
 }
+// Simulation-only snapshot: renderer interpolation, peeking and detached cameras
+// never change the player's gameplay awareness beam.
+static FlashlightBeam awarenessBeam;
+static unsigned awarenessLevel;
+static int awarenessTic=-1;
+static fixed_t awarenessX,awarenessY,awarenessZ,awarenessViewZ,awarenessBob;
+static angle_t awarenessAngle;
+static float awarenessLook;
+static bool flashlightAwarenessAllowed() {
+    return settings.flashlightMonsterAwareness&&settings.accelerated&&flashlightOn&&
+        Game_WadKind()==DOOM_WAD_DOOM&&Game_HasEffect(GAME_EFFECT_FLASHLIGHT)&&gamestate==GS_LEVEL&&
+        !netgame&&!lan_session&&!deathmatch&&!demoplayback&&!demorecording&&!arcade_active&&
+        !r_photoactive&&!director_watch&&!director_edit&&!paused&&!menuactive&&
+        consoleplayer>=0&&consoleplayer<MAXPLAYERS&&displayplayer==consoleplayer&&playeringame[consoleplayer]&&
+        players[consoleplayer].mo&&players[consoleplayer].playerstate==PST_LIVE&&players[consoleplayer].health>0&&
+        players[consoleplayer].mo->health>0;
+}
+static void updateFlashlightAwareness() {
+    awarenessBeam={};awarenessTic=leveltime;awarenessLevel=r_levelserial;
+    if(!flashlightAwarenessAllowed())return;
+    const player_t &player=players[consoleplayer];const mobj_t &mo=*player.mo;
+    awarenessX=mo.x;awarenessY=mo.y;awarenessZ=mo.z;awarenessAngle=mo.angle;
+    awarenessViewZ=player.viewz;awarenessBob=player.bob;
+    Uniforms camera{};
+    camera.eye[0]=units(mo.x);camera.eye[1]=units(mo.y);camera.eye[2]=units(player.viewz);
+    const float yaw=float(mo.angle*(2.0*doomPi/4294967296.0));
+    float gameLook=0;const float look=Game_LookPitch(&gameLook)?gameLook:pitch;awarenessLook=look;
+    camera.right[0]=std::sin(yaw);camera.right[1]=-std::cos(yaw);
+    camera.forward[0]=std::cos(yaw)*std::cos(look);camera.forward[1]=std::sin(yaw)*std::cos(look);camera.forward[2]=std::sin(look);
+    camera.up[0]=-std::cos(yaw)*std::sin(look);camera.up[1]=-std::sin(yaw)*std::sin(look);camera.up[2]=std::cos(look);
+    awarenessBeam=computeFlashlightBeam(camera,player.bob/16.f/FRACUNIT,float(leveltime),settings.classicFlashlight!=0,true);
+    if(!awarenessBeam.valid)return;
+    // Solid-map geometry can lie between the eye and the shoulder light.
+    if(SV_Active()) {
+        float dx=awarenessBeam.origin[0]-camera.eye[0],dy=awarenessBeam.origin[1]-camera.eye[1],dz=awarenessBeam.origin[2]-camera.eye[2];
+        float fraction=SV_Trace(camera.eye[0],camera.eye[1],camera.eye[2],dx,dy,dz,nullptr,nullptr);
+        if(fraction<1.f) {
+            awarenessBeam={};return; // Conservative when the rendered shoulder is obstructed.
+        }
+    }
+}
+static int flashlightIlluminates(const mobj_t *monster) {
+    if(!flashlightAwarenessAllowed()||!awarenessBeam.valid||awarenessLevel!=r_levelserial||awarenessTic!=leveltime||
+       !monster||!monster->subsector||monster->health<=0||monster->player||!(monster->flags&MF_SHOOTABLE))return 0;
+    const player_t &player=players[consoleplayer];const mobj_t &body=*player.mo;
+    float gameLook=0;const float look=Game_LookPitch(&gameLook)?gameLook:pitch;
+    if(body.x!=awarenessX||body.y!=awarenessY||body.z!=awarenessZ||body.angle!=awarenessAngle||
+       player.viewz!=awarenessViewZ||player.bob!=awarenessBob||look!=awarenessLook) {
+        updateFlashlightAwareness();
+        if(!awarenessBeam.valid)return 0;
+    }
+    const float x=units(monster->x),y=units(monster->y),z=units(monster->z),height=units(monster->height);
+    const float dx=x-awarenessBeam.origin[0],dy=y-awarenessBeam.origin[1];
+    if(dx*dx+dy*dy>awarenessBeam.radius*awarenessBeam.radius)return 0;
+    // The shader uses smoothstep(cone,.985,cosine) and linear range falloff.
+    // Require at least 10% of the beam's peak attenuation.
+    for(float part:{.25f,.55f,.85f}) {
+        float dz=z+height*part-awarenessBeam.origin[2];
+        float distance=std::sqrt(dx*dx+dy*dy+dz*dz);
+        if(!(distance>.001f&&distance<awarenessBeam.radius))continue;
+        float cosine=(dx*awarenessBeam.direction[0]+dy*awarenessBeam.direction[1]+dz*awarenessBeam.direction[2])/distance;
+        float t=std::clamp((cosine-awarenessBeam.cone)/(.985f-awarenessBeam.cone),0.f,1.f);
+        if((1.f-distance/awarenessBeam.radius)*t*t*(3.f-2.f*t)<.10f)continue;
+        if(SV_Active()&&SV_Trace(awarenessBeam.origin[0],awarenessBeam.origin[1],awarenessBeam.origin[2],dx,dy,dz,nullptr,nullptr)<.999f)continue;
+        // Reuse the engine BSP sight traversal for a one-unit target slice.
+        mobj_t from{},to{};
+        from.x=fixed_t(awarenessBeam.origin[0]*FRACUNIT);from.y=fixed_t(awarenessBeam.origin[1]*FRACUNIT);
+        from.z=fixed_t(awarenessBeam.origin[2]*FRACUNIT);from.subsector=R_PointInSubsector(from.x,from.y);
+        to.x=monster->x;to.y=monster->y;to.z=fixed_t((z+height*part-.5f)*FRACUNIT);to.height=FRACUNIT;to.subsector=monster->subsector;
+        if(from.subsector&&from.subsector->sector&&P_CheckSight(&from,&to))return 1;
+    }
+    return 0;
+}
+
 void applySettings() {
     if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
@@ -206,6 +284,8 @@ void applySettings() {
     st_helmet_style=settings.helmetFace;
     P_PeekOriginHook=I_Render3DPeekOrigin;
     R_BeforeTic=settings.accelerated?beforeTic:nullptr;
+    awarenessBeam={};R_UpdateFlashlightAwareness=settings.accelerated&&settings.flashlightMonsterAwareness?updateFlashlightAwareness:nullptr;
+    R_FlashlightIlluminates=settings.accelerated&&settings.flashlightMonsterAwareness?flashlightIlluminates:nullptr;
     R_WheelSlowMotion=+[]()->int{return wheelActive;};
     R_MuzzleFlash=settings.accelerated?fluidWeaponShot:nullptr;
     R_WeaponAttack=settings.accelerated?fluidWeaponAttack:nullptr;
@@ -334,6 +414,7 @@ void sceneShutdown() {
     toastyTexture.reset();toastyVisible=0;romeroTexture.reset();romeroAge=-1;
     cancelRelight();
     P_AcidVisualBurst=nullptr;P_AcidVisualCoat=nullptr;P_AcidVisualForget=nullptr;P_AcidVisualClear=nullptr;
+    awarenessBeam={};R_UpdateFlashlightAwareness=nullptr;R_FlashlightIlluminates=nullptr;
     R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_GoreHit=nullptr;R_GoreShotEnd=nullptr;R_GoreForget=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();

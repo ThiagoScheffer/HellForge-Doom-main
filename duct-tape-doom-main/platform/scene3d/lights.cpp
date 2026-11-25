@@ -330,6 +330,46 @@ std::array<float,3> torchColor() {
     for(float &c:glow)c=0.5f+0.5f*c;
     return glow;
 }
+FlashlightBeam computeFlashlightBeam(const Uniforms &camera,float bob,float time,bool classic,bool simulation) {
+    FlashlightBeam beam;
+        float lamp[3],aim[3],length=0,forward[3],right[3],up[3];
+        auto unit=[](const float *v,float *out){float l=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);for(int c=0;c<3;++c)out[c]=l>0?v[c]/l:0;};
+        unit(camera.forward,forward);unit(camera.right,right);unit(camera.up,up);
+        for(int c=0;c<3;++c) lamp[c]=camera.eye[c]+right[c]*16-up[c]*6-forward[c]*20;
+        // Like Doom 3's, the lamp backs out of walls: hugging a wall on the
+        // right (the player's radius is the lamp's offset) or facing into a
+        // corner put it on or behind the wall, which then blocked the beam.
+        float dx=lamp[0]-camera.eye[0],dy=lamp[1]-camera.eye[1],reach=std::sqrt(dx*dx+dy*dy),clear=1;
+        for(int i:reach>0?linesAround(camera.eye[0]+dx*0.5f,camera.eye[1]+dy*0.5f,reach*0.5f+5):std::vector<int>{}) {
+            const line_t &line=lines[i];
+            if(line.frontsector&&line.backsector&&line.frontsector!=line.backsector&&
+               lamp[2]>std::max(simulation?units(line.frontsector->floorheight):floorZ(line.frontsector),simulation?units(line.backsector->floorheight):floorZ(line.backsector))&&
+               lamp[2]<std::min(simulation?units(line.frontsector->ceilingheight):ceilZ(line.frontsector),simulation?units(line.backsector->ceilingheight):ceilZ(line.backsector))) continue;
+            float ax=units(line.v1->x),ay=units(line.v1->y),ex=units(line.v2->x)-ax,ey=units(line.v2->y)-ay;
+            float denominator=dx*ey-dy*ex;if(std::abs(denominator)<1e-6f)continue;
+            float t=((ax-camera.eye[0])*ey-(ay-camera.eye[1])*ex)/denominator;
+            float u=((ax-camera.eye[0])*dy-(ay-camera.eye[1])*dx)/denominator;
+            if(t>=0&&u>=0&&u<=1)clear=std::min(clear,std::max(0.0f,t-4/reach));
+        }
+        lamp[0]=camera.eye[0]+dx*clear;lamp[1]=camera.eye[1]+dy*clear;
+        // The beam sways with the gun as Doom bobs it (A_WeaponReady): side to
+        // side over 64 tics and dipping twice a cycle, by how fast the player
+        // moves, plus a slow drift at rest, so it feels carried rather than
+        // glued to the view.
+        bob=std::clamp(bob,0.f,1.f);
+        float phase=time*(2*doomPi/64),seconds=time/TICRATE;
+        float yaw=(std::cos(phase)*bob*1.2f+std::sin(seconds*(2*doomPi/4.3f))*0.2f)*(doomPi/180);
+        float pitch=(-std::abs(std::sin(phase))*bob*0.8f+std::sin(seconds*(2*doomPi/3.1f))*0.15f)*(doomPi/180);
+        for(int c=0;c<3;++c) {
+            aim[c]=camera.eye[c]+(forward[c]+right[c]*std::tan(yaw)+up[c]*std::tan(pitch))*256-lamp[c];
+            length+=aim[c]*aim[c];
+        }
+        length=std::sqrt(length);
+    if(!(length>0.001f)||!std::isfinite(length))return beam;
+    for(int c=0;c<3;++c){beam.origin[c]=lamp[c];beam.direction[c]=aim[c]/length;}
+    beam.radius=classic?640.f:900.f;beam.strength=classic?1.1f:1.9f;beam.cone=.90f;beam.valid=true;
+    return beam;
+}
 void collectFlashes(float fraction,const Uniforms &camera) {
     noteSectorChanges();
     flashes={};lightBlockers.clear();fogOnly={};lightKind=I_RENDER3D_LIGHT_FLASHLIGHT;
@@ -354,45 +394,11 @@ void collectFlashes(float fraction,const Uniforms &camera) {
     // side walls, door frames and things throw visible shadows (see
     // flashlightSilhouette).
     if(flashlightOn) {
-        float lamp[3],aim[3],length=0,forward[3],right[3],up[3];
-        auto unit=[](const float *v,float *out){float l=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);for(int c=0;c<3;++c)out[c]=l>0?v[c]/l:0;};
-        unit(camera.forward,forward);unit(camera.right,right);unit(camera.up,up);
-        for(int c=0;c<3;++c) lamp[c]=camera.eye[c]+right[c]*16-up[c]*6-forward[c]*20;
-        // Like Doom 3's, the lamp backs out of walls: hugging a wall on the
-        // right (the player's radius is the lamp's offset) or facing into a
-        // corner put it on or behind the wall, which then blocked the beam.
-        float dx=lamp[0]-camera.eye[0],dy=lamp[1]-camera.eye[1],reach=std::sqrt(dx*dx+dy*dy),clear=1;
-        for(int i:reach>0?linesAround(camera.eye[0]+dx*0.5f,camera.eye[1]+dy*0.5f,reach*0.5f+5):std::vector<int>{}) {
-            const line_t &line=lines[i];
-            if(line.frontsector&&line.backsector&&line.frontsector!=line.backsector&&
-               lamp[2]>std::max(floorZ(line.frontsector),floorZ(line.backsector))&&
-               lamp[2]<std::min(ceilZ(line.frontsector),ceilZ(line.backsector))) continue;
-            float ax=units(line.v1->x),ay=units(line.v1->y),ex=units(line.v2->x)-ax,ey=units(line.v2->y)-ay;
-            float denominator=dx*ey-dy*ex;if(std::abs(denominator)<1e-6f)continue;
-            float t=((ax-camera.eye[0])*ey-(ay-camera.eye[1])*ex)/denominator;
-            float u=((ax-camera.eye[0])*dy-(ay-camera.eye[1])*dx)/denominator;
-            if(t>=0&&u>=0&&u<=1)clear=std::min(clear,std::max(0.0f,t-4/reach));
-        }
-        lamp[0]=camera.eye[0]+dx*clear;lamp[1]=camera.eye[1]+dy*clear;
-        // The beam sways with the gun as Doom bobs it (A_WeaponReady): side to
-        // side over 64 tics and dipping twice a cycle, by how fast the player
-        // moves, plus a slow drift at rest, so it feels carried rather than
-        // glued to the view.
-        float bob=std::min(1.0f,players[displayplayer].bob/16.0f/FRACUNIT),time=leveltime+fraction;
-        float phase=time*(2*doomPi/64),seconds=time/TICRATE;
-        float yaw=(std::cos(phase)*bob*1.2f+std::sin(seconds*(2*doomPi/4.3f))*0.2f)*(doomPi/180);
-        float pitch=(-std::abs(std::sin(phase))*bob*0.8f+std::sin(seconds*(2*doomPi/3.1f))*0.15f)*(doomPi/180);
-        for(int c=0;c<3;++c) {
-            aim[c]=camera.eye[c]+(forward[c]+right[c]*std::tan(yaw)+up[c]*std::tan(pitch))*256-lamp[c];
-            length+=aim[c]*aim[c];
-        }
-        length=std::sqrt(length);
-        // The classic beam is shorter and weaker, in an old bulb's warm
-        // color; the shaders apply it like extralight (FEATURE_CLASSIC_FLASHLIGHT).
         bool classic=settings.classicFlashlight;
-        appendLight(lamp[0],lamp[1],lamp[2],classic?640:900,classic?1.1f:1.9f,
+        const auto beam=computeFlashlightBeam(camera,players[displayplayer].bob/16.0f/FRACUNIT,leveltime+fraction,classic);
+        if(beam.valid)appendLight(beam.origin[0],beam.origin[1],beam.origin[2],beam.radius,beam.strength,
                     classic?std::array<float,3>{1.0f,0.86f,0.62f}:std::array<float,3>{1.0f,0.96f,0.86f},nullptr,0.85f,true,0,
-                    {aim[0]/length,aim[1]/length,aim[2]/length,0.90f});
+                    {beam.direction[0],beam.direction[1],beam.direction[2],beam.cone});
         // Its bounce off what it lights (not for the classic beam, which
         // stays Doom's extralight); soft, and only the flashlight kind so
         // things cast no shadows from it (dynamicThingLight).

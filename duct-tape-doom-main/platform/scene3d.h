@@ -134,6 +134,7 @@ struct Settings {
     int hitFlinch=1; // Living monsters flinch from hits, leaning with the push.
     float bodyMotionStrength=1; // How far death reactions and flinches throw the body (0.5-3).
     int flashlightShadows=1; // Things in the flashlight beam cast their silhouette on the wall behind.
+    int flashlightMonsterAwareness=0;
     int classicFlashlight=1; // A shorter, warmer beam that raises light in steps to a little past full brightness, never further.
     int stippledShadows=1; // The flashlight's shadow edges, from walls and things, break into an ordered-dither stipple instead of a clean line.
      int softShotShadows=1; // Shots, projectiles and barrels light from a small body: shadow edges step per texel and soften into a dither.

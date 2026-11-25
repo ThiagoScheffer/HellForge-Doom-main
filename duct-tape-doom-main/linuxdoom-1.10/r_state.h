@@ -107,6 +107,9 @@ extern side_t*		sides;
 /* Optional native renderer hooks. The classic/headless builds leave these null. */
 extern void (*R_AcceleratedView)(player_t *player);
 extern void (*R_BeforeTic)(void);
+/* Optional simulation-time flashlight awareness; null in headless builds. */
+extern void (*R_UpdateFlashlightAwareness)(void);
+extern int (*R_FlashlightIlluminates)(const mobj_t *actor);
 // Renderer-only shot notification; projectile is a mobj type or -1 for gunfire.
 extern void (*R_MuzzleFlash)(mobj_t *source, int weapon, int projectile);
 extern void (*R_WeaponAttack)(player_t *player);
