@@ -4,6 +4,7 @@
 #include "sky_atmosphere.h"
 #include "../shaders/living_surfaces.h"
 #include "../monster_regions.h"
+#include "../monster_eye_damage.h"
 #include "../monster_skin_damage.h"
 #include "../monster_skin_regions.h"
 #include "../corpse_decomposition.h"
@@ -735,6 +736,106 @@ Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHeal
 }
 
 namespace {
+constexpr std::size_t eyeTextureBudget = 8u * 1024u * 1024u;
+constexpr std::size_t eyeRecordLimit = 4096;
+// Below the upward-growing acid range (-1900000000) and the other
+// generated namespaces. The bounded range also keeps -1-key representable.
+constexpr int eyeKeyBase = -2000000000;
+std::size_t eyeTextureBytes = 0;
+std::map<std::tuple<int, int, int>, int> eyeVariants;
+
+doom_eye_damage::PaintColors eyeColors(int type, const Image &original,
+                                      const std::vector<byte> &mask, const byte *palette) {
+    std::array<int, 256> nearby{};
+    const int w = original.width, h = original.height;
+    // Sample opaque flesh within two texels of the authored socket.
+    for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
+        const auto at = (std::size_t)y * w + x;
+        if (mask[at] || !original.pixels[at * 2 + 1]) continue;
+        const byte index = original.pixels[at * 2];
+        const byte *rgb = palette + index * 3;
+        const int r = rgb[0], g = rgb[1], b = rgb[2];
+        if (r < 24 || r > 200 || r < g + 12 || r < b + 12) continue;
+        // Reject the Pain Elemental's red eye ramp and favor brown flesh.
+        if (type == MT_PAIN && (g < r / 3 || g <= b)) continue;
+        int distance = 3;
+        for (int ny = std::max(0, y - 2); ny <= std::min(h - 1, y + 2); ++ny)
+            for (int nx = std::max(0, x - 2); nx <= std::min(w - 1, x + 2); ++nx)
+                if (mask[(std::size_t)ny * w + nx])
+                    distance = std::min(distance, std::abs(nx - x) + std::abs(ny - y));
+        nearby[index] += 3 - distance;
+    }
+    const auto middle = std::max_element(nearby.begin(), nearby.end());
+    const bool flesh = *middle > 0;
+    const byte *rgb = palette + (middle - nearby.begin()) * 3;
+    const auto nearest = [&](float scale) {
+        return (byte)doom_decay::closest(palette, rgb[0] * scale, rgb[1] * scale, rgb[2] * scale);
+    };
+    const bool blood = !bloodPalette().empty();
+    const byte dark = blood ? monsterSkinBloodIndex(type, 0.12f) : nearest(0.45f);
+    return {flesh ? nearest(0.19f) : dark, flesh ? nearest(0.53f) : dark,
+            flesh ? nearest(0.86f) : dark, dark,
+            blood ? monsterSkinBloodIndex(type, 0.43f) : dark,
+            blood ? monsterSkinBloodIndex(type, 0.62f) : dark};
+}
+}
+
+void monsterEyeInjuryReset() {
+    eyeVariants.clear();
+    eyeTextureBytes = 0;
+}
+
+Image &monsterEyeInjuryImage(int type, int lump, const Image &original, Image &source, int &key) {
+    if ((type != MT_HEAD && type != MT_PAIN) || lump < 0)
+        return source;
+    const auto identity = std::make_tuple(type, lump, key);
+    const auto found = eyeVariants.find(identity);
+    if (found != eyeVariants.end()) {
+        if (!found->second) return source;
+        key = found->second;
+        return images.at(key);
+    }
+    if (eyeVariants.size() >= eyeRecordLimit) return source;
+    const int variantKey = eyeKeyBase - (int)eyeVariants.size();
+    auto &record = eyeVariants.emplace(identity, 0).first->second;
+
+    const int w = original.width, h = original.height;
+    if (w < 1 || h < 1 || w > 256 || h > 256 || w != source.width || h != source.height ||
+        original.left != source.left || original.top != source.top)
+        return source;
+    const std::size_t count = (std::size_t)w * h;
+    if (original.pixels.size() != count * 2 || source.pixels.size() != count * 2)
+        return source;
+    // Indexed pixels, RGBA8 texture, and the CPU mask used by acid coating.
+    const std::size_t bytes = count * 7 + source.emission.size();
+    if (bytes > eyeTextureBudget - eyeTextureBytes || images.count(variantKey))
+        return source;
+    const int paletteLump = W_CheckNumForName((char*)"PLAYPAL");
+    if (paletteLump < 0 || W_LumpLength(paletteLump) < 768) return source;
+    auto regions = doom_regions::build(type, w, h, original.left, original.top, original.pixels.data());
+    if (!regions.stock || regions.eyes.size() != count ||
+        std::none_of(regions.eyes.begin(), regions.eyes.end(), [](byte b) { return b != 0; }))
+        return source;
+
+    const byte *palette = (const byte*)W_CacheLumpNum(paletteLump, PU_CACHE);
+    auto pixels = source.pixels;
+    if (!doom_eye_damage::paint(pixels, original.pixels, regions.eyes, w, h,
+                               eyeColors(type, original, regions.eyes, palette)))
+        return source;
+    auto normals = spriteNormals(w, h, original.pixels.data());
+    Image variant = upload(w, h, pixels.data(), source.left, source.top,
+                           source.emission.empty() ? nullptr : source.emission.data(), normals.data());
+    variant.glow = source.glow;
+    variant.glowWeight = source.glowWeight;
+    variant.glowHeight = source.glowHeight;
+    variant.eyeDamageMask = std::move(regions.eyes);
+    auto inserted = images.emplace(variantKey, std::move(variant));
+    eyeTextureBytes += bytes;
+    record = key = variantKey;
+    return inserted.first->second;
+}
+
+namespace {
 std::size_t decayTextureBytes=0;
 std::unordered_set<int> rejectedDecayTextures;
 }
@@ -785,7 +886,7 @@ Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
 }
 
 void imagesShutdown() {
-    monsterSkinReset();corpseDecayImageReset();images.clear();
+    monsterSkinReset();corpseDecayImageReset();monsterEyeInjuryReset();images.clear();
     skyDepthCache={};skyAtmosphereCache={};cloudTexture=nullptr;
 }
 } // namespace doom3d

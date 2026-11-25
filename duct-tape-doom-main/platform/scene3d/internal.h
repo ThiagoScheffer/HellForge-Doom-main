@@ -515,6 +515,8 @@ Image &playerColourImage(Image &,int,int,int &,const byte *voxelNormals=nullptr)
 Image &bloodSpriteImage(int lump,int tint,int &key);
 byte monsterSkinBloodIndex(int type,float shade); // Uses monster-specific blood tint and the WAD's blood palette.
 Image &monsterSkinImage(int type,int lump,Image &source,int health,int spawnHealth,int &key);
+Image &monsterEyeInjuryImage(int type,int lump,const Image &original,Image &source,int &key);
+void monsterEyeInjuryReset();
 void monsterSkinReset(); // Before image atlas/map resources are destroyed.
 // Procedurally cached death-sprite variants; original art remains authoritative.
 Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key);
@@ -560,7 +562,8 @@ void coatAcidActor(mobj_t *actor,fixed_t x,fixed_t y);
 void forgetAcidActor(const mobj_t *actor);
 void clearAcidVisuals();
 void clearAcidMarks();
-Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped);
+Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped,
+                     const Image *originalEyeArt);
 bool acidCoatingPosition(const mobj_t *actor,float eyeX,float eyeY,float &u,float &v);
 void watchSpray();
 void buildSpray(const Uniforms &camera);

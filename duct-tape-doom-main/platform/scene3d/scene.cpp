@@ -442,6 +442,7 @@ static void startLevel() {
     corpseDecayReset(); // Reset ages on level transition or save reload.
     monsterSkinReset(); // Variant counts and rejected-art identities are map-local.
     corpseDecayImageReset(); // Release/reset the bounded dry-sprite variant cache.
+    monsterEyeInjuryReset();
     bakeMap={};
     images.clear();
     oldThings.clear();oldHeights.clear();tickTime=0;

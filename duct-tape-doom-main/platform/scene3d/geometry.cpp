@@ -727,6 +727,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     {
         float eye[2], right[2];
     };
+    static bool visibleEyeInjuryActive(mobj_t *actor)
+    {
+        return settings.accelerated && settings.enhancedWeakPoints && settings.eyeInjuries &&
+               settings.visibleEyeInjuries && actor->health > 0 && !actor->player &&
+               (actor->type == MT_HEAD || actor->type == MT_PAIN) && P_WeakpointBlind(actor);
+    }
+
     // One thing in sector i: its shadows, light, liquid footclip and sprite
     // quad. Things the flashlight beam can outline join casters. With mirror,
     // also its quad for the glass mirror (mirrorBatches), from the same light:
@@ -811,7 +818,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Airborne blood shines like the floor blood (needs the normals of MODE_RELIT).
         if (settings.bloodShine && Game_ThingRole(thing->type) == GAME_THING_BLOOD && (mode & MODE_RELIT))
             mode |= MODE_WET_SPRITE;
-        if (settings.glowingEyes && (thing->flags & MF_COUNTKILL) && thing->health > 0)
+        const bool eyeInjured = visibleEyeInjuryActive(thing) && !death.ragdoll &&
+            !P_CombatCharred(thing) &&
+            ((thing->type == MT_HEAD && death.sprite == SPR_HEAD) ||
+             (thing->type == MT_PAIN && death.sprite == SPR_PAIN));
+        if (settings.glowingEyes && (thing->flags & MF_COUNTKILL) && thing->health > 0 && !eyeInjured)
             mode |= MODE_GLOWING_EYES;
         if (!(death.frame & FF_FULLBRIGHT))
             light = sunLightAt(x, y, &sectors[i], flowLightAt(x, y, &sectors[i], seamLightAt(x, y, &sectors[i], light)));
@@ -909,9 +920,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 (thing->type==MT_FATSO||thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?3:
                 (thing->type==MT_HEAD)?4:0;
             const DecorationArt *art=!self&&!directed&&!sf.rotate?decorationArt(*thing,lump):nullptr;
+            Image &eyeImage = eyeInjured
+                ? monsterEyeInjuryImage(thing->type, lump, sourceImage, skinImage, spriteKey)
+                : skinImage;
             Image &uncoatedImage=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
-                art ? decorationStain(*art,skinImage,spriteKey) : skinImage;
-            Image &image=acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen));
+                art ? decorationStain(*art,skinImage,spriteKey) : eyeImage;
+            Image &image=acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen),
+                                        uncoatedImage.eyeDamageMask.empty() ? nullptr : &sourceImage);
             // A traceable renderer hand-off is essential: isolated rule tests
             // cannot prove that the real game selects the new GPU texture.
             if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {

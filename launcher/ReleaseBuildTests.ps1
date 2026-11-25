@@ -32,4 +32,8 @@ try{$cfg=$reader.ReadToEnd()}finally{$reader.Dispose()}
 foreach($key in @('ambush_sight_reuse','sprite_frustum_filter','monster_hibernation','eye_injuries','elemental_combat_fx','advanced_monster_reactions','elemental_damage_over_time','combat_event_messages','speedrun_hud')){
  Check ($cfg -notmatch "(?m)^\s*$key\s+1\s*$") "new profile does not force $key on"
 }
+Check ($cfg -match '(?m)^\s*visible_eye_injuries\s+1\s*$') 'visible eye injuries default on beneath the gameplay switch'
+$reader=New-Object IO.StreamReader($a.GetManifestResourceStream('settings-schema.xml'))
+try{$catalogue=[xml]$reader.ReadToEnd()}finally{$reader.Dispose()}
+Check ($null -ne $catalogue.SelectSingleNode('/settings/option[@key="visible_eye_injuries"]')) 'launcher embeds the visible eye injuries setting'
 Write-Output "PASS $script:checks normal-release packaging checks"

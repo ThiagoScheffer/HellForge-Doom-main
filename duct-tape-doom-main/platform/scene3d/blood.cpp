@@ -174,7 +174,8 @@ static Image &bloodImage(int variant) {
 // Bounded, reusable sprite composites preserve the original silhouette and pose.
 static std::map<std::tuple<int,int,int>,int> acidSpriteCache;
 static std::vector<int> acidSpriteKeys;
-Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped) {
+Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped,
+                     const Image *originalEyeArt) {
     float u,v;
     if(!acidCoatingPosition(actor,eyeX,eyeY,u,v)||source.pixels.empty())return source;
     if(flipped)u=1.f-u;
@@ -190,6 +191,8 @@ Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,flo
     for(int y=std::max(0,cy-height/2);y<std::min(source.height,cy+(height+1)/2);++y)
         for(int x=std::max(0,cx-width/2);x<std::min(source.width,cx+(width+1)/2);++x) {
             size_t target=((size_t)y*source.width+x)*2;
+            // Leave the temporary eyelid legible under a facial splash.
+            if (originalEyeArt && source.eyeDamageMask[target/2]) continue;
             int mx=std::clamp((x-(cx-width/2))*mask.width/width,0,mask.width-1);
             int my=std::clamp((y-(cy-height/2))*mask.height/height,0,mask.height-1);
             size_t sample=((size_t)my*mask.width+mx)*2;
@@ -198,7 +201,7 @@ Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,flo
     static int nextKey=-1900000000;
     while(images.find(nextKey)!=images.end())++nextKey;
     int newKey=nextKey++;
-    auto normals=spriteNormals(source.width,source.height,pixels.data());
+    auto normals=spriteNormals(source.width,source.height,originalEyeArt ? originalEyeArt->pixels.data() : pixels.data());
     Image derived=upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,normals.data());
     images.emplace(newKey,std::move(derived));acidSpriteCache.emplace(lookup,newKey);acidSpriteKeys.push_back(newKey);key=newKey;
     return images.at(newKey);

@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="20afd9d65248e20bf1b8689b5d703f1ae645261a536ad97dd32c3e05cbdf880e">
+<settings source="platform/settings_panel.cpp" source_sha256="fe907c67b6a07b88cc759af921ef3627de3eeb036cc922c80b43231ba11b3ca5">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -71,6 +71,7 @@
   <option key="elemental_combat_fx" title="Elemental Combat FX" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="advanced_monster_reactions" title="Advanced Monster Reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="eye_injuries" title="Eye Injuries" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="visible_eye_injuries" title="Visible Eye Injuries" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="monster_bleeding" title="Monster Bleeding" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="monster_feeding" title="Monster Feeding" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="headshot_sound" title="Headshot Sound" category="Destruction" kind="check" choices="0=Off|1=On" />

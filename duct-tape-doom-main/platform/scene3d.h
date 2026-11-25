@@ -215,6 +215,7 @@ struct Settings {
     float speedrunX=0,speedrunY=0;
     int elementalCombatFX=0,advancedMonsterReactions=0;
     int eyeInjuries=0;
+    int visibleEyeInjuries=1;
     int monsterBleeding=0,headshotFrenzy=0,monsterMetalSparks=1,headshotFeedback=2,headshotSound=1,monsterFeeding=0;
     int monsterSkinDamage=0; // Optional stock-art-only cosmetic torso/limb damage, derived from current HP.
     int breakableWalls=1;
@@ -283,7 +284,7 @@ enum class SkyArtwork {
     Inferno=SKY_ART_INFERNO, OrangeClouds=SKY_ART_ORANGE_CLOUDS, BrownClouds=SKY_ART_BROWN_CLOUDS,
     BurningCity=SKY_ART_BURNING_CITY, BloodHell=SKY_ART_BLOOD_HELL, Count
 };
-struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; uint64_t skyPalette=0; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
+struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; uint64_t skyPalette=0; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens,eyeDamageMask; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
 
 // Frame profiling for the performance smoke test (I_Render3DProfile).
 struct Profile { bool enabled=false; unsigned skip=0; const char *screenshotPath=nullptr; I_Render3DFrameProfile frame={}; };

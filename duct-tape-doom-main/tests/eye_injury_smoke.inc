@@ -55,10 +55,30 @@ static void eyeIntegration() {
     auto trigger=[&](mobj_t *actor){P_WeakpointBeginShot(shooter,wp_pistol);wp_damage_event_t e{};e.target=actor;e.source=e.inflictor=shooter;e.kind=WP_BULLET;e.baseDamage=1;e.impact.eyeContact=1;e.impact.confidence=100;P_WeakpointApply(&e);P_WeakpointEndShot();};
     auto *caco=P_SpawnMobj(fx(-200),0,ONFLOORZ,MT_HEAD);auto *pain=P_SpawnMobj(fx(200),0,ONFLOORZ,MT_PAIN);auto *spider=P_SpawnMobj(0,fx(-256),ONFLOORZ,MT_SPIDER);
     trigger(caco);trigger(pain);trigger(spider);int savedTime=leveltime;
-    G_SaveGame(5,(char*)"Eye injuries v4");G_DoSaveGame();G_LoadGame((char*)"doomsav5.dsg");G_DoLoadGame();caco=pain=spider=nullptr;
-    for(auto*t=thinkercap.next;t!=&thinkercap;t=t->next)if(t->function.acp1==(actionf_p1)P_MobjThinker){auto*m=(mobj_t*)t;if(m->type==MT_HEAD)caco=m;if(m->type==MT_PAIN)pain=m;if(m->type==MT_SPIDER)spider=m;}
+    auto roundTrip=[&] {
+        G_SaveGame(5,(char*)"Eye injuries v4");G_DoSaveGame();G_LoadGame((char*)"doomsav5.dsg");G_DoLoadGame();
+        caco=pain=spider=nullptr;
+        for(auto*t=thinkercap.next;t!=&thinkercap;t=t->next) {
+            if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
+            auto*m=(mobj_t*)t;
+            if(m->type==MT_HEAD)caco=m;
+            if(m->type==MT_PAIN)pain=m;
+            if(m->type==MT_SPIDER)spider=m;
+        }
+    };
+    roundTrip();
     check(caco&&pain&&spider&&P_WeakpointBlind(caco)&&P_WeakpointBlind(pain)&&P_WeakpointEyeRage(spider),"real save/load restores all three actor-index eye statuses");
     leveltime=savedTime+350;P_WeakpointTick(spider);check(!P_WeakpointEyeRage(spider)&&P_WeakpointBlind(caco),"rage expires in ten seconds while blindness has no timeout");
+    shooter=players[consoleplayer].mo;
+    auto *corpse=P_SpawnMobj(caco->x+fx(24),caco->y,ONFLOORZ,MT_TROOP);
+    P_DamageMobj(corpse,shooter,shooter,10000);corpse->tics=-1;corpse->z=corpse->floorz;
+    caco->z=caco->floorz;
+    P_WeakpointFeedingTick(caco);
+    P_WeakpointFeedingChase(caco);P_WeakpointFeedingAttack(caco);P_WeakpointFeedingChase(caco);
+    check(!P_WeakpointBlind(caco),"loaded Cacodemon recovers after consuming a corpse");
+    roundTrip();
+    check(caco&&pain&&!P_WeakpointBlind(caco)&&P_WeakpointBlind(pain),
+          "a recovered monster saves and loads with ordinary eyesight while another remains blind");
     P_WeakpointConfigureEyes(0);check(!P_WeakpointBlind(caco)&&!P_WeakpointBlind(pain),"feature cancellation immediately restores normal perception");
     std::printf("PASS %d focused native eye-injury checks and stock overlays\n",checks);
 }

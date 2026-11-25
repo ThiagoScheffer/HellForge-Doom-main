@@ -1,5 +1,86 @@
 # Eye injuries: blindness and Spider rage
 
+## Eye Injuries 2.0 — Visible Blindness & Recovery
+
+In accelerated sprite rendering, a blinded Cacodemon loses its bright green
+iris and shows a narrowed eyelid with blue blood. The Pain Elemental shows a
+dark lid and uses the WAD's ordinary blood shades. Blood staining follows the
+socket and can trail into its lower edge on larger visible frames. The effect
+works with Blood and Blood Spray disabled.
+
+**Visible Eye Injuries** is in **F4 → Combat → Injuries**, directly below
+**Eye Injuries**, and in the launcher’s Combat settings. The
+`visible_eye_injuries 1` preference defaults on. Enhanced Monster Weak
+Points and Eye Injuries must both be enabled. Turning off the cosmetic option
+while a monster is blind restores its ordinary appearance and leaves the
+gameplay status active.
+
+The renderer queries `P_WeakpointBlind()` and selects the sprite for each
+view, including reflected views. `doom_regions::build()` validates the stock
+fingerprint against original artwork and supplies the same authored eye mask
+used by hit classification. Rear, hidden, closed and unrecognized replacement
+views use the existing sprite. The painter derives lid colors from nearby
+opaque flesh in PLAYPAL and reuses `monsterSkinBloodIndex()` for the stain.
+It changes palette indices within the mask and preserves coverage, offsets
+and original sprite normals. The existing sprite pipeline handles mirroring.
+
+Variants are shared by actor type, sprite lump and incoming image key.
+The cache tracks up to 4,096 requests, including fallbacks, and can retain
+up to 8 MiB of estimated texture, pixel and mask payload. A budget fallback
+keeps the existing sprite. Level reload and renderer shutdown clear the
+variant records. A recovered actor immediately switches back to its normal
+sprite and eye glow when enabled. Skin damage remains in the source, wound
+holes follow the existing sprite mask, and acid coating remains active around
+the injury. Saves continue to use the existing blindness sidecar.
+
+### Eye Injuries 2.0 verification
+
+- The Release engine and launcher built. The fresh native build passed all 44
+  CTest cases, including the production painter test. The earlier in-place
+  baseline passed 42 of 43 checks and hit a fixture-write error in portability.
+- The native smoke test passed 43 eye-injury checks, including both feeding
+  recovery paths with Monster Feeding off, Spider rage and save/load before
+  and after recovery. The seven F4 processes passed 20 checks covering defaults,
+  Apply, restart, F10 discard, reset and the parent settings. The launcher
+  passed 21 package checks including the embedded engine hash and setting.
+- Additional native smoke runs passed for corrosive barrels, elemental combat
+  and HUD settings, flashlight awareness and Imp fireball avoidance.
+- Stock artwork verification used the local DOOM II IWAD. All 36 Cacodemon
+  lumps in the local DOOM IWAD matched the corresponding DOOM II lumps
+  byte-for-byte. The Pain Elemental is present in DOOM II.
+- The Vulkan smoke test passed 699 assertions. It exercised stock front,
+  mirrored, hidden and attack views, replacement art, shared skin and acid
+  composites, glow, reblinding, death, save/load and cache reset. The normal,
+  injured and recovered captures were visually reviewed.
+
+The fixture takes the arguments `<DOOM2.WAD> <settings-arena.wad> <output-dir>
+--visual-eye-injuries`. It uses save slot 5 in its working directory. The
+capture comparison and runtime log are under
+`build/eye2-results/visual-eye-injuries/`.
+
+The warmed arena comparison sampled 15 frames per setting at 640×400. Each
+scene had one acid-coated floater and three more sharing a sprite variant.
+Skin damage was enabled for the group, including the Cacodemon's low-health
+tier. The GPU column measures submission through fence completion.
+
+| Scene | Visible Eye Injuries | Mean CPU | Mean GPU fence |
+| --- | --- | ---: | ---: |
+| Cacodemons | Off | 0.964 ms | 2.252 ms |
+| Cacodemons | On | 0.980 ms | 2.220 ms |
+| Pain Elementals | Off | 0.955 ms | 2.227 ms |
+| Pain Elementals | On | 1.002 ms | 2.363 ms |
+
+One uncached variant took 1.19 ms to generate and queue. The mean lookup
+time across 20,000 warmed requests was 0.008 µs. Those requests reused the
+same texture with zero additional image uploads. The budget stress added
+262 variants with approximately 7.27 MiB of estimated payload alongside
+variants already cached. It preserved the source texture on exhaustion and
+accepted the previously rejected request after save/load reset the cache.
+These are short fixture measurements. Interactive gameplay, reflections in
+live maps and a broader CPU/GPU benchmark remain unverified.
+
+## Original gameplay implementation
+
 ```yaml
 project: DOOM: HELLFORGE
 build: 2026.11.14.2

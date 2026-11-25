@@ -325,13 +325,13 @@ Monsters can suffer from Acid and Lava places as the player - so they try to avo
 
 
 
-//rework
+//rework Texture Immersion and emissive texture
 
-We had applied  Texture Immersion for these texture file:
+We had applied  Texture Immersion for these texture file before:
 body_1  body_2 - wall with a dead body half smashed, only upper part torax,arms and head are nailed to the wall 
 wall50_1 wall50_2 wall51_2 wall51_3 - wall marble with a bodies hanged or chained on it
  
-first remove all morph or moving effect of it to fix. - make it like original default.
+first remove all morph or moving effect of it to fix. - make it like original default shaders.
 
 
 new updated idea: 
@@ -339,6 +339,21 @@ body_1  body_2 = give a immersion effect as wall blood part still slowly bleedin
 
 wall50_1 wall50_2 wall51_2 wall51_3 - immersion  add some flies near the wall, spiders and some maggots on it - similiar to the GOR5 leg.
 
+Texture immersion:
+ w108_2 w108_3 w108_4 = 3 small skulls textures - add small dots same as monster eyes dots emissive to it.
+
+
+wall42_1 wall42_6 wall42_5 wall30_2 wall30_3 wall30_4 - small demon like faces on the wall - add same eyes technic as texture: sw2_4, change only that for these textures only when the player get near it will open the eyes, far it remain off.
+
+emissive texture rework:
+
+sample door2_4 - this door texture emissive texture - highlights the red leds like parts
+all other doors textures must have same emissive effect to increate immersion.
+doors to fix: (door9_2 door15_1 door15_2 = can use same idea from door2_4)
+(this door has 3 green dots to act as leds door15_3)
+
+These walls textures are like soft fluorescent light yellow effect emissive - missing
+rw38_1 rw38_2 rw38_3 rw38_4 rw39_1
 
 
 
@@ -372,9 +387,8 @@ Hud speedrun improvements:
 add options to add colored infos,like Health,Armor,Keys - to improve UX for user to see it, not all text in white.
 
 
-emissive texture rework
 
-sample 
+ 
 
 Approved: write a precise and detailed with codes guides codex prompt - keep token saving, no need testing, as all will be manually tested later, to preserve tokens.
 focus on implementation and correct guided details here so vscode codex will write it.

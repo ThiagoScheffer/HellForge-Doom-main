@@ -104,6 +104,7 @@ static void settingsPersistenceFrame(){
         settings.elementalCombatFX=settings.advancedMonsterReactions=0;applySettings();check(!p_wp_elemental&&!p_wp_reactions,"disable applies immediately");
     }else if(settingsCase=="--settings-eye-default"){
         check(!settings.eyeInjuries&&!p_wp_eyes,"eye injuries default off");
+        check(settings.visibleEyeInjuries,"missing visible setting defaults on");
     }else if(settingsCase=="--settings-eye-write"){
         check(!settings.eyeInjuries,"fresh eye setting starts off");
         check(I_TestSettingsPersistence(7),"real Combat checkbox applies through F4");
@@ -115,6 +116,19 @@ static void settingsPersistenceFrame(){
             auto before=fileContents(graphicsConfig);check(I_TestSettingsPersistence(8),"F10 discards eye checkbox draft");
             check(settings.eyeInjuries&&p_wp_eyes&&fileContents(graphicsConfig)==before,"eye discard leaves current behavior and file unchanged");
         }
+    }else if(settingsCase=="--settings-visible-eye-off"){
+        check(settings.visibleEyeInjuries&&I_TestSettingsPersistence(13),"F4 applies the visible setting independently");
+        check(!settings.visibleEyeInjuries&&settings.eyeInjuries&&p_wp_eyes,"cosmetic switch leaves gameplay enabled");
+        check(fileContents(graphicsConfig).find("visible_eye_injuries 0")!=std::string::npos,"F4 saves the off preference");
+    }else if(settingsCase=="--settings-visible-eye-reset"){
+        check(!settings.visibleEyeInjuries,"cosmetic off preference survives restart");
+        const auto before=fileContents(graphicsConfig);
+        check(I_TestSettingsPersistence(14)&&fileContents(graphicsConfig)==before,"F10 discards cosmetic draft");
+        check(I_TestSettingsPersistence(15)&&settings.visibleEyeInjuries,"F4 reset restores the default");
+        check(fileContents(graphicsConfig).find("visible_eye_injuries 1")!=std::string::npos,"F4 saves the restored default");
+    }else if(settingsCase=="--settings-visible-eye-parents"){
+        check(settings.visibleEyeInjuries&&I_TestSettingsPersistence(16),"turning off gameplay controls preserves the visual preference");
+        check(fileContents(graphicsConfig).find("visible_eye_injuries 1")!=std::string::npos,"disabled parents preserve the saved preference");
     }else if(settingsCase=="--settings-ambush-ui-write"||settingsCase=="--settings-ambush-ui-disable"){
         bool enable=settingsCase=="--settings-ambush-ui-write";
         check(settings.ambushSightReuse!=enable,"isolated ambush profile starts in the expected state");

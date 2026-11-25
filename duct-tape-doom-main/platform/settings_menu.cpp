@@ -753,6 +753,23 @@ extern "C" int I_TestSettingsControls(void) {
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();
+    if(mode>=13&&mode<=16) {
+        const int before=settings.visibleEyeInjuries;
+        panel.draft.accelerated=1;
+        if(mode==16) {
+            for(const char *key:{"eye_injuries","enhanced_weak_points"}) {
+                if(!selectSetting(key))return 0;
+                I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+            }
+            I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+            return !panel.open&&!settings.eyeInjuries&&!settings.enhancedWeakPoints&&settings.visibleEyeInjuries==before;
+        }
+        if(!selectSetting("visible_eye_injuries")||strcmp(panel.tabs[(size_t)panel.tab].title,"Combat"))return 0;
+        I_Render3DSettingsKey(mode==15?SDL_SCANCODE_R:SDL_SCANCODE_RETURN,0);
+        if(panel.draft.visibleEyeInjuries==before||settings.visibleEyeInjuries!=before)return 0;
+        I_Render3DSettingsKey(mode==14?SDL_SCANCODE_F10:SDL_SCANCODE_F4,0);
+        return !panel.open&&settings.visibleEyeInjuries==(mode==14?before:!before);
+    }
     if(mode==12) {
         const int active=settings.incendiaryBarrels;
         if(!selectSetting("incendiary_barrels")||strcmp(panel.tabs[(size_t)panel.tab].title,"Combat"))return 0;
