@@ -7,6 +7,9 @@ from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
 extends that foundation with sprite-aware combat, monster survival behavior,
 larger-map support, atmospheric sky rendering, cosmetic monster damage,
 corpse ambience and decomposition, persistent settings, and faster recovery after death.
+Recent additions include a semantic Speedrun HUD, recoverable medical supplies,
+shared acid liquid effects, rain-driven blood washout, flashlight-triggered
+monster awareness and smarter Imp ranged-attack decisions.
 The renderer, destruction systems, and bundled-mod integrations are described
 below with their upstream credits.
 
@@ -18,6 +21,13 @@ Why? cos we love Doom. I wanted something personal as my taste.
 
 ![HELLFORGE launcher artwork](launcher/hero.png)
 
+**Latest development update — 26 November 2026:** six additional features have
+been reported implemented since the documented baseline. Five have explicit
+user-reported passing tests or acceptance; Corrosive Barrels 2.0 was reported
+implemented. See [recent gameplay, HUD, environment and AI updates](#recent-gameplay-hud-environment-and-ai-updates)
+for behavior, configuration and verification scope. No new build identifier is
+assigned by this README update.
+
 ## What's new in HELLFORGE
 
 From pixel-level hit detection to atmospheric rendering and corpse decomposition,
@@ -27,6 +37,12 @@ the sections that follow.
 
 | Feature | What players get | Engineering highlights |
 | :--- | :--- | :--- |
+| **[Speedrun HUD 2.0](#speedrun-hud-20)** | Classic, Colored and Dynamic stats, color-coded health/armor/ammo, key indicators and optional text shadow. | Semantic and state-dependent colors, configurable intensity, existing layout and HUD-only behavior retained. |
+| **[Medical Supply Recovery](#medical-supply-recovery-10)** | Unused healing remains on the ground as a small recovery pack, available for later pickups. | Exact integer healing conservation, variable-value packs and partial consumption; classic behavior remains available. |
+| **[Corrosive Barrels 2.0](#corrosive-barrels-20--shared-liquid-effects)** | Acid splashes adhere to walls, run downward and coat exposed sprite monsters with dripping green liquid. | Shared blood-liquid physics, decals and procedural textures with independent acid material ownership; cosmetic additions. |
+| **[Dynamic Rain Blood Washout](#dynamic-rain-blood-washout-20)** | Rain spreads and dilutes large blood pools; small droplets disappear faster; sheltered blood is preserved. | Rain-exposure and deposit-size-dependent aging, shared decal rendering and irreversible washout. |
+| **[Flashlight Monster Awareness](#flashlight-monster-awareness-10)** | Idle monsters can detect the player when directly illuminated, even when facing away. | Reuses the flashlight beam, visibility checks and normal idle-to-chase transition; optional gameplay behavior. |
+| **[Imp Fireball Avoidance](#imp-fireball-avoidance-10)** | Imps skip wasteful fireball attempts when another living Imp obstructs their path toward the player. | Bounded projectile-path queries, normal chase fallback and pre-spawn revalidation; performance gains require measurement. |
 | **Immersive Sky Environment** | Moving layered clouds and distant rocky, icy, industrial, or infernal horizons, selectable through F4. | Three parallax horizon layers; WAD-sky-tinted pseudo-volumetric clouds; continuous wind; Off/Auto/manual profiles without changing map geometry or sunlight bakes. |
 | **Soft Sun Shafts 2.0** | Smoother, less pixelated beams with gradual edges and depth transitions. | Removes 32-level alpha quantization and ordered dithering in the sunbeam shader; replaces stepped noise motion with continuous drift. |
 | **HUD bloom ghosting fix** | HUD text and graphics no longer cast misplaced dark copies across bright emissive surfaces in the tested configuration. | Corrected bloom-mask sampling for the three-layer HUD texture atlas while retaining emissive textures. |
@@ -71,7 +87,11 @@ vulnerabilities, injuries, eye injuries, bleeding, feeding, frenzy, and death-sa
 are optional and default off. Damaging elemental burns, colored notifications and the Speedrun HUD also default off. Immersive Sky, Monster Skin Damage, Decoration Immersion and Corpse Decomposition also default Off. New ambush sight reuse, sprite filtering and idle-search
 reuse also default off in the normal build. Sprite combat additions are restricted to
 single-player sprite rendering; multiplayer, demos, and voxel targets retain
-their documented exclusions.
+their documented exclusions. Speedrun HUD 2.0 defaults to Classic colors;
+Medical Supply Recovery, Flashlight Monster Awareness and Imp Fireball Avoidance
+are opt-in in their approved designs. Corrosive Barrels 2.0 adds subordinate visual
+preferences under the existing Corrosive Barrels feature. The recent updates
+focus on sprite-based rendering; no new voxel work is included.
 
 > **Current behavior:** the survival-AI update supersedes the original flat
 > bleeding and amber world-impact effects. It adds progressive bleeding,
@@ -79,6 +99,162 @@ their documented exclusions.
 > The [latest survival update](docs/changes/SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md)
 > adds escape/search behavior, Arch-vile hunting and persistent hostile-pair
 > retaliation. Earlier reports remain linked as implementation history.
+
+### Recent gameplay, HUD, environment and AI updates
+
+The following six features were reported implemented after the documented
+**2026.11.15.6 source baseline**. Their descriptions reflect the accepted
+feature specifications and the developer's subsequent implementation reports.
+The latest local source, complete test logs and benchmark captures for these
+changes were not supplied with this README update. Configuration names, defaults
+and engineering details below describe the approved design unless otherwise
+noted; they should be checked against the current local source before being used
+as an exact API or configuration reference.
+
+#### Speedrun HUD 2.0
+
+- **F4 → SPEEDRUN:** Classic retains the original appearance; Colored adds
+  semantic information colors; Dynamic also responds to current player state.
+  A color-intensity control blends semantic colors with neutral HUD text, and
+  an optional one-pixel text shadow improves readability on bright backgrounds.
+- Dynamic health colors distinguish overhealth, healthy, low and critical
+  states (above 100 HP, 51–100, 26–50 and 25 or less). Armor distinguishes
+  green/blue armor types and no armor; ammunition warnings reflect low supply
+  and the equipped weapon's consumption. Map, deaths, killstreak, damage dealt
+  and damage taken use distinct semantic colors. Completed secrets/items can
+  be highlighted when their map totals are nonzero.
+- Optional colored blue, yellow and red key indicators support **Compact**
+  (one indicator per color) and **Cards / Skulls** (all six key types).
+  Existing stat visibility, Row, Column, Split Columns, placement, background
+  opacity and Speedrun HUD-only behavior are retained.
+- **Compatibility:** Classic is the default color mode; key indicators and
+  text shadow are initially off. The change is presentation-only and does not
+  modify run counters, pickup rules or the existing Modern HUD.
+- **Verification:** the supplied HUD/settings patch passed isolated C++17
+  helper and option-registration tests. The developer subsequently reported
+  **all tests passed and approved**. No new FPS or GPU-memory result is claimed.
+
+#### Medical Supply Recovery 1.0
+
+- Optional medical pickup overflow recovery preserves unused healing when a
+  Medikit (25 HP) would bring the player to the normal 100 HP cap. The original
+  pickup becomes a small recovery pack using existing Stimpack artwork, with
+  the exact unused capacity instead of a fixed 10 HP reward.
+- **Example:** a player at 90 HP uses 10 HP from a Medikit and leaves a 15 HP
+  recovery pack. A later visit at 92 HP consumes 8 HP and leaves 7 HP. The final
+  visit consumes the remaining 7 HP: **10 + 8 + 7 = 25 HP**, with no new healing
+  created. At full or above-normal health, the original pickup remains untouched.
+- Approved modes: **Classic** (default), **Medikits only**, and **Medikits and
+  Stimpacks**; proposed `graphics.cfg` key: `medikit_overflow` (0/1/2). Existing
+  recovery packs retain their remaining value after switching to Classic.
+- The design uses the normal health-giving path, existing pickup appearance and
+  saved per-object metadata without growing the native actor record. Recovery
+  packs must preserve their value across saves, avoid duplicate item-count
+  credit, and leave health bonuses, Soulspheres, Megaspheres and Berserk unchanged.
+  New overflow generation is intended for supported single-player sessions,
+  excluding multiplayer/LAN, demos and Arcade.
+- **Verification:** implementation and a passing test were reported by the
+  developer. Detailed save/ABI and compatibility test logs were not supplied.
+  The mechanic conserves healing but may make maps easier by reducing waste.
+
+#### Corrosive Barrels 2.0 — Shared Liquid Effects
+
+- Acid barrel explosions now produce toxic yellow-green liquid splashes on
+  exposed walls and floors. Wall splatter adheres to the existing surface and
+  develops downward-running streaks; nearby exposed sprite monsters receive
+  localized contamination that follows their movement and can shed droplets.
+- The approved architecture reuses the existing blood spray trajectories,
+  gravity, impact detection, wall-relative decals, procedural splatter masks,
+  runoff, lighting and depth-tested rendering. Acid is a separate material and
+  tint, not ordinary green Baron/Hell Knight blood. New code is limited to
+  material-aware filtering, explosion notification and sprite coating where needed.
+- Acid effects are independent of the Blood/Blood Spray switches. The approved
+  F4 controls are **Acid Splatters and Wall Runoff** (`acid_splatters`) and
+  **Monster Acid Contamination** (`acid_monster_coating`), enabled by default
+  under the existing Corrosive Barrels master switch. No voxel work is included.
+- The new splashes and drips are cosmetic: existing acid damage, hazardous
+  pools, radiation-suit protection and explosion rules remain authoritative.
+  Visual drips do not create additional damaging acid pools. Temporary effect
+  records have bounded lifetimes and budgets; cosmetic persistence in saves is
+  not required by the approved design.
+- **Verification:** the developer reported the feature implemented. A separate
+  feature-specific test result and performance capture were not supplied in
+  this update. No measured CPU/GPU savings or exhaustive visual coverage is claimed.
+
+#### Dynamic Rain Blood Washout 2.0
+
+- Outdoor rain progressively dilutes blood on exposed surfaces. Large pools
+  beneath corpses spread across a wider area and become thinner, whereas small
+  droplets and footprints clean up faster. Walls can show downward runoff;
+  sheltered areas preserve their normal blood behavior.
+- The approved design extends the existing rain washout and decal system,
+  accumulating actual rainfall exposure rather than using only the age of a
+  stain. Rain intensity and deposit size influence the cleaning rate; stopping
+  rain pauses further washing without restoring previously removed blood.
+  Fully cleaned deposits are removed, and washed corpse pools do not regenerate
+  simply because their corpse remains in the world.
+- Intended configuration: **Dynamic rain blood washout**, **Blood wall runoff**
+  and a washout-speed preference. Exact timings and spread factors depend on
+  the implemented tuning. The effect cleans external liquid, not the blood
+  painted into original corpse artwork, and does not remove the corpse itself.
+- Blood and acid retain independent material behavior. The rain extension does
+  not change acid damage or the existing corpse-decomposition rules. It reuses
+  the current weather, decal and liquid rendering systems rather than adding
+  a separate fluid simulation.
+- **Verification:** the developer reported implementation, **all tests passed**
+  and later reconfirmed that the feature is working. No independent benchmark
+  or exhaustive weather/geometry coverage is asserted.
+
+#### Flashlight Monster Awareness 1.0
+
+- Optional **Flashlight Alerts Monsters** lets an idle monster directly
+  illuminated by the player's flashlight detect the player, including when
+  the monster initially faces away. It plays its usual alert sound and enters
+  normal pursuit; it is not forced directly into an attack animation.
+- The approved implementation shares the existing Classic/Modern beam
+  geometry, simulation-time player pose, range/cone and visibility checks.
+  Solid walls and closed doors block direct illumination. Blind monsters and
+  No Target retain their restrictions. Active AI, infighting, normal sight and
+  sound detection continue unchanged.
+- The new idle detection runs before the negative-search hibernation return
+  so a stationary player can rotate the flashlight and wake an eligible
+  monster. It does not require a per-frame global monster scan. Switching
+  the flashlight off after detection does not cancel normal pursuit.
+- Approved configuration: `flashlight_monster_awareness` (0/1, default 0),
+  intended for supported single-player accelerated gameplay. Multiplayer,
+  demos, Arcade and detached camera modes are excluded in the design. No
+  new persistent actor fields, animations or shaders are required.
+- **Verification:** implementation and passing tests were reported by the
+  developer. Exact beam/geometry parity and performance measurements were
+  not supplied for this README update.
+
+#### Imp Fireball Avoidance 1.0
+
+- Optional **Imp Fireball Avoidance** prevents an ordinary Imp from wasting a
+  player-directed fireball attack when another living Imp reliably obstructs
+  its predicted projectile path. Obstructed Imps continue their normal chase
+  behavior and become eligible to attack when the path clears.
+- The approved design places the main check after the existing ranged-attack
+  eligibility decision, before the missile animation. A second check before
+  projectile creation handles an obstruction appearing during the animation.
+  Melee attacks, ordinary infighting and supported enhanced AI remain available.
+- Reuses the engine's projectile dimensions, collision semantics and bounded
+  spatial blockmap queries. Vertical separation matters; nearby Imps outside
+  the collision path must not prevent firing. Uncertain or unsupported
+  trajectories fall back to original behavior. The policy does not alter
+  existing fireball damage, speed, collision or same-species immunity.
+- Approved configuration: `imp_fireball_avoidance` (0/1, default 0) under
+  **F4 → Monster AI → Navigation**. The design is renderer-independent and
+  restricted to supported single-player sessions. No additional actor save
+  fields, new assets or new shaders are required.
+- **Optimization intent:** fewer wasted fireballs may reduce projectile
+  allocations, thinker and collision work, dynamic lighting and impact FX.
+  Bounded queries run only for attack candidates, not every monster every
+  frame. Net performance depends on query cost and actual encounter density.
+- **Verification:** the developer reported **all tests passed**. No benchmark
+  timings, projectile-count captures or CPU/GPU comparisons were provided;
+  this is an accepted AI feature with optimization potential, not a measured
+  performance improvement.
 
 ### Latest survival and encounter updates
 
@@ -300,6 +476,11 @@ restoring saved player state**. These results belong to the builds and test
 conditions recorded in their linked reports; loading coverage does not imply
 full campaign or performance certification.
 
+The six later features summarized above have developer-reported implementation
+status; five have an explicit passing-test or approval report. Those reports
+are not independently reproduced here, and no new aggregate test count or
+benchmark is inferred from them.
+
 **Explore:** [Combat matrix](docs/changes/ENHANCED-MONSTER-COMBAT.md#implemented-matrix)
 · [Survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)
 · [Build and test instructions](BUILDING.md)
@@ -349,6 +530,10 @@ the extensions highlighted above.
   crash logs, retained PDB symbols, and Windows minidumps.
 - Large-texture and large-WAD compatibility improvements, including expanded
   texture column offsets and configurable native zone memory.
+- Shared acid liquid effects for corrosive barrel explosions, with wall
+  adhesion, runoff and cosmetic sprite contamination.
+- Dynamic rain washout spreads and dilutes exposed blood, removing small
+  deposits faster than large corpse pools.
 
 ### Weapons and bundled content
 
@@ -378,6 +563,10 @@ the extensions highlighted above.
   injuries, localized effects, and optional monster frenzy/infighting rules.
 - Native FluidMonsters movement for supported ground monsters, overlap recovery,
   door/corner chase fixes, floor/ceiling fitting, and typed notarget controls.
+- Optional Flashlight Monster Awareness adds direct illumination to idle
+  detection while preserving normal alert and chase behavior.
+- Optional Imp Fireball Avoidance reduces wasted same-species-obstructed
+  projectile attempts while retaining melee and infighting.
 
 ### HUD, input, and game flow
 
@@ -396,6 +585,10 @@ the extensions highlighted above.
   formatting and drawing work. This reuses the existing HUD atlas and does not
   remove its GPU allocation, so it is a clean-screen option rather than a
   claimed memory-saving mode.
+- Speedrun HUD 2.0 adds Classic/Colored/Dynamic information colors, adjustable
+  intensity, optional text shadow, and Compact or Cards / Skulls key indicators.
+- Optional Medical Supply Recovery conserves unused Medikit/Stimpack healing
+  through variable-value recovery packs left on the ground for later use.
 - Local single-player movement options including autorun, jumping, mouse look,
   and limited air steering. Demo, multiplayer, voxel, and unsupported scripted
   content retain their documented restrictions.
@@ -419,6 +612,14 @@ or memory-saving guarantee. Sprite skin injuries are deliberately limited to
 recognized stock artwork; unusual PWAD replacements and non-sprite presentations
 may remain visually unmodified. Decomposition's cosmetic corpse age is not
 preserved across saved-game reloads.
+
+The recent feature work is sprite-focused and does not require voxel models.
+Existing upstream renderer capabilities and historical compatibility notes are
+retained. The new medical, flashlight and Imp AI options can change gameplay
+balance and timing when enabled; the approved designs default to classic/off
+behavior and restrict gameplay-changing features in unsupported sessions.
+Shared acid and rain effects are cosmetic. No new performance figures or full
+cross-WAD certification are asserted for these six additions.
 
 See the [large-WAD compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md)
 and [reload/cache report](docs/changes/RELOAD-LIGHTING-CACHE.md) for measured
@@ -498,6 +699,14 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
   Notifications independently of the spray toggle.
 
 Recent source updates for this build family:
+
+- **Latest six-feature development batch (26 November 2026):** see the
+  [feature details and verification notes](#recent-gameplay-hud-environment-and-ai-updates).
+  The developer reported Speedrun HUD 2.0, Medical Supply Recovery, Dynamic
+  Rain Blood Washout, Flashlight Monster Awareness and Imp Fireball Avoidance
+  implemented with passing tests/acceptance, and Corrosive Barrels 2.0
+  implemented. No separate acid-specific test report or new performance
+  benchmark was provided. The documented build identifier is unchanged.
 
 - **Sunder 2308 MAP01 shutdown.** Closing the game during a background lighting
   update now cancels the remaining work. The in-game probe went from at least
@@ -598,8 +807,10 @@ inside `test-references/`; see HF-005 through HF-008 in the log. The Sunder
 there as well.
 
 **README baseline: build 2026.11.15.6.** This identifier is the documented
-source baseline; the improvements above were rebuilt and packaged afterward,
-but do not assert a new release identifier. The sky, soft sun-shaft, HUD bloom,
+source baseline; earlier documented improvements were rebuilt and packaged
+afterward, but no new release identifier is asserted. The six later feature
+updates are described from developer-reported implementation and acceptance;
+packaging and exact build identifiers for that batch were not supplied. The sky, soft sun-shaft, HUD bloom,
 monster skin-damage, decoration-ambience and Corpse Decomposition M1/M2 updates
 above were developed as incremental source patches for this build family.
 The user reported successful Windows build and gameplay tests for decomposition

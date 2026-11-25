@@ -500,6 +500,9 @@ static bool retaliationPair(mobj_t* a,mobj_t* b){
     if(!allowed(a)||!allowed(b)||a==b||!speciesPair(a,b))return false;
     auto x=runtime.find(a),y=runtime.find(b);return (x!=runtime.end()&&x->second.retaliationTarget==b)||(y!=runtime.end()&&y->second.retaliationTarget==a);
 }
+int P_WeakpointImpSpeciesRisk(mobj_t *source,mobj_t *victim) {
+    return P_WeakpointActive() && (P_WeakpointFrenzied(source) || P_WeakpointEyeRage(source) || retaliationPair(source,victim));
+}
 void P_WeakpointMonsterMissile(mobj_t *missile,mobj_t *actor) {
     if(P_WeakpointEyeRage(actor))runtime[missile].eyeMissile=true;
     else if(P_WeakpointFrenzied(actor))runtime[missile].friendlyMissile=true;

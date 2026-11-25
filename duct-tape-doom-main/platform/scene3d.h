@@ -250,7 +250,7 @@ struct Settings {
     int materialRubble=1;
     int liquidProjectileImpacts=1;
     int progressiveGlass=1,hiddenMachinery=1,adjacentReverb=1;
-    int persistentPursuit=0,aggressiveAI=0,advancedTactics=0;
+    int persistentPursuit=0,aggressiveAI=0,advancedTactics=0,impFireballAvoidance=0;
     float fluidGloveRed=239,fluidGloveGreen=239,fluidGloveBlue=239;
     float fluidShadeRed=2,fluidShadeGreen=2,fluidShadeBlue=2;
     // Sound, though graphics.cfg keeps it: the mixer is told in applySettings.

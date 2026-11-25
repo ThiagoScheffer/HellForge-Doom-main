@@ -380,7 +380,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Navigation",{
                 check("advanced_tactics","Advanced tactics",&s.advancedTactics,"WARNING: Can make the game hard, and very hard with pistol starts. Adds monster-specific movement, cover, suppression and predictive attacks. Single-player only."),
                 check("aggressive_ai","Aggressive AI",&s.aggressiveAI,"WARNING: Can make the game hard, and very hard with pistol starts. Adds sustained attacks, faster gunfire, repositioning and barrages. Single-player only."),
-                check("persistent_pursuit","Persistent pursuit",&s.persistentPursuit,"Alerted monsters search around walls and retry blocked routes. Off keeps original AI. Single-player only; does not wake unaware monsters.")}}}},
+                check("persistent_pursuit","Persistent pursuit",&s.persistentPursuit,"Alerted monsters search around walls and retry blocked routes. Off keeps original AI. Single-player only; does not wake unaware monsters."),
+                check("imp_fireball_avoidance","Imp Fireball Avoidance",&s.impFireballAvoidance,"Imps avoid fireballs blocked by other living Imps. Single-player only.")}}}},
         {"Bundled mods",{
             {voxelDetected()?"VoxelDoom detected":"VoxelDoom not loaded",{
                 check("voxel_models","Voxel models",&s.voxelModels,"Load VoxelDoom through the launcher to use Cheello's voxel models. Missing frames use sprites. Uses native animation and lighting; pack scripts are not executed.",[](const Settings &d){return d.accelerated&&voxelDetected();}),

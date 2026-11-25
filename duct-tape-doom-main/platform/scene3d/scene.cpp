@@ -4,6 +4,7 @@ extern "C" {
 }
 extern "C" {
 #include "p_arena.h"
+#include "p_imp_avoidance.h"
 }
 extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
@@ -267,6 +268,7 @@ void applySettings() {
     }
     p_fluidweapons=settings.fluidWeapons;p_fluidmonsters=settings.fluidMonsters;
     p_persistentpursuit=settings.persistentPursuit;
+    P_SetImpFireballAvoidance(settings.impFireballAvoidance);
     P_SetAggressiveAI(settings.aggressiveAI);
     P_SetAdvancedTactics(settings.advancedTactics);
     I_SetFluidSoundAddon(settings.fluidSounds);

@@ -135,6 +135,7 @@ void P_WeakpointFrenzyTarget(mobj_t*);
 void P_WeakpointMonsterMissile(mobj_t*,mobj_t*);
 int P_WeakpointFriendlyMissile(mobj_t*);
 int P_WeakpointCanHitSpecies(mobj_t*,mobj_t*);
+int P_WeakpointImpSpeciesRisk(mobj_t*,mobj_t*);
 void P_WeakpointRetaliationDamage(mobj_t*,mobj_t*,mobj_t*);
 int P_WeakpointActive(void);
 int P_WeakpointHuman(int type);

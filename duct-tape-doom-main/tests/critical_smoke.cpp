@@ -24,7 +24,8 @@ extern "C" void A_Look(mobj_t*);
 extern const lab::MapWorld *SV_MapWorld();
 using namespace doom3d;
 static std::string output;
-static bool flashlightAwarenessMode=false;
+static bool flashlightAwarenessMode=false,impAvoidanceMode=false;
+extern "C" boolean P_ImpFireballBlocked(mobj_t*);
 static bool visual=false;
 static bool visualEnhanced=false;
 static bool visualSevere=false;
@@ -757,8 +758,26 @@ static void flashlightAwarenessIntegration() {
     settings.flashlightMonsterAwareness=0;applySettings();check(!R_FlashlightIlluminates,"disabled setting removes gameplay hook");
     P_RemoveMobj(monster);std::printf("PASS flashlight awareness integration (%d checks)\n",checks);
 }
+static void impAvoidanceIntegration() {
+    auto *player=players[consoleplayer].mo;
+    check(P_TeleportMove(player,fx(100),fx(-100)),"place target");
+    auto *source=P_SpawnMobj(fx(100),fx(100),ONFLOORZ,MT_TROOP);
+    auto *blocker=P_SpawnMobj(fx(100),fx(0),ONFLOORZ,MT_TROOP);
+    source->target=player;settings.impFireballAvoidance=0;applySettings();
+    check(!P_ImpFireballBlocked(source),"disabled policy allows shot");
+    settings.impFireballAvoidance=1;applySettings();
+    check(P_ImpFireballBlocked(source),"aligned living imp blocks shot");
+    check(P_TeleportMove(blocker,fx(170),fx(0)),"move blocker aside");
+    check(!P_ImpFireballBlocked(source),"clear path allows shot");
+    check(P_TeleportMove(blocker,fx(100),fx(0)),"restore blocker");
+    blocker->health=0;check(!P_ImpFireballBlocked(source),"dead imp does not suppress shot");
+    blocker->health=60;netgame=true;check(!P_ImpFireballBlocked(source),"network play disables policy");netgame=false;
+    P_RemoveMobj(blocker);P_RemoveMobj(source);
+    std::printf("PASS imp avoidance integration (%d checks)\n",checks);
+}
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(impAvoidanceMode){impAvoidanceIntegration();I_Quit();return;}
     if(flashlightAwarenessMode){flashlightAwarenessIntegration();I_Quit();return;}
     if(goreMode){goreIntegration();I_Quit();return;}
     if(soulMode){revenantSoulIntegration();I_Quit();return;}
@@ -789,6 +808,7 @@ extern "C" void I_TestFrame() {
 int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     flashlightAwarenessMode=argc==5&&!std::strcmp(argv[4],"--flashlight-awareness");
+    impAvoidanceMode=argc==5&&!std::strcmp(argv[4],"--imp-avoidance");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     const bool goreSolid=argc==5&&!std::strcmp(argv[4],"--gore-g1-solid");
     solidMode=solidMode||goreSolid;
@@ -844,7 +864,7 @@ int main(int argc,char **argv) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");if(!visual)SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
     if(!SDL_Init(SDL_INIT_VIDEO))return 3;
     std::vector<std::string> args={"critical-smoke","-iwad",argv[1],"-file",argv[2],"-config",config,"-graphics",graphics,
-        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode||incendiaryMode||vileMode||soulMode||flashlightAwarenessMode)?"1":"4"};
+        "-nomonsters","-nomusic","-nosound","-width","640","-height","400","-warp",visualSurvival?"6":(visual||acidMode||incendiaryMode||vileMode||soulMode||flashlightAwarenessMode||impAvoidanceMode)?"1":"4"};
     if(incendiaryLargeMode) {
         args.erase(std::find(args.begin(),args.end(),"-nomonsters"));
         args.back()="15";

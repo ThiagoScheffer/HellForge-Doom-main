@@ -28,7 +28,7 @@ struct Option {
     double low=0,high=1,step=0.05;
     OptionCondition enabled=nullptr;
     void (*action)()=nullptr;
-    bool arcadeLocked() const {return arcade_active&&key&&(!strcmp(key,"advanced_tactics")||!strcmp(key,"aggressive_ai")||!strcmp(key,"persistent_pursuit")||!strcmp(key,"flashlight_monster_awareness")||!strcmp(key,"mod_fluid_monsters"));}
+    bool arcadeLocked() const {return arcade_active&&key&&(!strcmp(key,"advanced_tactics")||!strcmp(key,"aggressive_ai")||!strcmp(key,"persistent_pursuit")||!strcmp(key,"imp_fireball_avoidance")||!strcmp(key,"flashlight_monster_awareness")||!strcmp(key,"mod_fluid_monsters"));}
     bool isEnabled(const Settings &s) const {return !arcadeLocked()&&(!enabled||enabled(s));}
     // Slider: value moved onto the nearest step within range.
     float snap(double value) const {return (float)std::clamp(low+std::round((value-low)/step)*step,low,high);}

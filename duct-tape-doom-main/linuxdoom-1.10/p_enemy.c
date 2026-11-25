@@ -3,6 +3,11 @@
 #include "../platform/monster_wake_audit.h"
 #include "m_argv.h"
 #include "p_arena.h"
+#include "p_imp_avoidance.h"
+#include "d_deh.h"
+#include "i_lan.h"
+#include <stdint.h>
+#include <limits.h>
 // Emacs style mode select   -*- C++ -*- 
 //-----------------------------------------------------------------------------
 //
@@ -234,6 +239,104 @@ boolean P_CheckMeleeRange (mobj_t*	actor)
 }
 
 #include "p_aggressive.inc"
+
+/* This policy never changes collision state or consumes gameplay RNG. */
+static int impAvoidance;
+void P_SetImpFireballAvoidance(int enabled) { impAvoidance = enabled != 0; }
+int P_ImpFireballAvoidanceEnabled(void) {
+    return impAvoidance && !netgame && !lan_session && !deathmatch &&
+        !demoplayback && !demorecording && !arcade_active;
+}
+void A_TroopAttack(mobj_t *actor);
+void A_FaceTarget(mobj_t *actor);
+
+typedef struct {
+    mobj_t *source, *target;
+    int64_t x,y,z,mx,my,mz,radius,height;
+    int targetStep, earliest, blocked, visited, incomplete;
+} imp_query_t;
+static imp_query_t *impQuery;
+
+static int P_ImpClip(double origin,double velocity,double lo,double hi,double *first,double *last) {
+    double a,b,t;
+    if (velocity == 0) return origin >= lo && origin <= hi;
+    a=(lo-origin)/velocity; b=(hi-origin)/velocity;
+    if(a>b){t=a;a=b;b=t;}
+    if(a>*first)*first=a; if(b<*last)*last=b;
+    return *first<=*last;
+}
+/* Sample zero is the spawn half-step. Later horizontal checks precede Z movement. */
+static int P_ImpSample(const imp_query_t *q,const mobj_t *thing,int n) {
+    int64_t x=q->x+q->mx*n, y=q->y+q->my*n;
+    int64_t z=q->z+q->mz*(n ? n-1 : 0), r=q->radius+(int64_t)thing->radius;
+    return thing->radius>0 && thing->height>0 && x>(int64_t)thing->x-r && x<(int64_t)thing->x+r &&
+        y>(int64_t)thing->y-r && y<(int64_t)thing->y+r && z<=(int64_t)thing->z+thing->height && z+q->height>=thing->z;
+}
+static int P_ImpFirstSample(const imp_query_t *q,const mobj_t *thing,int maxstep) {
+    double first=1,last=maxstep,r=(double)q->radius+thing->radius;
+    int n;
+    if(thing->radius<=0||thing->height<=0)return -1;
+    if(P_ImpSample(q,thing,0))return 0;
+    if(maxstep<1 || !P_ImpClip((double)q->x,(double)q->mx,thing->x-r,thing->x+r,&first,&last) ||
+       !P_ImpClip((double)q->y,(double)q->my,thing->y-r,thing->y+r,&first,&last) ||
+       !P_ImpClip((double)(q->z-q->mz),(double)q->mz,(double)thing->z-q->height,(double)thing->z+thing->height,&first,&last))return -1;
+    n=(int)ceil(first); if(n<1)n=1;
+    /* Strict horizontal boundaries can exclude the first integer. */
+    for(;n<=maxstep && n<=last && n<=(int)ceil(first)+1;++n)
+        if(P_ImpSample(q,thing,n))return n;
+    return -1;
+}
+static boolean PIT_ImpCandidate(mobj_t *thing) {
+    imp_query_t *q=impQuery; int step, isimp;
+    if(++q->visited>256){q->incomplete=1;return false;}
+    if(thing==q->source||thing==q->target||!(thing->flags&(MF_SOLID|MF_SHOOTABLE)))return true;
+    step=P_ImpFirstSample(q,thing,q->targetStep);
+    if(step<0)return true;
+    isimp=thing->type==MT_TROOP && thing->health>0 && !thing->player &&
+          !P_WeakpointImpSpeciesRisk(q->source,thing);
+    if(step<q->earliest){q->earliest=step;q->blocked=isimp;}
+    else if(step==q->earliest && !isimp)q->blocked=0;
+    return true;
+}
+boolean P_ImpFireballBlocked(mobj_t *actor) {
+    imp_query_t q={0}; mobj_t *target; mobjinfo_t *info=&mobjinfo[MT_TROOPSHOT];
+    int64_t dx,dy,dz,dist,extent,x0,x1,y0,y1; int bx,by,steps; angle_t angle;
+    if(!P_ImpFireballAvoidanceEnabled()||!actor||actor->type!=MT_TROOP||!actor->info||
+       actor->health<=0||actor->player||!(target=actor->target)||!target->player||target->health<=0||
+       !(target->flags&MF_SHOOTABLE)||(target->flags&MF_SHADOW)||deh_species_infighting||
+       P_WeakpointFrenzied(actor)||P_WeakpointEyeRage(actor)||P_WeakpointAttackOffset(actor)||
+       actor->info->missilestate!=S_TROO_ATK1||states[S_TROO_ATK1].nextstate!=S_TROO_ATK2||
+       states[S_TROO_ATK1].action.acp1!=(actionf_p1)A_FaceTarget||
+       states[S_TROO_ATK2].nextstate!=S_TROO_ATK3||states[S_TROO_ATK2].action.acp1!=(actionf_p1)A_FaceTarget||
+       states[S_TROO_ATK3].action.acp1!=(actionf_p1)A_TroopAttack||
+       (info->flags&(MF_MISSILE|MF_NOGRAVITY))!=(MF_MISSILE|MF_NOGRAVITY)||
+       info->speed<=0||info->speed>MAXMOVE/2||(info->flags&(MF_NOCLIP|MF_FLOAT|MF_SKULLFLY))||info->radius<=0||info->height<=0||
+       !blocklinks||bmapwidth<=0||bmapheight<=0||impQuery)return false;
+    dx=(int64_t)target->x-actor->x;dy=(int64_t)target->y-actor->y;dz=(int64_t)target->z-actor->z;
+    if(dx>INT_MAX||dx< -INT_MAX||dy>INT_MAX||dy< -INT_MAX||dz>INT_MAX||dz<INT_MIN)return false;
+    if(llabs(dx)+llabs(dy)>INT_MAX)return false;
+    dist=P_AproxDistance((fixed_t)dx,(fixed_t)dy);if(dist<0)return false;
+    steps=(int)(dist/info->speed);if(steps<1)steps=1;
+    if(steps>1024)return false;
+    angle=R_PointToAngle2(actor->x,actor->y,target->x,target->y)>>ANGLETOFINESHIFT;
+    q.source=actor;q.target=target;q.mx=FixedMul(info->speed,finecosine[angle]);q.my=FixedMul(info->speed,finesine[angle]);q.mz=dz/steps;
+    q.x=(int64_t)actor->x+(q.mx>>1);q.y=(int64_t)actor->y+(q.my>>1);q.z=(int64_t)actor->z+32*FRACUNIT+(q.mz>>1);
+    q.radius=info->radius;q.height=info->height;
+    q.targetStep=P_ImpFirstSample(&q,target,steps+4);if(q.targetStep<0)return false;
+    q.earliest=q.targetStep;
+    extent=(int64_t)MAXRADIUS+info->radius;
+    x0=(q.x<q.x+q.mx*q.targetStep?q.x:q.x+q.mx*q.targetStep)-extent-bmaporgx;
+    x1=(q.x>q.x+q.mx*q.targetStep?q.x:q.x+q.mx*q.targetStep)+extent-bmaporgx;
+    y0=(q.y<q.y+q.my*q.targetStep?q.y:q.y+q.my*q.targetStep)-extent-bmaporgy;
+    y1=(q.y>q.y+q.my*q.targetStep?q.y:q.y+q.my*q.targetStep)+extent-bmaporgy;
+    x0>>=MAPBLOCKSHIFT;x1>>=MAPBLOCKSHIFT;y0>>=MAPBLOCKSHIFT;y1>>=MAPBLOCKSHIFT;
+    if(x0<0)x0=0;if(y0<0)y0=0;if(x1>=bmapwidth)x1=bmapwidth-1;if(y1>=bmapheight)y1=bmapheight-1;
+    if(x0>x1||y0>y1||(x1-x0+1)*(y1-y0+1)>96)return false;
+    impQuery=&q;
+    for(by=(int)y0;by<=y1&&!q.incomplete;++by)for(bx=(int)x0;bx<=x1&&!q.incomplete;++bx)P_BlockThingsIterator(bx,by,PIT_ImpCandidate);
+    impQuery=NULL;
+    return !q.incomplete && q.blocked && q.earliest<q.targetStep;
+}
 
 //
 // P_CheckMissileRange
@@ -898,6 +1001,9 @@ void MP_BODY(A_Chase) (mobj_t*	actor)
 	
 	if (!P_CheckMissileRange (actor))
 	    goto nomissile;
+
+        if (P_ImpFireballBlocked(actor))
+            goto nomissile;
 	
 	P_AggressiveStartAttack(actor);
 	P_SetMobjState (actor, actor->info->missilestate);
@@ -1119,8 +1225,9 @@ void A_TroopAttack (mobj_t* actor)
     }
 
     
-    // launch a missile
-    P_SpawnMissile (actor, actor->target, MT_TROOPSHOT);
+    // Revalidate after the attack animation; melee has already been handled.
+    if (!P_ImpFireballBlocked(actor))
+        P_SpawnMissile (actor, actor->target, MT_TROOPSHOT);
 }
 
 
