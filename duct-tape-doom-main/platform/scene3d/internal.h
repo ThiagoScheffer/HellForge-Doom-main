@@ -26,6 +26,7 @@ extern "C" {
 #include "doomdef.h"
 #include "../../linuxdoom-1.10/p_weakpoints.h"
 #include "../../linuxdoom-1.10/p_acid.h"
+#include "../../linuxdoom-1.10/p_hazard.h"
 #include "../../linuxdoom-1.10/p_incendiary.h"
 #include "doomstat.h"
 #include "r_state.h"
@@ -358,6 +359,8 @@ void combatBleed(mobj_t*,int justApplied);
 bool combatHeadSprayHandled(const mobj_t *target,const mobj_t *source);
 void combatElemental(mobj_t*,int);
 Image &charredImage(Image&,int,int&);
+Image &acidCorpseImage(int lump,Image &source,int &key);
+Image *dissolvedCorpseImage(int &key);
 int cosmeticBulletLocate(mobj_t*,mobj_t*,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,fixed_t,wp_impact_t*);
 extern float headshotUntil;
 extern unsigned headshotLevel;

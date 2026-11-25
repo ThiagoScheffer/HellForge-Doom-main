@@ -32,6 +32,8 @@ rcsid[] = "$Id: p_spec.c,v 1.6 1997/02/03 22:45:12 b1 Exp $";
 #include "p_notices.h"
 extern int SV_Active(void);
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -45,6 +47,10 @@ extern int SV_Active(void);
 #include "r_local.h"
 #include "p_local.h"
 #include "p_boom.h"
+#include "p_hazard.h"
+#include "p_acid.h"
+#include "i_lan.h"
+#include "m_arcade.h"
 
 #include "g_game.h"
 
@@ -1017,11 +1023,129 @@ P_ShootSpecialLine
 
 
 
-//
-// P_PlayerInSpecialSector
-// Called every tic frame
-//  that the player origin is in a special sector
-//
+/* Shared read-only classification for monster hazards.  Player handling below
+   remains independent, preserving its suit RNG, secrets and exit behavior. */
+static int hazardDamage, hazardAvoidance, hazardDissolution;
+
+void P_HazardConfigure(int damage,int avoidance,int dissolution)
+{
+    hazardDamage=damage!=0;
+    hazardAvoidance=avoidance!=0;
+    hazardDissolution=dissolution!=0;
+}
+
+static int hazardSession(void)
+{
+    return !netgame&&!lan_session&&!deathmatch&&!demoplayback&&!demorecording&&!arcade_active;
+}
+
+int P_HazardAvoidanceEnabled(void) { return hazardDamage&&hazardAvoidance&&hazardSession(); }
+int P_HazardDissolutionEnabled(void) { return hazardDissolution&&hazardSession(); }
+
+int P_HazardFloorTickDue(const mobj_t *actor)
+{
+    return hazardDamage&&!(leveltime&31)&&hazardSession()&&actor->health>0&&
+        !actor->player&&(actor->flags&MF_SHOOTABLE)&&P_HazardSupportedType(actor->type);
+}
+
+void P_HazardTick(mobj_t *actor)
+{
+    const sector_t *sector=actor->subsector?actor->subsector->sector:NULL;
+    hazard_info_t hazard={HAZARD_NONE,0};
+    if(P_HazardFloorContact(actor,sector))hazard=P_HazardSectorInfo(sector);
+    if(hazard.kind==HAZARD_ACID)
+        P_AcidTickWithFloor(actor,hazard.damage);
+    else {
+        P_AcidTick(actor);
+        if(hazard.kind==HAZARD_LAVA&&actor->health>0&&actor->thinker.function.acv!=(actionf_v)(-1))
+            P_DamageMobjLava(actor,hazard.damage);
+    }
+}
+
+int P_HazardAvoidanceChance(const mobj_t *actor)
+{
+    int64_t health, spawn;
+    if(!actor||!actor->info||!P_HazardSupportedType(actor->type)||
+       actor->health<=0||actor->info->spawnhealth<=0)return 0;
+    health=(int64_t)actor->health*100;
+    spawn=actor->info->spawnhealth;
+    if(health>spawn*75)return 0;
+    if(health>spawn*50)return 25;
+    if(health>spawn*25)return 60;
+    return 90;
+}
+
+int P_HazardSectorDamage(const sector_t *sector)
+{
+    unsigned special;
+    if(!sector)return 0;
+    special=(unsigned short)sector->special;
+    if(special>=32) {
+        switch((special>>5)&3) {case 1:return 5;case 2:return 10;case 3:return 20;default:return 0;}
+    }
+    switch(special) {case 7:return 5;case 5:return 10;case 4:case 16:case 11:return 20;default:return 0;}
+}
+
+hazard_kind_t P_HazardFloorKind(int flat)
+{
+    extern int numflats;
+    char name[9];
+    int next;
+    /* Fixed-size direct-mapped cache; level changes invalidate loaded flat IDs. */
+    static struct { int flat; hazard_kind_t kind; } cache[128];
+    static unsigned serial;
+    static int initialized;
+    static const lumpinfo_t *cachedLumps;
+    static int cachedFirstFlat,cachedFlatCount;
+    unsigned index;
+    hazard_kind_t kind=HAZARD_NONE;
+    if(flat<0||flat>=numflats)return HAZARD_NONE;
+    if(!initialized||serial!=r_levelserial||cachedLumps!=lumpinfo||
+       cachedFirstFlat!=firstflat||cachedFlatCount!=numflats) {
+        int i;for(i=0;i<128;++i)cache[i].flat=-1;
+        serial=r_levelserial;cachedLumps=lumpinfo;cachedFirstFlat=firstflat;
+        cachedFlatCount=numflats;initialized=1;
+    }
+    index=(unsigned)flat%128;
+    if(cache[index].flat==flat)return cache[index].kind;
+    const int lump=firstflat+flat;
+    memcpy(name,lumpinfo[lump].name,8);name[8]=0;
+    // Follow the native animation families, and ignore replacement artwork.
+    if(lumpinfo[0].handle>=0 && lumpinfo[lump].handle==lumpinfo[0].handle &&
+       P_PicAnimationNext(false,flat,&next)>0) {
+        if((!strncmp(name,"LAVA",4)&&name[4]>='1'&&name[4]<='4'&&!name[5]) ||
+           (!strncmp(name,"RROCK0",6)&&name[6]>='5'&&name[6]<='8'&&!name[7]) ||
+           !strcmp(name,"SLIME09")||!strcmp(name,"SLIME10")||
+           !strcmp(name,"SLIME11")||!strcmp(name,"SLIME12"))
+            kind=HAZARD_LAVA; // SLIME09-12 share the RROCK lava artwork.
+        else if((!strncmp(name,"NUKAGE",6)&&name[6]>='1'&&name[6]<='3'&&!name[7]) ||
+                (!strncmp(name,"SLIME0",6)&&name[6]>='1'&&name[6]<='8'&&!name[7]))
+            kind=HAZARD_ACID;
+    }
+    cache[index].flat=flat;cache[index].kind=kind;
+    return kind;
+}
+
+hazard_info_t P_HazardSectorInfo(const sector_t *sector)
+{
+    hazard_info_t result={HAZARD_NONE,0};
+    int damage=P_HazardSectorDamage(sector);
+    if(damage>0) {
+        result.kind=P_HazardFloorKind(sector->floorpic);
+        if(result.kind!=HAZARD_NONE)result.damage=damage;
+    }
+    return result;
+}
+
+int P_HazardFloorContact(const mobj_t *actor,const sector_t *sector)
+{
+    if(!actor||!sector||actor->momz!=0)return 0;
+    if(!SV_Active())return actor->z==sector->floorheight&&actor->floorz==sector->floorheight;
+    return llabs((int64_t)actor->z-actor->floorz)<=FRACUNIT/64 &&
+        llabs((int64_t)actor->floorz-sector->floorheight)<=FRACUNIT/64;
+}
+
+// Called every tic frame that the player's origin is in a special sector.
 void P_PlayerInSpecialSector (player_t* player)
 {
     sector_t*	sector;
@@ -1043,7 +1167,7 @@ void P_PlayerInSpecialSector (player_t* player)
 if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);sector->secretfound=1;sector->special&=~128;}
         int damage=(flags>>5)&3;
         if(damage&&!(leveltime&31)&&(!player->powers[pw_ironfeet]||(damage==3&&P_Random()<5)))
-            P_DamageMobj(player->mo,NULL,NULL,damage==1?5:damage==2?10:20);
+            P_DamageMobj(player->mo,NULL,NULL,P_HazardSectorDamage(sector));
         return;
     }
     // Has hitten ground.
@@ -1053,14 +1177,14 @@ if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);s
 	// HELLSLIME DAMAGE
 	if (!player->powers[pw_ironfeet])
 	    if (!(leveltime&0x1f))
-		P_DamageMobj (player->mo, NULL, NULL, 10);
+		P_DamageMobj (player->mo, NULL, NULL, P_HazardSectorDamage(sector));
 	break;
 	
       case 7:
 	// NUKAGE DAMAGE
 	if (!player->powers[pw_ironfeet])
 	    if (!(leveltime&0x1f))
-		P_DamageMobj (player->mo, NULL, NULL, 5);
+		P_DamageMobj (player->mo, NULL, NULL, P_HazardSectorDamage(sector));
 	break;
 	
       case 16:
@@ -1071,7 +1195,7 @@ if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);s
 	    || (P_Random()<5) )
 	{
 	    if (!(leveltime&0x1f))
-		P_DamageMobj (player->mo, NULL, NULL, 20);
+		P_DamageMobj (player->mo, NULL, NULL, P_HazardSectorDamage(sector));
 	}
 	break;
 			
@@ -1088,7 +1212,7 @@ if(flags&128){player->secretcount++;P_Notice((int)(player-players),N_SECRET,0);s
 	player->cheats &= ~CF_GODMODE;
 
 	if (!(leveltime&0x1f))
-	    P_DamageMobj (player->mo, NULL, NULL, 20);
+	    P_DamageMobj (player->mo, NULL, NULL, P_HazardSectorDamage(sector));
 
 	if (player->health <= 10)
 	    G_ExitLevel();

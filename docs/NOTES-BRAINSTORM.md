@@ -324,7 +324,7 @@ Death GraveSystem memo - A new option for gamexx -> User can enable option to ke
 Monsters can suffer from Acid and Lava places as the player - so they try to avoid sometimes if they are already hurt. if monster die from Acid, it will melt suing the deco POL5 with green color effect to match ACID.
 
 
-
+--------------------------
 //rework Texture Immersion and emissive texture
 
 We had applied  Texture Immersion for these texture file before:
@@ -355,7 +355,7 @@ doors to fix: (door9_2 door15_1 door15_2 = can use same idea from door2_4)
 These walls textures are like soft fluorescent light yellow effect emissive - missing
 rw38_1 rw38_2 rw38_3 rw38_4 rw39_1
 
-
+-----------------------------
 
 Cacodemon and painelemental - eye injuries system - if hit eye and get blinded - improve it by making the eye part closed or like a woundblood so player can visually see that the monster Eye is hurt - if it recovery health and can see again, remove the hurt effect on the eye.
 

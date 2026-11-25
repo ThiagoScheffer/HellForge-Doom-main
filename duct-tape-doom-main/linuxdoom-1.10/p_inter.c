@@ -46,6 +46,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 
 #include "p_local.h"
 #include "p_acid.h"
+#include "p_hazard.h"
 #include "p_incendiary.h"
 #include "p_encounter.h"
 #include "r_state.h"
@@ -993,7 +994,7 @@ damageMobj
   mobj_t*	source,
   int 		damage,
   boolean acid,
-  boolean oilFire )
+  boolean oilFire, boolean lava )
 {
     unsigned	ang;
     int		saved;
@@ -1132,6 +1133,11 @@ damageMobj
     {
 	P_NoticeKill(source,target,inflictor);
 	P_KillMobj (source, target);
+        if(acid && target->thinker.function.acv!=(actionf_v)(-1) &&
+           !target->player && P_HazardSupportedType(target->type)) {
+            if(lava)P_HazardRecordDeath(target,HAZARD_LAVA);
+            else if(P_HazardDissolutionEnabled())P_HazardRecordDeath(target,HAZARD_ACID);
+        }
         if(!acid)P_CombatConfirmed(target,source,elementKind,damage,previousBurn);
 	return;
     }
@@ -1170,18 +1176,23 @@ damageMobj
 
 void P_DamageMobj(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage)
 {
-    damageMobj(target,inflictor,source,damage,false,false);
+    damageMobj(target,inflictor,source,damage,false,false,false);
 }
 
 void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage)
 {
-    damageMobj(target,NULL,source,damage,true,false);
+    damageMobj(target,NULL,source,damage,true,false,false);
+}
+
+void P_DamageMobjLava(mobj_t *target,int damage)
+{
+    damageMobj(target,NULL,NULL,damage,true,false,true);
 }
 
 void P_DamageMobjFire(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage)
 {
     int previousDot=p_wp_dot_damage;
     if(!inflictor)p_wp_dot_damage=5; /* Periodic oil damage suppresses pain and weakpoint reactions. */
-    damageMobj(target,inflictor,source,damage,false,true);
+    damageMobj(target,inflictor,source,damage,false,true,false);
     p_wp_dot_damage=previousDot;
 }

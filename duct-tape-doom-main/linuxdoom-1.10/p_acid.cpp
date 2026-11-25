@@ -276,9 +276,9 @@ extern "C" void P_AcidBarrelExplode(mobj_t *barrel, mobj_t *source) {
     }
 }
 
-extern "C" void P_AcidTick(mobj_t *actor) {
-    if (!actor) return;
-    if (!P_AcidEnabled()) return;
+static bool acidTick(mobj_t *actor,int floorDamage) {
+    if (!actor) return false;
+    if (!P_AcidEnabled()) return false;
     sweepPools();
 
     /* A damaged, still-intact barrel continues to seep. The puddle is refreshed
@@ -295,13 +295,13 @@ extern "C" void P_AcidTick(mobj_t *actor) {
                 }
             }
         }
-        return;
+        return false;
     }
 
-    if(pools.empty()&&exposures.empty())return;
+    if(pools.empty()&&exposures.empty())return false;
     if (!validVictim(actor) || radiationProtected(actor)) {
         exposures.erase(actor);
-        return;
+        return false;
     }
 
     const AcidPool *contact = nullptr;
@@ -324,17 +324,24 @@ extern "C" void P_AcidTick(mobj_t *actor) {
             it->second.source = contact->source;
         }
     }
-    if (it == exposures.end()) return;
+    if (it == exposures.end()) return false;
     if (leveltime > it->second.until) {
         exposures.erase(it);
-        return;
+        return false;
     }
-    if (leveltime < it->second.nextDamage) return;
+    if (leveltime < it->second.nextDamage) return false;
 
     mobj_t *source = it->second.source;
     it->second.nextDamage = leveltime + acidDamageInterval;
-    P_DamageMobjAcid(actor,source,acidDamage);
+    P_DamageMobjAcid(actor,source,std::max(acidDamage,floorDamage));
     if (actor->thinker.function.acv==(actionf_v)(-1)||actor->health<=0)exposures.erase(actor);
+    return true;
+}
+
+extern "C" void P_AcidTick(mobj_t *actor) { acidTick(actor,0); }
+
+extern "C" void P_AcidTickWithFloor(mobj_t *actor,int floorDamage) {
+    if(!acidTick(actor,floorDamage))P_DamageMobjAcid(actor,nullptr,floorDamage);
 }
 
 extern "C" void P_AcidForget(mobj_t *actor) {

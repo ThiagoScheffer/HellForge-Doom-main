@@ -50,6 +50,8 @@ rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 #include "p_fluid.h"
 #include "p_swarm.h"
 #include "p_acid.h"
+#include "p_hazard.h"
+#include "p_solid.h"
 
 #include "s_sound.h"
 
@@ -58,6 +60,7 @@ rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 // State.
 #include "doomstat.h"
 #include "r_state.h"
+#include "r_main.h"
 
 // A negative sight result lives only on this A_Look stack, across no actions
 // or world updates. Never reuse the initial ambush test's positive result:
@@ -528,6 +531,68 @@ boolean P_TryWalk (mobj_t* actor)
 #include "p_pursuit.inc"
 #include "p_tactics.inc"
 
+/* Direction classification never attempts movement or touches collision globals. */
+static int hazardMover(mobj_t *actor)
+{
+    return P_HazardAvoidanceEnabled() && actor->health>0 && !actor->player &&
+        P_HazardSupportedType(actor->type) && !(actor->flags&(MF_FLOAT|MF_NOCLIP)) &&
+        actor->subsector && P_HazardFloorContact(actor,actor->subsector->sector) &&
+        !P_WeakpointImmobilized(actor);
+}
+
+static int hazardStep(mobj_t *actor,int dir)
+{
+    fixed_t speed=P_FluidMoveSpeed(actor), floor, ceiling;
+    int64_t x=(int64_t)actor->x+FixedMul(speed,xspeed[dir]);
+    int64_t y=(int64_t)actor->y+FixedMul(speed,yspeed[dir]);
+    if(x<INT_MIN||x>INT_MAX||y<INT_MIN||y>INT_MAX)return -1;
+    const sector_t *sector=R_PointInSubsector((fixed_t)x,(fixed_t)y)->sector;
+    if(SV_Active() && (!SV_MapMode() || SV_MapPosition(actor,(fixed_t)x,(fixed_t)y)) &&
+       (SV_Position(actor,(fixed_t)x,(fixed_t)y,&floor,&ceiling)!=1 ||
+        llabs((int64_t)floor-sector->floorheight)>FRACUNIT/64))return -1;
+    return P_HazardSectorInfo(sector).kind!=HAZARD_NONE;
+}
+
+typedef struct {
+    int chance, escaping, decision;
+    unsigned attempted;
+    int deferred[8], count;
+} hazard_walk_t;
+
+static boolean hazardTryWalk(mobj_t *actor,hazard_walk_t *walk)
+{
+    unsigned dir=(unsigned)actor->movedir;
+    if(!walk->chance&&!walk->escaping)return P_TryWalk(actor);
+    if(dir>=8||(walk->attempted&(1u<<dir)))return false;
+    walk->attempted|=1u<<dir;
+    int destination=hazardStep(actor,dir);
+    if(destination>0 && !walk->escaping && walk->decision==0)
+        walk->decision=P_Random()*100/256<walk->chance?1:-1;
+    if((walk->escaping&&destination!=0)||(destination>0&&walk->decision>0)) {
+        walk->deferred[walk->count++]=(int)dir;
+        return false;
+    }
+    return P_TryWalk(actor);
+}
+
+/* Give exposed actors a bounded escape attempt from their normal look/chase
+   actions, without assigning a combat target or interrupting pain. */
+static boolean hazardEscape(mobj_t *actor)
+{
+    if(!hazardMover(actor)||P_WeakpointFrenzied(actor)||P_WeakpointFeeding(actor)||
+       !P_HazardSectorInfo(actor->subsector->sector).damage)return false;
+    int old=actor->movedir;
+    int first=(unsigned)old<8?old:(int)(actor->angle>>29);
+    for(int offset=0;offset<8;++offset) {
+        int dir=(first+offset)&7;
+        if(hazardStep(actor,dir)!=0)continue;
+        actor->movedir=dir;
+        if(P_TryWalk(actor))return true;
+    }
+    actor->movedir=old;
+    return false;
+}
+
 void P_NewChaseDir (mobj_t*	actor)
 {
     fixed_t	deltax;
@@ -543,6 +608,11 @@ void P_NewChaseDir (mobj_t*	actor)
     if (!actor->target)
 	I_Error ("P_NewChaseDir: called with no target");
 		
+    hazard_walk_t walk={0};
+    if(hazardMover(actor)) {
+        walk.escaping=P_HazardSectorInfo(actor->subsector->sector).damage!=0;
+        walk.chance=P_HazardAvoidanceChance(actor);
+    }
     olddir = actor->movedir;
     turnaround=opposite[olddir];
 
@@ -568,7 +638,7 @@ void P_NewChaseDir (mobj_t*	actor)
 	&& d[2] != DI_NODIR)
     {
 	actor->movedir = diags[((deltay<0)<<1)+(deltax>0)];
-	if (actor->movedir != turnaround && P_TryWalk(actor))
+	if (actor->movedir != turnaround && hazardTryWalk(actor,&walk))
 	    return;
     }
 
@@ -589,7 +659,7 @@ void P_NewChaseDir (mobj_t*	actor)
     if (d[1]!=DI_NODIR)
     {
 	actor->movedir = d[1];
-	if (P_TryWalk(actor))
+	if (hazardTryWalk(actor,&walk))
 	{
 	    // either moved forward or attacked
 	    return;
@@ -600,7 +670,7 @@ void P_NewChaseDir (mobj_t*	actor)
     {
 	actor->movedir =d[2];
 
-	if (P_TryWalk(actor))
+	if (hazardTryWalk(actor,&walk))
 	    return;
     }
 
@@ -610,7 +680,7 @@ void P_NewChaseDir (mobj_t*	actor)
     {
 	actor->movedir =olddir;
 
-	if (P_TryWalk(actor))
+	if (hazardTryWalk(actor,&walk))
 	    return;
     }
 
@@ -625,7 +695,7 @@ void P_NewChaseDir (mobj_t*	actor)
 	    {
 		actor->movedir =tdir;
 		
-		if ( P_TryWalk(actor) )
+		if ( hazardTryWalk(actor,&walk) )
 		    return;
 	    }
 	}
@@ -640,7 +710,7 @@ void P_NewChaseDir (mobj_t*	actor)
 	    {
 		actor->movedir =tdir;
 		
-		if ( P_TryWalk(actor) )
+		if ( hazardTryWalk(actor,&walk) )
 		    return;
 	    }
 	}
@@ -649,10 +719,14 @@ void P_NewChaseDir (mobj_t*	actor)
     if (turnaround !=  DI_NODIR)
     {
 	actor->movedir =turnaround;
-	if ( P_TryWalk(actor) )
+	if ( hazardTryWalk(actor,&walk) )
 	    return;
     }
 
+    for(int i=0;i<walk.count;++i) {
+        actor->movedir=walk.deferred[i];
+        if(P_TryWalk(actor))return;
+    }
     actor->movedir = DI_NODIR;	// can not move
 }
 
@@ -786,6 +860,7 @@ void A_KeenDie (mobj_t* mo)
 //
 static void P_LookAction(mobj_t* actor);
 void A_Look(mobj_t *actor) {
+    hazardEscape(actor);
     WA_LookBegin(actor);
 #ifdef DOOM_MONSTER_PROFILING
     MP_Scope scope={0};if(mp_enabled)scope=MP_Begin(MP_LOOK);
@@ -966,6 +1041,7 @@ void MP_BODY(A_Chase) (mobj_t*	actor)
 	return;
     }
     
+    if(hazardEscape(actor))return;
     if(P_TacticsMove(actor))return;
     if(P_AggressiveManeuver(actor))return;
     int woundedAttack=P_WeakpointBleedOpportunity(actor);
@@ -1023,6 +1099,12 @@ void MP_BODY(A_Chase) (mobj_t*	actor)
     }
     
     // chase towards player
+    if(actor->movecount>0 && (unsigned)actor->movedir<8 && hazardMover(actor) &&
+       P_HazardAvoidanceChance(actor)>0 && hazardStep(actor,actor->movedir)>0 &&
+       P_HazardBoundaryDue(actor)) {
+        P_NewChaseDir(actor);
+        return;
+    }
     if (!P_TacticsHold(actor) && !P_PersistentPursuit(actor) && (--actor->movecount<0
 	|| !P_Move (actor)))
     {
@@ -1438,7 +1520,7 @@ boolean PIT_VileCheck (mobj_t*	thing)
     int		maxdist;
     boolean	check;
 	
-    if (!(thing->flags & MF_CORPSE) )
+    if (!(thing->flags & MF_CORPSE) || P_HazardAcidCorpse(thing))
 	return true;	// not a monster
     
     if (thing->tics != -1)

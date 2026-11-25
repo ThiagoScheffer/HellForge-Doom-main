@@ -11,6 +11,7 @@ extern "C" {
 #include "p_local.h"
 #include "p_arena.h"
 #include "p_weakpoints.h"
+#include "p_hazard.h"
 #include "doomstat.h"
 #include "m_random.h"
 }
@@ -36,6 +37,9 @@ int (*P_SevereBloodTint)(const mobj_t*)=nullptr;
 void (*P_SevereBloodBurst)(const wp_severe_burst_t*)=nullptr;
 namespace {
 struct Runtime {
+    hazard_kind_t hazardDeath=HAZARD_NONE;
+    int hazardDeathTic=0;
+    int hazardBoundaryNext=0;
     int dotUntil=0,dotNext=0,dotKind=0,dotDamage=0,dotPlayer=-1;
     mobj_t *dotSource=nullptr;
     int burnUntil=0,burnKind=0,charred=0;
@@ -60,7 +64,7 @@ struct Runtime {
     uint64_t shot=0;
 };
 bool keepSurvival(const Runtime &r){return r.retaliationTarget||r.retaliationVictim;}
-bool keepExpansion(const Runtime &r){return r.dotUntil>=leveltime&&r.dotKind||r.charred||r.burnUntil>leveltime||r.staggerCooldown>leveltime||r.baronUntil>leveltime||r.siphonUntil>leveltime||r.siphonCooldown>leveltime;}
+bool keepExpansion(const Runtime &r){return r.hazardDeath!=HAZARD_NONE||r.dotUntil>=leveltime&&r.dotKind||r.charred||r.burnUntil>leveltime||r.staggerCooldown>leveltime||r.baronUntil>leveltime||r.siphonUntil>leveltime||r.siphonCooldown>leveltime;}
 std::unordered_map<mobj_t*,Runtime> runtime;
 mobj_t *deathCleanup=nullptr;
 struct Pellets {int total=0,face=0;bool frenzyHead=false,eye=false;};
@@ -212,7 +216,7 @@ void P_WeakpointConfigure(int enhanced,int vulnerabilities,int injuries) {
     if(enhanced!=p_wp_enhanced||vulnerabilities!=p_wp_vulnerabilities||injuries!=p_wp_injuries) {
         for(auto it=runtime.begin();it!=runtime.end();) {
             auto &r=it->second;r.aimUntil=r.aimCooldown=r.legUntil=r.legCooldown=r.offset=0;
-            if(!keepExpansion(r)&&!keepSurvival(r)&&r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile&&!r.feedPhase&&!r.feedCooldown&&!r.feedSearch&&!r.noEat)it=runtime.erase(it);else ++it;
+            if(r.hazardBoundaryNext<=leveltime&&!keepExpansion(r)&&!keepSurvival(r)&&r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.bleedUntil&&!r.frenzyUntil&&!r.friendlyMissile&&!r.feedPhase&&!r.feedCooldown&&!r.feedSearch&&!r.noEat)it=runtime.erase(it);else ++it;
         }
     }
     p_wp_enhanced=enhanced;p_wp_vulnerabilities=vulnerabilities;p_wp_injuries=injuries;
@@ -420,6 +424,35 @@ void P_WeakpointForget(mobj_t *actor){
         }}
 }
 void P_WeakpointDied(mobj_t *actor){auto *previous=deathCleanup;deathCleanup=actor;P_WeakpointForget(actor);deathCleanup=previous;}
+void P_HazardRecordDeath(mobj_t *actor,hazard_kind_t kind) {
+    auto &status=runtime[actor];
+    status.hazardDeath=kind;
+    status.hazardDeathTic=leveltime;
+}
+int P_HazardBoundaryDue(mobj_t *actor) {
+    auto &status=runtime[actor];
+    if(status.hazardBoundaryNext>leveltime)return 0;
+    status.hazardBoundaryNext=leveltime+TICRATE/2;
+    return 1;
+}
+static int hazardCorpse(const mobj_t *actor,hazard_kind_t kind) {
+    if(!actor||actor->health>0||!P_HazardSupportedType(actor->type))return 0;
+    const auto it=runtime.find(const_cast<mobj_t*>(actor));
+    return it!=runtime.end()&&it->second.hazardDeath==kind;
+}
+int P_HazardAcidCorpse(const mobj_t *actor) {
+    return hazardCorpse(actor,HAZARD_ACID);
+}
+int P_HazardLavaCorpse(const mobj_t *actor) {
+    return hazardCorpse(actor,HAZARD_LAVA);
+}
+int P_HazardDeathAge(const mobj_t *actor) {
+    const auto it=runtime.find(const_cast<mobj_t*>(actor));
+    return it==runtime.end()?0:std::clamp(leveltime-it->second.hazardDeathTic,0,ACID_DISSOLVE_TICS);
+}
+int P_HazardDissolved(const mobj_t *actor) {
+    return P_HazardAcidCorpse(actor)&&actor->tics==-1&&P_HazardDeathAge(actor)>=ACID_DISSOLVE_TICS;
+}
 void P_WeakpointClear(void){combatExpansionReset();P_WeakpointFeedingReset();runtime.clear();severeCount=0;pellets.clear();shotSource=nullptr;shotId=0;}
 size_t P_WeakpointRuntimeCount(void){return runtime.size();}
 
@@ -550,7 +583,7 @@ void P_WeakpointTick(mobj_t *actor) {
     it=runtime.find(actor);
     if(it!=runtime.end()) {
         const auto &r=it->second;
-        if(!keepExpansion(r)&&!keepSurvival(r)&&r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.friendlyMissile&&!r.noEat&&!r.bleedUntil&&!r.frenzyUntil&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.aimUntil<=leveltime&&
+        if(r.hazardBoundaryNext<=leveltime&&!keepExpansion(r)&&!keepSurvival(r)&&r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.friendlyMissile&&!r.noEat&&!r.bleedUntil&&!r.frenzyUntil&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.aimUntil<=leveltime&&
             r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)runtime.erase(it);
     }
 }
@@ -609,7 +642,12 @@ uint32_t get(const unsigned char *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|(
 std::vector<mobj_t*> actors(){std::vector<mobj_t*> out;for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next)if(t->function.acp1==(actionf_p1)P_MobjThinker)out.push_back((mobj_t*)t);return out;}
 }
 size_t P_WeakpointSave(unsigned char *destination) {
-    auto list=actors();std::vector<unsigned char> out;put(out,7);put(out,0);uint32_t count=0;
+    auto list=actors();
+    const bool hasHazard=std::any_of(list.begin(),list.end(),[](mobj_t *actor) {
+        const auto it=runtime.find(actor);
+        return it!=runtime.end()&&it->second.hazardDeath!=HAZARD_NONE;
+    });
+    std::vector<unsigned char> out;put(out,hasHazard?8:7);put(out,0);uint32_t count=0;
     for(size_t i=0;i<list.size();++i) {
         auto it=runtime.find(list[i]);if(it==runtime.end())continue;const auto &r=it->second;
         if(!keepExpansion(r)&&!keepSurvival(r)&&r.kind==WP_OTHER&&!r.blind&&!r.eyeRageUntil&&!r.eyeMissile&&!r.friendlyMissile&&!r.noEat&&!r.feedPhase&&r.feedCooldown<=leveltime&&r.feedSearch<=leveltime&&r.bleedUntil<=leveltime&&r.frenzyUntil<=leveltime&&r.aimUntil<=leveltime&&r.aimCooldown<=leveltime&&r.legUntil<=leveltime&&r.legCooldown<=leveltime)continue;
@@ -633,6 +671,10 @@ size_t P_WeakpointSave(unsigned char *destination) {
         put(out,std::max(0,r.dotUntil-leveltime));put(out,std::max(0,r.dotNext-leveltime));put(out,r.dotKind);put(out,r.dotDamage);
         put(out,actorId(r.dotSource));put(out,r.dotPlayer+1);
         put(out,std::max(0,r.feedAttemptUntil-leveltime));put(out,actorId(r.feedDanger));put(out,actorId(r.retaliationTarget));put(out,actorId(r.retaliationVictim));
+        if(hasHazard) {
+            put(out,r.hazardDeath);
+            put(out,r.hazardDeath!=HAZARD_NONE?P_HazardDeathAge(list[i]):0);
+        }
     }
     for(int i=0;i<4;++i)out[4+i]=(unsigned char)(count>>(i*8));
     put(out,(uint32_t)(out.size()+8));out.insert(out.end(),{'W','P','0','1'});
@@ -642,8 +684,8 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
     P_WeakpointClear();if(length<16||std::memcmp(data+length-4,"WP01",4))return 0;
     size_t bytes=get(data+length-8);if(bytes<16||bytes>length)return 0;
     const auto *p=data+length-bytes;uint32_t count=get(p+4);
-    uint32_t version=get(p);size_t stride=version==1?60:version==2?84:version==3?136:version==4?160:version==5?196:version==6?220:236;
-    if((version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
+    uint32_t version=get(p);size_t stride=version==1?60:version==2?84:version==3?136:version==4?160:version==5?196:version==6?220:version==7?236:244;
+    if((version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8)||count>(bytes-16)/stride||bytes!=16+(size_t)count*stride)return bytes;
     auto list=actors();p+=8;
     for(uint32_t i=0;i<count;++i,p+=stride) {
         uint32_t id=get(p),kind=get(p+4);if(!id||id>list.size()||kind>WP_OTHER+7)continue;
@@ -694,6 +736,13 @@ size_t P_WeakpointLoad(const unsigned char *data,size_t length) {
             r.feedDanger=ref(get(p+224));r.retaliationTarget=ref(get(p+228));r.retaliationVictim=ref(get(p+232));
         }else if(r.feedPhase)r.feedAttemptUntil=leveltime+p_wp_balance.feedWindow;
         auto *actor=list[id-1];
+        if(version>=8&&actor->health<=0&&!actor->player&&P_HazardSupportedType(actor->type)) {
+            const auto kind=get(p+236);
+            if(kind==HAZARD_ACID||kind==HAZARD_LAVA) {
+                r.hazardDeath=(hazard_kind_t)kind;
+                r.hazardDeathTic=leveltime-(int)std::min(get(p+240),(uint32_t)ACID_DISSOLVE_TICS);
+            }
+        }
         if(!p_wp_dot||!dotEligible(actor)||r.dotUntil<leveltime||!r.dotKind||!r.dotDamage){r.dotUntil=r.dotNext=r.dotKind=r.dotDamage=0;r.dotSource=nullptr;r.dotPlayer=-1;}
         if(!p_wp_elemental||!elementalEligible(actor)){r.burnUntil=r.burnKind=r.charred=0;}
         if(!p_wp_reactions||!allowed(actor)){r.staggerUntil=r.staggerCooldown=r.baronUntil=r.siphonUntil=r.siphonNext=r.siphonCooldown=0;}

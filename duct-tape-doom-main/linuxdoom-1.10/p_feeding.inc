@@ -53,7 +53,7 @@ mobj_t *findFood(mobj_t *actor) {
 }
 void P_WeakpointFeedingReset(void){feedBudgetTic=-1;feedBudget=0;}
 int P_WeakpointFoodEligible(mobj_t *food,int corpse) {
-    if(!food||food->player||!food->info||!(food->info->flags&MF_COUNTKILL)||
+    if(!food||(corpse&&P_HazardAcidCorpse(food))||food->player||!food->info||!(food->info->flags&MF_COUNTKILL)||
         (P_WeakpointTargetAllowed&&!P_WeakpointTargetAllowed(food)))return 0;
     auto found=runtime.find(food);if(found!=runtime.end()&&found->second.noEat)return 0;
     if(!corpse)return food->health>0&&(food->flags&MF_SHOOTABLE)&&

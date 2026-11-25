@@ -742,7 +742,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     }
     void criticalSurface(mobj_t *thing, mobj_t *viewer)
     {
-        if (!thing || !viewer || !thing->subsector || thing->sprite < 0 || thing->sprite >= numsprites)
+        if (!thing || !viewer || !thing->subsector || P_HazardAcidCorpse(thing) || thing->sprite < 0 || thing->sprite >= numsprites)
             return;
         const auto &sprite = sprites[thing->sprite];
         int frame = thing->frame & FF_FRAMEMASK;
@@ -804,8 +804,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Reflected/voxel presentation retains the existing sprite/model path.
         if (!mirror && monsterProjectileVisual(*thing, camera, fraction))
             return;
+        const bool acidCorpse=P_HazardAcidCorpse(thing);
+        const bool lavaCorpse=P_HazardLavaCorpse(thing);
+        const bool charred=lavaCorpse||P_CombatCharred(thing);
         DeathView death = {thing->sprite, thing->frame, thing->angle, false, 1, 0, {}};
-        bool directed = !self && settings.deathDirector && deathView(*thing, fraction, death);
+        bool directed = !self && !acidCorpse && settings.deathDirector && deathView(*thing, fraction, death);
         if (death.sprite < 0 || death.sprite >= numsprites)
             return;
         const auto &sprite = sprites[death.sprite];
@@ -833,7 +836,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Hit flinches and death jolts (body_motion.cpp): drawn in strips, a hop lifts the body.
         // A directed death scales the jolt by its phase and adds the landing's settle.
         BodyPose pose;
-        bool posed = !self && !death.fall.active && (thing->flags & MF_COUNTKILL) && bodyPose(*thing, fraction, pose);
+        bool posed = !self && !acidCorpse && !death.fall.active && (thing->flags & MF_COUNTKILL) && bodyPose(*thing, fraction, pose);
         if (directed)
         {
             if (!posed)
@@ -853,14 +856,14 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         float strongest = 0;
         ShadowLight shadowLight{};
         const size_t casterIndex=casters.size();
-        if (!self)
+        if (!self && !acidCorpse)
             addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera);
-        if (!self && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
+        if (!self && !acidCorpse && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
             casters.push_back({thing, &image, lump, (bool)flipped(rotation), x, y, z, std::hypot(x - camera.eye[0], y - camera.eye[1])});
         auto pulse = lit.pulse, beamLight = lit.beam, baked = lit.baked;
         const auto &shadowLights = lit.shadows;
         const auto &statics = lit.statics;
-        if (!self)
+        if (!self && !acidCorpse)
             for (const auto &light : shadowLights.lights)
                 if (light.strength > 0.025f)
                     addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera, &light);
@@ -926,7 +929,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // The quad for one view: that view's frame, facing along its right.
         auto emit = [&](std::map<int, std::vector<Vertex>> &out, unsigned seen, float rx, float ry, bool collar)
         {
-            if (!death.ragdoll && drawVoxel(out, *thing, death.sprite, death.frame, death.facing, x, y, z, light, baked, packedStatics, tint, camera)) {
+            if (!acidCorpse && !lavaCorpse && !death.ragdoll &&
+                drawVoxel(out, *thing, death.sprite, death.frame, death.facing, x, y, z, light, baked, packedStatics, tint, camera)) {
                 // Voxel substitution bypasses the sprite-texture path entirely.
                 // Report it explicitly instead of falsely diagnosing missing age data.
                 if(M_CheckParm((char*)"-decaydebug")) {
@@ -945,7 +949,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             Image &sourceImage = bloodTint ? bloodSpriteImage(lump, bloodTint, spriteKey) : lumpImage(lump, false);
             const bool oilRupture=thing->type==MT_MISC77&&thing->sprite==SPR_BEXP&&thing->state==&states[S_BEXP5]&&
                 thing->health==0&&(thing->flags&MF_NOBLOOD);
-            Image &baseImage = P_CombatCharred(thing) ? charredImage(sourceImage,spriteKey,spriteKey) :
+            Image &baseImage = charred ? charredImage(sourceImage,spriteKey,spriteKey) :
                 (thing->player||oilRupture) ? playerColourImage(sourceImage,spriteKey,(thing->flags&MF_TRANSLATION)>>MF_TRANSSHIFT,spriteKey) :
                 sourceImage;
             // Keep the unmodified art authoritative for silhouette, pose, wound attachment
@@ -979,8 +983,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 : skinImage;
             Image &uncoatedImage=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
                 art ? decorationStain(*art,skinImage,spriteKey) : eyeImage;
-            Image &image=acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen),
-                                        uncoatedImage.eyeDamageMask.empty() ? nullptr : &sourceImage);
+            Image *residue=acidCorpse&&P_HazardDissolved(thing)?dissolvedCorpseImage(spriteKey):nullptr;
+            if(acidCorpse&&!residue)spriteKey=-1-lump;
+            Image &image=residue?*residue:acidCorpse?acidCorpseImage(lump,sourceImage,spriteKey):
+                acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen),
+                                uncoatedImage.eyeDamageMask.empty() ? nullptr : &sourceImage);
             // A traceable renderer hand-off is essential: isolated rule tests
             // cannot prove that the real game selects the new GPU texture.
             if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {
@@ -1015,26 +1022,42 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 bottom = z + (image.top - image.height - death.fall.ground) * keep + death.fall.lift;
             }
             // float sink=!ragdoll?sinkInLiquid(thing,i,image,x,y,camera,collar):dollDown?sinkInLiquid(thing,i,image,x,y,camera,collar,true):0;top-=sink;bottom-=sink;
-            float sink = !ragdoll ? sinkInLiquid(thing, i, image, x, y, camera, collar) : dollDown ? sinkInLiquid(thing, i, image, x, y, camera, collar, true)
+            float sink = acidCorpse ? 0.f : !ragdoll ? sinkInLiquid(thing, i, image, x, y, camera, collar) : dollDown ? sinkInLiquid(thing, i, image, x, y, camera, collar, true)
                                                                                                    : 0;
-            if (!ragdoll && !death.fall.active && sink == 0 && !floorFittedMonster)
+            if (!acidCorpse && !ragdoll && !death.fall.active && sink == 0 && !floorFittedMonster)
                 sink = -floorOverhang(thing, i, image); // fallback for other sprite types
             top -= sink;
             bottom -= sink;
+            if(acidCorpse) {
+                if(residue) {
+                    const float scale=thing->type==MT_SERGEANT?1.3f:
+                        (thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?1.5f:1.f;
+                    left=-image.width*scale*.5f;
+                    right=-left;
+                    bottom=units(thing->floorz)+.5f;
+                    top=bottom+image.height*scale;
+                } else {
+                    const float t=float(P_HazardDeathAge(thing))/ACID_DISSOLVE_TICS;
+                    const float collapse=t*t*(3.f-2.f*t);
+                    bottom=std::max(bottom,std::min(z,units(thing->floorz))+.5f);
+                    top=bottom+image.height*(1.f-.78f*collapse);
+                }
+            }
 
             float pivotDown=0;
             const float roll=art?decorationRoll(*thing,*art,fraction,rx,ry,top,ceilZ(&sectors[i]),pivotDown):0;
             const float pivot=art?decorationPivot(*art,image,flipped(seen)):0;
 
-            float u0 = flipped(seen) ? image.width : 0, u1 = flipped(seen) ? 0 : image.width;
-            unsigned m = mode | ((mode & MODE_RELIT) && flipped(seen) ? MODE_FLIPPED : 0);
+            const bool flipImage=!residue&&flipped(seen);
+            float u0 = flipImage ? image.width : 0, u1 = flipImage ? 0 : image.width;
+            unsigned m = mode | ((mode & MODE_RELIT) && flipImage ? MODE_FLIPPED : 0);
             auto &vertices = out[spriteKey];
             size_t first = vertices.size();
-            if (collar && !self)
+            if (collar && !self && !acidCorpse)
                 woundView(thing, players[displayplayer].mo, baseImage, flipped(seen), x, y, fittedFeet - sink, top, bottom, rx, ry, posed ? &pose : nullptr, (int)seen);
             // Wound holes (wounds.cpp): texels shot through, and their rims.
             std::vector<byte> holes;
-            bool wounded = !self && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
+            bool wounded = !self && !acidCorpse && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
             const std::vector<byte> *cut = wounded ? &holes : nullptr;
             auto finish = [&](std::vector<Vertex> &batch, size_t from)
             {

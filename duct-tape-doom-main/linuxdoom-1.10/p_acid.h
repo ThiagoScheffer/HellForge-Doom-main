@@ -32,6 +32,7 @@ void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage);
 void P_AcidBarrelDamaged(mobj_t *barrel, mobj_t *source, int healthBefore, int healthAfter);
 void P_AcidBarrelExplode(mobj_t *barrel, mobj_t *source);
 void P_AcidTick(mobj_t *actor);
+void P_AcidTickWithFloor(mobj_t *actor,int floorDamage);
 void P_AcidForget(mobj_t *actor);
 void P_AcidClear(void);
 

@@ -251,6 +251,7 @@ void applySettings() {
     fitGame(settings);
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
+    P_HazardConfigure(settings.monsterEnvironmentDamage,settings.monsterHazardAvoidance,settings.acidCorpseDissolution);
     if(!settings.accelerated||!settings.corrosiveBarrels||!settings.acidSplatters)clearAcidVisuals();
     P_AcidVisualBurst=settings.accelerated?emitAcidBurst:nullptr;
     P_AcidVisualCoat=settings.accelerated?coatAcidActor:nullptr;
@@ -369,6 +370,7 @@ static void earlyDirectorSettings(){
  int arg=M_CheckParm((char*)"-graphics");if(arg&&arg+1<myargc)graphicsConfig=myargv[arg+1];
  loadSettings();P_AcidConfigure(settings.corrosiveBarrels);ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
  P_IncendiaryConfigure(settings.incendiaryBarrels);
+ P_HazardConfigure(settings.monsterEnvironmentDamage,settings.monsterHazardAvoidance,settings.acidCorpseDissolution);
 }
 struct DirectorStartupSettings {DirectorStartupSettings(){ED_StartupSettings=earlyDirectorSettings;}};
 static DirectorStartupSettings directorStartupSettings;
@@ -379,6 +381,7 @@ void sceneInit(SDL_Window *window) {
     loadSettings();if(M_CheckParm((char*)"-classic"))settings.accelerated=0;
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
+    P_HazardConfigure(settings.monsterEnvironmentDamage,settings.monsterHazardAvoidance,settings.acidCorpseDissolution);
     P_IncendiaryConfigure(settings.incendiaryBarrels);
     if(M_CheckParm((char*)"-ambushsightreuse"))settings.ambushSightReuse=1;
     P_SetAmbushSightReuse(settings.ambushSightReuse);

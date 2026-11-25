@@ -43,6 +43,7 @@ rcsid[] = "$Id: p_mobj.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 #include "p_solid.h"
 #include "p_fluid.h"
 #include "p_acid.h"
+#include "p_hazard.h"
 #include "p_incendiary.h"
 #include "m_arcade.h"
 #include "p_digwall.h"
@@ -537,7 +538,8 @@ void MP_BODY(P_MobjThinker) (mobj_t* mobj)
 {
     P_WeakpointTick(mobj);
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
-    P_AcidTick(mobj);
+    const int floorTick=P_HazardFloorTickDue(mobj);
+    if(!floorTick)P_AcidTick(mobj);
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
     P_IncendiaryTick(mobj);
     if(mobj->thinker.function.acv==(actionf_v)(-1))return;
@@ -568,6 +570,10 @@ void MP_BODY(P_MobjThinker) (mobj_t* mobj)
     }
 
     
+    if(floorTick&&mobj->health>0) {
+        P_HazardTick(mobj);
+        if(mobj->thinker.function.acv==(actionf_v)(-1))return;
+    }
     // cycle through states,
     // calling action functions at transitions
     if (mobj->tics != -1)

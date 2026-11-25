@@ -195,6 +195,8 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Combat",{
                 check("corrosive_barrels","Corrosive Barrels",&s.corrosiveBarrels,
                     "Damaged barrels seep green acid; ruptures splash nearby actors and leave persistent corrosive pools. Monsters and players take 5 HP every 17 tics, with two seconds of residual exposure; Radiation Suits protect the player. Single-player only; disabled in multiplayer and demos. Acid decals require the accelerated 3D renderer. Off preserves classic barrel behavior."),
+                check("acid_corpse_dissolution","Acid Corpse Dissolution",&s.acidCorpseDissolution,
+                    "Selected monsters killed by acid dissolve. Accelerated rendering shows green remains."),
                 check("acid_splatters","Acid Splatters and Wall Runoff",&s.acidSplatters,
                     "Acid spray sticks to walls and leaves cosmetic floor splatters. Does not increase acid damage.",[](const Settings &d){return d.accelerated&&d.corrosiveBarrels;}),
                 check("acid_monster_coating","Monster Acid Contamination",&s.acidMonsterCoating,
@@ -396,6 +398,11 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("advanced_tactics","Advanced tactics",&s.advancedTactics,"WARNING: Can make the game hard, and very hard with pistol starts. Adds monster-specific movement, cover, suppression and predictive attacks. Single-player only."),
                 check("aggressive_ai","Aggressive AI",&s.aggressiveAI,"WARNING: Can make the game hard, and very hard with pistol starts. Adds sustained attacks, faster gunfire, repositioning and barrages. Single-player only."),
                 check("persistent_pursuit","Persistent pursuit",&s.persistentPursuit,"Alerted monsters search around walls and retry blocked routes. Off keeps original AI. Single-player only; does not wake unaware monsters."),
+                check("monster_environment_damage","Monster Environmental Damage",&s.monsterEnvironmentDamage,
+                    "Selected monsters take damage from hazardous acid and lava floors. Single-player only."),
+                check("monster_hazard_avoidance","Monster Hazard Avoidance",&s.monsterHazardAvoidance,
+                    "Injured monsters increasingly prefer safe routes. Requires Monster Environmental Damage.",
+                    [](const Settings &d){return d.monsterEnvironmentDamage!=0;}),
                 check("imp_fireball_avoidance","Imp Fireball Avoidance",&s.impFireballAvoidance,"Imps avoid fireballs blocked by other living Imps. Single-player only.")}}}},
         {"Bundled mods",{
             {voxelDetected()?"VoxelDoom detected":"VoxelDoom not loaded",{

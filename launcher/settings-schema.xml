@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="cef71804b7e7bc6e1d2e7ab6d090ed55d6a67dc2b2fb55e3bfc8b06d3a3353b0">
+<settings source="platform/settings_panel.cpp" source_sha256="1cc219c22a49f88cd5d48f2d4fba2fd7639a0e63da7d81f690b150a200ebeee0">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -58,6 +58,7 @@
   <option key="hanging_fragments" title="Delay before fragments fall" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="collapse_size" title="Largest detached fragment" category="Destruction" kind="choice" choices="4=Small|12=Medium|24=Large" />
   <option key="corrosive_barrels" title="Corrosive Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="acid_corpse_dissolution" title="Acid Corpse Dissolution" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="acid_splatters" title="Acid Splatters and Wall Runoff" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="acid_monster_coating" title="Monster Acid Contamination" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="incendiary_barrels" title="Incendiary Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
@@ -127,6 +128,8 @@
   <option key="advanced_tactics" title="Advanced tactics" category="Monster AI" kind="check" choices="0=Off|1=On" />
   <option key="aggressive_ai" title="Aggressive AI" category="Monster AI" kind="check" choices="0=Off|1=On" />
   <option key="persistent_pursuit" title="Persistent pursuit" category="Monster AI" kind="check" choices="0=Off|1=On" />
+  <option key="monster_environment_damage" title="Monster Environmental Damage" category="Monster AI" kind="check" choices="0=Off|1=On" />
+  <option key="monster_hazard_avoidance" title="Monster Hazard Avoidance" category="Monster AI" kind="check" choices="0=Off|1=On" />
   <option key="imp_fireball_avoidance" title="Imp Fireball Avoidance" category="Monster AI" kind="check" choices="0=Off|1=On" />
   <option key="voxel_models" title="Voxel models" category="Bundled mods" kind="check" choices="0=Off|1=On" />
   <option key="voxel_eyes" title="Voxel glowing eyes" category="Bundled mods" kind="check" choices="0=Off|1=On" />

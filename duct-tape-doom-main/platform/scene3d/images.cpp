@@ -768,6 +768,72 @@ Image &charredImage(Image &source,int sourceKey,int &key) {
     auto normals=spriteNormals(source.width,source.height,pixels.data());
     return images.emplace(key,upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,normals.data())).first->second;
 }
+Image &acidCorpseImage(int lump,Image &source,int &key) {
+    // Dedicated range below eye injuries. One variant per source frame.
+    if(lump<0||lump>=1000000)return source;
+    key=INT_MIN+lump;
+    auto found=images.find(key);
+    if(found!=images.end())return found->second;
+    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    byte tint[256];
+    for(int i=0;i<256;++i) {
+        const byte *rgb=palette+3*i;
+        tint[i]=bloodTintIndex((byte)i,LIQUID_TINT_ACID);
+        int lo=std::min({rgb[0],rgb[1],rgb[2]}),hi=std::max({rgb[0],rgb[1],rgb[2]});
+        if(lo<120||hi-lo>55)continue;
+        // Bright neutral details are bone or highlights. Keep them legible.
+        int desired[]={hi*85/100,hi*92/100,hi*68/100};
+        int best=INT_MAX;
+        for(int j=0;j<256;++j) {
+            int distance=0;
+            for(int c=0;c<3;++c) {
+                int delta=palette[3*j+c]-desired[c];distance+=delta*delta;
+            }
+            if(distance<best){best=distance;tint[i]=(byte)j;}
+        }
+    }
+    auto pixels=source.pixels;
+    for(size_t i=0;i+1<pixels.size();i+=2)if(pixels[i+1])pixels[i]=tint[pixels[i]];
+    auto normals=spriteNormals(source.width,source.height,pixels.data());
+    return images.emplace(key,upload(source.width,source.height,pixels.data(),
+        source.left,source.top,nullptr,normals.data())).first->second;
+}
+
+Image *dissolvedCorpseImage(int &key) {
+    // Resolve the IWAD patch even when a PWAD overrides the same sprite name.
+    static const lumpinfo_t *directory=nullptr;
+    static unsigned level=~0u;
+    static int lump=-1;
+    if(directory!=lumpinfo||level!=r_levelserial) {
+        directory=lumpinfo;level=r_levelserial;lump=-1;
+        if(numlumps>0&&lumpinfo[0].handle>=0)
+            for(int i=0;i<numlumps;++i)
+                if(lumpinfo[i].handle==lumpinfo[0].handle&&!memcmp(lumpinfo[i].name,"POL5A0\0",8)) {
+                    lump=i;break;
+                }
+    }
+    if(lump<0||lump>=1000000)return nullptr;
+    key=INT_MIN+lump;
+    auto found=images.find(key);
+    if(found!=images.end())return &found->second;
+    const int size=W_LumpLength(lump);
+    if(size<8||size>65536)return nullptr;
+    const byte *data=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
+    const patch_t *patch=(const patch_t*)data;
+    int width=SHORT(patch->width),height=SHORT(patch->height);
+    if(width<=0||height<=0||width>256||height>256||8+4*width>size)return nullptr;
+    for(int x=0;x<width;++x) {
+        size_t pos=(uint32_t)LONG(patch->columnofs[x]);
+        if(pos<(size_t)(8+4*width))return nullptr;
+        while(pos<(size_t)size&&data[pos]!=255) {
+            if(pos+4>(size_t)size||pos+4+data[pos+1]>(size_t)size)return nullptr;
+            pos+=4+data[pos+1];
+        }
+        if(pos>=(size_t)size)return nullptr;
+    }
+    return &acidCorpseImage(lump,lumpImage(lump,false),key);
+}
+
 const std::array<float,3> &averageColor(Image &image) {
     if(image.averaged)return image.average;
     const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);

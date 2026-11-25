@@ -47,6 +47,7 @@ int P_CombatVisualKind(mobj_t *actor) {
     auto it=runtime.find(actor);return it!=runtime.end()&&(it->second.burnUntil>leveltime||(actor->player&&actor->health<=0))?it->second.burnKind:0;
 }
 int P_CombatCharred(mobj_t *actor) {
+    if(P_HazardLavaCorpse(actor))return 1;
     if(!p_wp_elemental||!elementalEligible(actor)||actor->player||actor->health>0)return 0;
     auto it=runtime.find(actor);return it!=runtime.end()&&it->second.charred;
 }

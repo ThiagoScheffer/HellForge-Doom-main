@@ -737,15 +737,21 @@ void buildBlood(const Uniforms &camera) {
     // Only remove the pool actually created for the same live corpse.
     // Other blood impacts/splats and neighboring corpse pools stay intact.
     // Keys in BloodPool are identities only: never dereference cached pointers.
-    std::unordered_map<const mobj_t*,std::array<float,2>> driedOwners;
+    struct PoolRemoval { float x,y; bool acid; };
+    std::unordered_map<const mobj_t*,PoolRemoval> driedOwners;
     for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
         if(!(thing->flags&MF_CORPSE)||(thing->flags&MF_NOBLOOD))continue;
+        if(P_HazardAcidCorpse(thing)) {
+            if(pooledCorpses.count(thing))
+                driedOwners.emplace(thing,PoolRemoval{0,0,true});
+            continue;
+        }
         if(corpseDecayStage(thing)>=2) {
             // Preserve an existing no-recreate marker without allocating an
             // entry for corpses that never had a blood pool in the first place.
             auto pooled=pooledCorpses.find(thing);
             if(pooled!=pooledCorpses.end())pooled->second=true;
-            driedOwners.emplace(thing,std::array<float,2>{units(thing->x),units(thing->y)});
+            driedOwners.emplace(thing,PoolRemoval{units(thing->x),units(thing->y),false});
             continue;
         }
         auto seen=pooledCorpses.find(thing);
@@ -760,8 +766,8 @@ void buildBlood(const Uniforms &camera) {
     // identity AND original pool location to avoid mismatching nearby corpses.
     bloodPools.erase(std::remove_if(bloodPools.begin(),bloodPools.end(),[&](const BloodPool &pool) {
         auto it=driedOwners.find(pool.owner);
-        return it!=driedOwners.end() &&
-               std::abs(it->second[0]-pool.x)<0.01f && std::abs(it->second[1]-pool.y)<0.01f;
+        return it!=driedOwners.end() && (it->second.acid ||
+               (std::abs(it->second.x-pool.x)<0.01f && std::abs(it->second.y-pool.y)<0.01f));
     }),bloodPools.end());
     for(const auto &pool:bloodPools) {
         float age=now-pool.born;
