@@ -28,9 +28,9 @@ struct alignas(16) PresentUniforms {
     float shutter[4];
     float chromatic[4];
     float sceneRect[4];
-    float speedrunHudRects[2][4];
+    float overlayRects[3][4];
 };
-static_assert(sizeof(PresentUniforms)==96,"Present uniform layout mismatch");
+static_assert(sizeof(PresentUniforms)==112,"Present uniform layout mismatch");
 
 static void present(SDL_GPUCommandBuffer *command,SDL_GPUTexture *target,const FrameView &view) {
     SDL_GPUColorTargetInfo info={};
@@ -43,7 +43,7 @@ static void present(SDL_GPUCommandBuffer *command,SDL_GPUTexture *target,const F
     PresentUniforms uniforms={
         {(float)r_photoactive,(float)r_photodof,r_photofocus,(float)r_photostyle},
         {I_PhotoFlash(),0,0,0},
-        {view.chromaticDisplacement,0.35f,1.f,0.f},{},{}
+        {view.chromaticDisplacement,std::clamp(settings.chromaticAberrationCoverage/100.f,0.f,1.f),1.f,0.f},{},{}
     };
     if(view.chromaticDisplacement>0.f) {
         // Intersect the viewport's covered pixel centers with setView's integer scissor.
@@ -51,8 +51,8 @@ static void present(SDL_GPUCommandBuffer *command,SDL_GPUTexture *target,const F
         uniforms.sceneRect[1]=std::max((float)(int)view.worldY,std::ceil(view.worldY-0.5f));
         uniforms.sceneRect[2]=std::min((float)((int)view.worldX+(int)view.worldW),std::ceil(view.worldX+view.worldW-0.5f));
         uniforms.sceneRect[3]=std::min((float)((int)view.worldY+(int)view.worldH),std::ceil(view.worldY+view.worldH-0.5f));
-        for(int i=0;i<2;++i)
-            std::copy_n(view.speedrunHudRects[i],4,uniforms.speedrunHudRects[i]);
+        for(int i=0;i<3;++i)
+            std::copy_n(view.overlayRects[i],4,uniforms.overlayRects[i]);
     }
     SDL_PushGPUFragmentUniformData(command,2,&uniforms,sizeof(uniforms));
     SDL_GPUTextureSamplerBinding samplers[]={{colorTexture,linearClamp},{bloomTexture,linearClamp},{hudTexture,linearClamp},{paletteLUT,nearestClamp},{sampleCount!=SDL_GPU_SAMPLECOUNT_1?sceneDepth:depthTexture,nearestClamp}};
@@ -508,13 +508,25 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
         const int anchor=i?(settings.speedrunPlayerAnchor|1):split?(settings.speedrunAnchor&~1):settings.speedrunAnchor;
         auto panel=hudScreenPosition((float)width,view.uiHeight,view.uiWidth,region.width,region.height,anchor,
             i?settings.speedrunPlayerX:settings.speedrunX,i?settings.speedrunPlayerY:settings.speedrunY,settings.hudLayout==2,split);
-        auto &rect=view.speedrunHudRects[i];
+        auto &rect=view.overlayRects[i];
         rect[0]=panel.x;rect[1]=view.uiY+panel.y;
         rect[2]=panel.x+panel.w;rect[3]=view.uiY+panel.y+panel.h;
         screenQuad(hud,-1+2*panel.x/width,1-2*panel.y/view.uiHeight,2*panel.w/width,2*panel.h/view.uiHeight,
             region.x/320.f,2.f/3,(region.x+region.width)/320.f,2.f/3+region.height/600.f);
     }
     std::vector<Vertex> cross;if(!director_view_active&&!speedrunOnlyHud(settings))cross=crosshairVertices(view.worldW,view.worldH);
+    if(view.chromaticDisplacement>0.f&&!cross.empty()) {
+        // Crosshair and hit feedback live in the scene target, outside the HUD atlas.
+        auto &rect=view.overlayRects[2];
+        rect[0]=rect[2]=view.worldX+(cross.front().x+1.f)*view.worldW*0.5f;
+        rect[1]=rect[3]=view.worldY+(1.f-cross.front().y)*view.worldH*0.5f;
+        for(const auto &v:cross) {
+            const float x=view.worldX+(v.x+1.f)*view.worldW*0.5f;
+            const float y=view.worldY+(1.f-v.y)*view.worldH*0.5f;
+            rect[0]=std::min(rect[0],x);rect[1]=std::min(rect[1],y);
+            rect[2]=std::max(rect[2],x);rect[3]=std::max(rect[3],y);
+        }
+    }
     std::vector<const std::vector<Vertex>*> transient={&hud,&cross};
     arcadeRankQuad.clear();
     if((Arcade_MenuOpen()||Menu_BrandOpen())&&arcadeRankTexture){

@@ -11,9 +11,9 @@ layout(set=2,binding=4) uniform sampler2D photoDepth;
 layout(std140,set=3,binding=2) uniform Photo {
     vec4 photo;
     vec4 shutter;
-    vec4 chromatic; // Displacement at 1080p, protected radius, outer radius, reserved.
+    vec4 chromatic; // Displacement at 1080p, coverage (0-1), outer radius, reserved.
     vec4 sceneRect; // Active viewport bounds in image pixels.
-    vec4 speedrunHudRects[2];
+    vec4 overlayRects[3];
 };
 layout(location=0) out vec4 outColor;
 float photoZ(vec2 uv){float d=textureLod(photoDepth,uv,0).r;return c.projection.z*c.projection.w/(c.projection.w-d*(c.projection.w-c.projection.z));}
@@ -34,9 +34,9 @@ float hudCoverage(vec2 screenUV) {
     }
     return coverage;
 }
-bool coversSpeedrunHud(vec2 pixel) {
-    for(int i=0;i<2;++i) {
-        vec4 rect=speedrunHudRects[i];
+bool coversOverlay(vec2 pixel) {
+    for(int i=0;i<3;++i) {
+        vec4 rect=overlayRects[i];
         if(rect.z>rect.x&&rect.w>rect.y&&
            all(greaterThanEqual(pixel,rect.xy-0.5))&&all(lessThanEqual(pixel,rect.zw+0.5)))
             return true;
@@ -51,11 +51,15 @@ vec3 applyChromaticAberration(vec2 screenUV,vec2 sceneUV,vec3 original,float cov
     if(any(lessThan(screenPixel,sceneRect.xy))||any(greaterThanEqual(screenPixel,sceneRect.zw)))
         return original;
 
-    vec2 centered=(screenPixel-sceneRect.xy)/extent*2.0-1.0;
-    float edge=smoothstep(chromatic.y,chromatic.z,length(centered));
-    if(edge<=0.0001||coverage>0.0)return original;
+    vec2 halfExtent=extent*0.5;
+    vec2 pixelFromCenter=screenPixel-sceneRect.xy-halfExtent;
+    float distanceFromCenter=length(pixelFromCenter);
+    float radius=distanceFromCenter/length(halfExtent);
+    float innerRadius=mix(0.92,0.0,chromatic.y);
+    float edge=smoothstep(innerRadius,chromatic.z,radius);
+    if(edge<=0.0||coverage>0.0)return original;
 
-    vec2 direction=normalize(centered*extent);
+    vec2 direction=pixelFromCenter/max(distanceFromCenter,0.0001);
     vec2 offset=direction*(chromatic.x*extent.y/1080.0)*edge;
     vec2 scenePixel=sceneUV*size;
     if(any(lessThan(scenePixel,sceneRect.xy))||any(greaterThanEqual(scenePixel,sceneRect.zw)))
@@ -65,7 +69,7 @@ vec3 applyChromaticAberration(vec2 screenUV,vec2 sceneUV,vec3 original,float cov
     vec2 blue=clamp(scenePixel-offset,low,high);
 
     // Overlays share the scene image. Guard the destination and shifted taps.
-    if(coversSpeedrunHud(screenPixel)||coversSpeedrunHud(red)||coversSpeedrunHud(blue))
+    if(coversOverlay(screenPixel)||coversOverlay(red)||coversOverlay(blue))
         return original;
     if((coverage<0.0&&hudCoverage(screenUV)>0.0)||
        hudCoverage(red/size)>0.0||hudCoverage(blue/size)>0.0)

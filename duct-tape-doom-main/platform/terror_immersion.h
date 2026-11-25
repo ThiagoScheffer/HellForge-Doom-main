@@ -7,7 +7,9 @@ namespace doom_terror {
 
 enum Mode { Off = 0, Cinematic = 1, Terror = 2, Hybrid = 3 };
 
-constexpr float maxDisplacement1080 = 6.f;
+constexpr float maxDisplacement1080 = 14.f;
+constexpr float terrorPulseFrequency = 0.45f;
+constexpr float terrorPulseAmplitude = 0.18f;
 
 inline bool dynamicMode(int mode)
 {

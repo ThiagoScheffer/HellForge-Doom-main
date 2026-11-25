@@ -129,6 +129,8 @@ static double worldInterpolation(uint64_t now){
 static struct {
     doom_terror::Envelope lowHealth;
     doom_terror::DamageEnvelope damage;
+    doom_terror::Envelope pulse;
+    float pulsePhase = 0.f;
     const mobj_t *actor = nullptr;
     unsigned level = 0;
     float renderedFraction = 1.f;
@@ -148,6 +150,15 @@ static const player_t *terrorPlayer() {
 
 static void resetTerror() {terrorState={};}
 
+static bool terrorDetachedView() {
+    return r_photoactive||director_watch||director_edit||director_menu;
+}
+
+static void resetTerrorPulse() {
+    terrorState.pulse={};
+    terrorState.pulsePhase=0.f;
+}
+
 static void syncTerror(const player_t *player) {
     const auto *actor=player?player->mo:nullptr;
     if(terrorState.level!=r_levelserial||terrorState.actor!=actor) {
@@ -155,6 +166,7 @@ static void syncTerror(const player_t *player) {
         terrorState.level=r_levelserial;
         terrorState.actor=actor;
     }
+    if(terrorDetachedView())resetTerrorPulse();
 }
 
 static void playerTerrorDamage(player_t *player,int healthLost) {
@@ -174,6 +186,13 @@ static void updateTerror() {
     constexpr float dt=1.f/TICRATE;
     if(settings.chromaticDamageResponse)terrorState.damage.advance(dt);
     if(settings.chromaticLowHealth)doom_terror::advanceLowHealth(terrorState.lowHealth,player->health,dt);
+    if(settings.chromaticTerrorPulse&&!terrorDetachedView()) {
+        constexpr float cycle=2.f*doomPi;
+        terrorState.pulsePhase+=cycle*doom_terror::terrorPulseFrequency*dt;
+        if(terrorState.pulsePhase>=cycle)terrorState.pulsePhase-=cycle;
+        terrorState.pulse.previous=terrorState.pulse.current;
+        terrorState.pulse.current=std::sin(terrorState.pulsePhase);
+    }
 }
 
 static float chromaticDisplacement(float fraction) {
@@ -183,18 +202,24 @@ static float chromaticDisplacement(float fraction) {
         return 0.f;
     const float gain=doom_terror::intensityGain(settings.chromaticAberrationIntensity);
     if(gain<=0.f||!localTerrorView()||automapactive||menuactive||I_Render3DSettingsOpen()||
-       r_photoactive||director_watch||director_edit||director_menu||director_view_active||
+       terrorDetachedView()||director_view_active||
        wheelActive||Arcade_MenuOpen()||Menu_BrandOpen())
         return 0.f;
 
-    float strength=mode==doom_terror::Cinematic||mode==doom_terror::Hybrid?0.25f:0.f;
+    float strength=mode==doom_terror::Cinematic||mode==doom_terror::Hybrid?0.30f:0.f;
     const auto *player=dynamic?terrorPlayer():nullptr;
     if(player&&terrorState.level==r_levelserial&&terrorState.actor==player->mo) {
         // Cache the presentation fraction so a pause holds the last displayed envelope.
         if(!paused)terrorState.renderedFraction=fraction;
         const float t=terrorState.renderedFraction;
-        if(settings.chromaticLowHealth)strength+=terrorState.lowHealth.interpolate(t);
-        if(settings.chromaticDamageResponse)strength+=terrorState.damage.interpolate(t);
+        const float lowHealth=settings.chromaticLowHealth?terrorState.lowHealth.interpolate(t):0.f;
+        const float damage=settings.chromaticDamageResponse?terrorState.damage.interpolate(t):0.f;
+        float dynamicStrength=lowHealth+damage;
+        if(settings.chromaticTerrorPulse) {
+            const float envelope=std::clamp(std::max(lowHealth,damage),0.f,1.f);
+            dynamicStrength*=1.f+doom_terror::terrorPulseAmplitude*envelope*terrorState.pulse.interpolate(t);
+        }
+        strength+=dynamicStrength;
     }
     return std::min(strength,1.f)*gain*doom_terror::maxDisplacement1080;
 }
@@ -368,6 +393,7 @@ void applySettings() {
     if(!dynamicTerror)resetTerror();
     if(!settings.chromaticDamageResponse)terrorState.damage={};
     if(!settings.chromaticLowHealth)terrorState.lowHealth={};
+    if(!settings.chromaticTerrorPulse)resetTerrorPulse();
     R_PlayerTerrorDamage=dynamicTerror&&settings.chromaticDamageResponse?playerTerrorDamage:nullptr;
     awarenessBeam={};R_UpdateFlashlightAwareness=settings.accelerated&&settings.flashlightMonsterAwareness?updateFlashlightAwareness:nullptr;
     R_FlashlightIlluminates=settings.accelerated&&settings.flashlightMonsterAwareness?flashlightIlluminates:nullptr;
