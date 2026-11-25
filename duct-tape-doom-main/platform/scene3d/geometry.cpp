@@ -909,8 +909,9 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 (thing->type==MT_FATSO||thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?3:
                 (thing->type==MT_HEAD)?4:0;
             const DecorationArt *art=!self&&!directed&&!sf.rotate?decorationArt(*thing,lump):nullptr;
-            Image &image=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
+            Image &uncoatedImage=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
                 art ? decorationStain(*art,skinImage,spriteKey) : skinImage;
+            Image &image=acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen));
             // A traceable renderer hand-off is essential: isolated rule tests
             // cannot prove that the real game selects the new GPU texture.
             if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {

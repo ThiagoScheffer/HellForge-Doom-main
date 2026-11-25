@@ -518,6 +518,9 @@ void monsterSkinReset(); // Before image atlas/map resources are destroyed.
 Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key);
 void corpseDecayImageReset();
 extern int bloodSourceTint;
+enum class LiquidMaterial : uint8_t { Blood, Acid };
+enum LiquidTint : int { LIQUID_TINT_NORMAL=0, LIQUID_TINT_BLUE=1, LIQUID_TINT_GREEN=2, LIQUID_TINT_ACID=3 };
+bool acidLiquidOn();
 struct BloodSourceScope {
     int previous;
     explicit BloodSourceScope(int tint):previous(bloodSourceTint){bloodSourceTint=tint;}
@@ -530,9 +533,9 @@ void buildBlood(const Uniforms &camera);
 // Splats shown from born on: a splat, a drop's speck, or a body's smear
 // (thick end forward along angle). size across, stretched along angle.
 enum { BLOOD_SPLAT,BLOOD_SPECK,BLOOD_SMEAR };
-bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true);
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood);
 // On the wall hit at (x,y,z), stretched along it; drips: one or two run down from it.
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true);
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood);
 
 // spray.cpp
 // What a hitscan hit throws: an exit spray past the body along the shot, a speck or two back.
@@ -550,6 +553,13 @@ void sprayWallHit(float x,float y,float z,float dx,float dy,float speed);
 // A body sliding on the floor: a smear at (x,y), thick end forward along angle.
 void spraySmear(float x,float y,float angle,float size);
 // Each tic: wounds drip, sliding bodies smear, bodies thrown into walls splash them.
+void emitAcidBurst(fixed_t x,fixed_t y,fixed_t z,fixed_t height);
+void coatAcidActor(mobj_t *actor,fixed_t x,fixed_t y);
+void forgetAcidActor(const mobj_t *actor);
+void clearAcidVisuals();
+void clearAcidMarks();
+Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped);
+bool acidCoatingPosition(const mobj_t *actor,float eyeX,float eyeY,float &u,float &v);
 void watchSpray();
 void buildSpray(const Uniforms &camera);
 void sprayShutdown();

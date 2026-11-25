@@ -200,6 +200,7 @@ struct Settings {
     int criticalParts=0; // Single-player sprite-based human headshots, player bullets only.
     int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
     int elementalDot=0,combatMessages=0;
+    int acidSplatters=1,acidMonsterCoating=1;
     int corrosiveBarrels=0; // Persistent acid leaks and damaging pools from explosive barrels; classic behavior when off.
     int incendiaryBarrels=0;
     int speedrunHUD=0,speedrunAttempts=1,speedrunDeaths=1,speedrunStreak=1,speedrunAttemptTime=1,speedrunRuntime=1,speedrunDealt=1,speedrunTaken=1,speedrunAnchor=0,speedrunLayout=0;

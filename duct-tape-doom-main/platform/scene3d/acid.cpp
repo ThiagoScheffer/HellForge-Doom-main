@@ -133,7 +133,7 @@ void buildAcid(const Uniforms &camera) {
         }
         if (pool.kind==P_ACID_POOL_LEAK) {
             leakDrops(pool,age,fade,camera);
-        } else if(radius>=48.f&&age<.52f) {
+        } else if(!settings.acidSplatters&&radius>=48.f&&age<.52f) {
             for(int n=0;n<7;++n) {
                 const float t=age-n*.019f;
                 if(t<0.f)continue;

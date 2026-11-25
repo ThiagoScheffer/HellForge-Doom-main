@@ -18,20 +18,20 @@ int monsterBloodTint(const mobj_t *thing) {
 byte bloodTintIndex(byte index,int tint) {
     if(!tint)return index;
     const byte *pal=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
-    static std::array<std::array<byte,256>,2> tables;
+    static std::array<std::array<byte,256>,3> tables;
     static std::array<byte,768> previous{};
     static bool ready=false;
     if(!ready||!std::equal(previous.begin(),previous.end(),pal)){
         std::copy_n(pal,768,previous.begin());ready=true;
-        for(int kind=0;kind<2;++kind)for(int i=0;i<256;++i){
+        for(int kind=0;kind<3;++kind)for(int i=0;i<256;++i){
             float intensity=std::max({pal[i*3],pal[i*3+1],pal[i*3+2]});
-            std::array<float,3> color=kind==0?std::array<float,3>{.1f,.1f,1.f}:std::array<float,3>{.16f,1.f,.29f};
+            std::array<float,3> color=kind==0?std::array<float,3>{.1f,.1f,1.f}:kind==1?std::array<float,3>{.16f,1.f,.29f}:std::array<float,3>{.62f,1.f,.10f};
             float best=1e9f;int match=0;
             for(int j=0;j<256;++j){float d=0;for(int k=0;k<3;++k){float delta=pal[j*3+k]-intensity*color[k];d+=delta*delta;}if(d<best){best=d;match=j;}}
             tables[kind][i]=byte(match);
         }
     }
-    return tables[std::clamp(tint,1,2)-1][index];
+    return tables[std::clamp(tint,1,3)-1][index];
 }
 constexpr int bloodKeyBase=-0x40000000; // Image keys clear of walls and lumps.
 constexpr int bloodPool=0,bloodSplats=4,bloodSpeckFirst=1+bloodSplats,bloodSpecks=3,bloodDrip=bloodSpeckFirst+bloodSpecks,bloodSmear=bloodDrip+1;
@@ -57,6 +57,7 @@ const std::vector<byte> &bloodPalette() {
     return bloodShades;
 }
 bool bloodOn() {return settings.blood&&gamestate==GS_LEVEL&&!floors.empty()&&!bloodPalette().empty();}
+bool acidLiquidOn() {return settings.accelerated&&settings.corrosiveBarrels&&settings.acidSplatters&&P_AcidEnabled()&&gamestate==GS_LEVEL&&!floors.empty()&&!bloodPalette().empty();}
 static byte bloodIndex(float shade) {
     const auto &shades=bloodPalette();
     return shades[std::clamp((int)std::lround(std::clamp(shade,0.0f,1.0f)*(shades.size()-1)),0,(int)shades.size()-1)];
@@ -76,6 +77,7 @@ static std::array<float,3> bloodColorForTint(float shade,int tint) {
 }
 std::array<float,3> bloodColor(float shade) {return bloodColorForTint(shade,bloodSourceTint);}
 Image &bloodSpriteImage(int lump,int tint,int &key) {
+    if(tint) tint=std::clamp(tint,1,2);
     key=-1-lump;
     if(!tint)return lumpImage(lump,false);
     key=-15000000-lump*3-std::clamp(tint,1,2);
@@ -169,6 +171,39 @@ static Image &bloodImage(int variant) {
     }
     return images.emplace(key,upload(width,height,pixels.data())).first->second;
 }
+// Bounded, reusable sprite composites preserve the original silhouette and pose.
+static std::map<std::tuple<int,int,int>,int> acidSpriteCache;
+static std::vector<int> acidSpriteKeys;
+Image &acidCoatedImage(const mobj_t *actor,Image &source,int &key,float eyeX,float eyeY,bool flipped) {
+    float u,v;
+    if(!acidCoatingPosition(actor,eyeX,eyeY,u,v)||source.pixels.empty())return source;
+    if(flipped)u=1.f-u;
+    int qu=std::clamp(int(u*8),0,7),qv=std::clamp(int(v*8),0,7);
+    auto lookup=std::make_tuple(key,qu,qv);
+    auto found=acidSpriteCache.find(lookup);
+    if(found!=acidSpriteCache.end()) {auto image=images.find(found->second);if(image!=images.end()){key=found->second;return image->second;}acidSpriteCache.erase(found);}
+    if(acidSpriteCache.size()>=512)return source;
+    auto pixels=source.pixels;
+    const Image &mask=bloodImage(1+32*LIQUID_TINT_ACID);
+    int width=std::max(8,source.width/3),height=std::max(8,source.height/4);
+    int cx=(2*qu+1)*source.width/16,cy=(2*qv+1)*source.height/16;
+    for(int y=std::max(0,cy-height/2);y<std::min(source.height,cy+(height+1)/2);++y)
+        for(int x=std::max(0,cx-width/2);x<std::min(source.width,cx+(width+1)/2);++x) {
+            size_t target=((size_t)y*source.width+x)*2;
+            int mx=std::clamp((x-(cx-width/2))*mask.width/width,0,mask.width-1);
+            int my=std::clamp((y-(cy-height/2))*mask.height/height,0,mask.height-1);
+            size_t sample=((size_t)my*mask.width+mx)*2;
+            if(pixels[target+1]&&mask.pixels[sample+1])pixels[target]=mask.pixels[sample];
+        }
+    static int nextKey=-1900000000;
+    while(images.find(nextKey)!=images.end())++nextKey;
+    int newKey=nextKey++;
+    auto normals=spriteNormals(source.width,source.height,pixels.data());
+    Image derived=upload(source.width,source.height,pixels.data(),source.left,source.top,nullptr,normals.data());
+    images.emplace(newKey,std::move(derived));acidSpriteCache.emplace(lookup,newKey);acidSpriteKeys.push_back(newKey);key=newKey;
+    return images.at(newKey);
+}
+
 static int variantOf(int kind,const uint32_t *seed=nullptr) {
     int pick=seed?int(hash32(*seed)&3u):int(randomRange(0,4));
     return kind==BLOOD_SPECK?bloodSpeckFirst+pick%bloodSpecks:kind==BLOOD_SMEAR?bloodSmear:1+pick%bloodSplats;
@@ -177,6 +212,13 @@ struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool fl
 struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; };
 struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
+static std::vector<BloodFloor> acidFloors;
+static std::vector<BloodWall> acidWalls;
+void clearAcidMarks() {
+    acidFloors.clear();acidWalls.clear();
+    for(int key:acidSpriteKeys)images.erase(key);
+    acidSpriteKeys.clear();acidSpriteCache.clear();
+}
 static std::vector<BloodWall> severeWallMarks;
 static std::vector<BloodPool> severePools;
 static std::unordered_map<const mobj_t*,bool> pooledCorpses;
@@ -422,39 +464,45 @@ static void buildSevereBlood(const Uniforms &camera) {
 constexpr size_t maxFloorBlood=320,maxWallBlood=160;
 static void checkBloodLevel() {
     if(bloodLevelSerial==r_levelserial)return;
-    bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();
+    bloodFloors.clear();bloodWalls.clear();acidFloors.clear();acidWalls.clear();bloodPools.clear();pooledCorpses.clear();
     bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
-bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld) {
-    if(!bloodOn()||sector<0||sector>=numsectors)return false;
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld,LiquidMaterial material) {
+    if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn())||sector<0||sector>=numsectors)return false;
     checkBloodLevel();
-    if(bloodFloors.size()>=maxFloorBlood) {
+    auto &marks=material==LiquidMaterial::Acid?acidFloors:bloodFloors;
+    const size_t limit=material==LiquidMaterial::Acid?96:maxFloorBlood;
+    if(marks.size()>=limit) {
         if(!replaceOld)return false;
-        bloodFloors.erase(bloodFloors.begin());
+        marks.erase(marks.begin());
     }
-    const int variant=variantOf(kind,decorationSeed)+32*bloodSourceTint;
+    const int variant=variantOf(kind,decorationSeed)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint);
     const bool flip=kind!=BLOOD_SMEAR&&(decorationSeed?((hash32(*decorationSeed)&4u)!=0):randomRange(0,1)<.5f);
-    bloodFloors.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr});
+    marks.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr});
     return true;
 }
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld) {
-    if(!bloodOn())return false;
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld,LiquidMaterial material) {
+    if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn()))return false;
+    if(hit.line<0||hit.line>=numlines||hit.side<0||hit.side>1)return false;
     checkBloodLevel();
     WallSpan span;if(!wallSpan(lines[hit.line],hit.side,hit.section,span))return false;
     float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);if(len<1)return false;
     if(z<span.bottom||z>span.top)return false;
     float along=std::clamp(((x-span.a.x)*ex+(y-span.a.y)*ey)/len,0.0f,len);
-    if(bloodWalls.size()>=maxWallBlood) {
+    if(material==LiquidMaterial::Acid&&(span.texture<=0||span.texture==skytexture))return false;
+    auto &marks=material==LiquidMaterial::Acid?acidWalls:bloodWalls;
+    const size_t limit=material==LiquidMaterial::Acid?64:maxWallBlood;
+    if(marks.size()>=limit) {
         if(!replaceOld)return false;
-        bloodWalls.erase(bloodWalls.begin());
+        marks.erase(marks.begin());
     }
-    BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variantOf(kind)+32*bloodSourceTint,randomRange(0,1)<0.5f,0,{},{}};
+    BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variantOf(kind)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint),randomRange(0,1)<0.5f,0,{},{}};
     // Runs from a heavy splat: one or two, down from its lower half.
     if(drips) {
         wall.drips=1+(randomRange(0,1)<0.4f);
         for(int n=0;n<wall.drips;++n) {wall.dripU[n]=randomRange(-0.3f,0.3f)*size;wall.dripLength[n]=randomRange(8,26);}
     }
-    bloodWalls.push_back(wall);
+    marks.push_back(wall);
     return true;
 }
 // Hitscan blood without the spray: splats land on the floor a little past
@@ -645,8 +693,12 @@ void buildBlood(const Uniforms &camera) {
         bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){
             return d.decoration&&now<d.born;
         }),bloodFloors.end());
-    if(!settings.blood||bloodPalette().empty())return;
+    const bool showBlood=settings.blood&&!bloodPalette().empty();
+    const bool showAcid=acidLiquidOn();
+    if(!showAcid){acidFloors.clear();acidWalls.clear();}
+    if(!showBlood&&!showAcid)return;
     checkBloodLevel();
+    if(showBlood) {
     // Pools: corpses that came to rest, once each, sized to the body.
     for(auto &entry:pooledCorpses)entry.second=false;
     // Only remove the pool actually created for the same live corpse.
@@ -698,8 +750,11 @@ void buildBlood(const Uniforms &camera) {
         if(wash>=0)flatBlood(bloodPool+32*pool.tint,pool.sector,pool.x,pool.y,
             pool.size*grow*spread,pool.angle,1,false,false,wet,dark,wash,camera);
     }
+    } // blood-only pools
     bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){return now-d.born>180;}),bloodFloors.end());
-    for(const auto &d:bloodFloors) {
+    acidFloors.erase(std::remove_if(acidFloors.begin(),acidFloors.end(),[&](const BloodFloor &d){return now-d.born>25;}),acidFloors.end());
+    for(const auto *marks:{&bloodFloors,&acidFloors})for(const auto &d:*marks) {
+        if((marks==&bloodFloors&&!showBlood)||(marks==&acidFloors&&!showAcid))continue;
         if(now<d.born)continue;
         if(d.ceiling?camera.eye[2]>ceilZ(&sectors[d.sector]):camera.eye[2]<floorZ(&sectors[d.sector]))continue; // Back of the flat.
         float wet,dark;bloodAge(now-d.born,0,3,wet,dark);
@@ -707,6 +762,7 @@ void buildBlood(const Uniforms &camera) {
         if(wash<0)continue;
         flatBlood(d.variant,d.sector,d.x,d.y,d.size*spread,d.angle,d.stretch,d.flip,d.ceiling,d.ceiling?0:wet,dark,wash,camera);
     }
+    if(showBlood) {
     bloodFootprints.erase(std::remove_if(bloodFootprints.begin(),bloodFootprints.end(),
         [&](const BloodFootprint &p){return now<p.born||now-p.born>footprintLifetime;}),bloodFootprints.end());
     if(settings.accelerated&&totalkills<200&&levelSerial==r_levelserial)for(const auto &p:bloodFootprints) {
@@ -715,17 +771,24 @@ void buildBlood(const Uniforms &camera) {
         float wash=rainWash(rainedOn(p.sector,p.x,p.y),age,dark,spread);
         if(wash>=0)flatBlood(p.variant,p.sector,p.x,p.y,footprintLength*spread,p.angle,1,p.flip,false,wet,dark,wash,camera);
     }
+    }
     // Wall splats stay matte; thin spray doesn't glint believably.
     bloodWalls.erase(std::remove_if(bloodWalls.begin(),bloodWalls.end(),[&](const BloodWall &d){return now-d.born>180;}),bloodWalls.end());
+    acidWalls.erase(std::remove_if(acidWalls.begin(),acidWalls.end(),[&](const BloodWall &d){return now-d.born>30;}),acidWalls.end());
     severeWallMarks.erase(std::remove_if(severeWallMarks.begin(),severeWallMarks.end(),
         [&](const BloodWall &d){return now<d.born||now-d.born>45;}),severeWallMarks.end());
-    for(const auto *wallMarks:{&bloodWalls,&severeWallMarks})for(const auto &d:*wallMarks) {
+    for(const auto *wallMarks:{&bloodWalls,&severeWallMarks,&acidWalls})for(const auto &d:*wallMarks) {
+        if((wallMarks==&acidWalls&&!showAcid)||(wallMarks!=&acidWalls&&!showBlood))continue;
         if(now<d.born)continue;
         WallSpan span;if(!wallSpan(lines[d.line],d.side,d.section,span))continue;
         float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
         if(len<1||ex*(camera.eye[1]-span.a.y)-ey*(camera.eye[0]-span.a.x)>0)continue; // Back of the wall.
         const Image &image=bloodImage(d.variant);
         float zc=span.anchor+d.dz,h=d.size*0.5f,hu=h*d.stretch*image.width/std::max(1,image.height);
+        if(wallMarks==&acidWalls&&SV_Active()) {
+            float px=span.a.x+ex*d.along/len,py=span.a.y+ey*d.along/len;
+            if(SV_Edited(px,py,zc)||SV_Edited(px+ey/len,py-ex/len,zc)||SV_Edited(px-ey/len,py+ex/len,zc))continue;
+        }
         float u0=std::max(0.0f,d.along-hu),u1=std::min(len,d.along+hu),z0=std::max(span.bottom,zc-h),z1=std::min(span.top,zc+h);
         if(u1<=u0||z1<=z0)continue;
         float wet,dark;bloodAge(now-d.born,0,3,wet,dark);
@@ -767,12 +830,15 @@ void bloodShutdown() {
     severeBursts={};severeLevel=~0u;
     severeWallMarks.clear();
     severePools.clear();
-    bloodFloors.clear();bloodWalls.clear();bloodPools.clear();pooledCorpses.clear();bloodShades.clear();bloodShadesLoaded=false;
+    bloodFloors.clear();bloodWalls.clear();acidFloors.clear();acidWalls.clear();bloodPools.clear();pooledCorpses.clear();bloodShades.clear();bloodShadesLoaded=false;
     sprayShutdown();
 }
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestAcidWallMarks() {return int(doom3d::acidWalls.size());}
+extern "C" int I_TestAcidWallDrips() {int count=0;for(const auto &d:doom3d::acidWalls)count+=d.drips;return count;}
+extern "C" int I_TestAcidFloorMarks() {return int(doom3d::acidFloors.size());}
 extern "C" int I_TestSevereWallMarks() {return int(doom3d::severeWallMarks.size());}
 extern "C" int I_TestSeverePools() {return int(doom3d::severePools.size());}
 extern "C" int I_TestCombatBloodWalls(int *out,int capacity) {

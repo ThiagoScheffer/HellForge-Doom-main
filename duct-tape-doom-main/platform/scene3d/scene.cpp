@@ -171,6 +171,10 @@ void applySettings() {
     fitGame(settings);
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
+    if(!settings.accelerated||!settings.corrosiveBarrels||!settings.acidSplatters)clearAcidVisuals();
+    P_AcidVisualBurst=settings.accelerated?emitAcidBurst:nullptr;
+    P_AcidVisualCoat=settings.accelerated?coatAcidActor:nullptr;
+    P_AcidVisualForget=forgetAcidActor;P_AcidVisualClear=clearAcidVisuals;
     P_IncendiaryConfigure(settings.incendiaryBarrels);
     p_breakablewalls=settings.breakableWalls&&!netgame;
     p_throughwalls=settings.throughWalls;
@@ -329,6 +333,7 @@ void sceneShutdown() {
     for(auto &texture:keyHandTextures)texture.reset();keyHandVisible=keyWeaponDrop=0;
     toastyTexture.reset();toastyVisible=0;romeroTexture.reset();romeroAge=-1;
     cancelRelight();
+    P_AcidVisualBurst=nullptr;P_AcidVisualCoat=nullptr;P_AcidVisualForget=nullptr;P_AcidVisualClear=nullptr;
     R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_GoreHit=nullptr;R_GoreShotEnd=nullptr;R_GoreForget=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();

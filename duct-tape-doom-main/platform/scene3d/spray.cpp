@@ -23,6 +23,7 @@ struct Drop {
     std::array<float,3> color;
     bool decoration=false;
     DropVisual visual=DropVisual::Blood;
+    LiquidMaterial material=LiquidMaterial::Blood;
 };
 static std::vector<Drop> drops;
 constexpr size_t maxDrops=768;
@@ -32,9 +33,54 @@ static std::unordered_map<const mobj_t*,Slide> slides;
 static unsigned sprayLevelSerial;
 static unsigned goreEventOrdinal;
 
+static bool throwDrop(float,float,float,float,float,float,float,float,int,int*,const uint32_t*,DropVisual,float,int*,LiquidMaterial);
+struct AcidCoating {float localYaw;int born,next;uint32_t seed;};
+static std::unordered_map<const mobj_t*,AcidCoating> acidCoatings;
+void forgetAcidActor(const mobj_t *actor) {acidCoatings.erase(actor);}
+void clearAcidVisuals() {
+    acidCoatings.clear();
+    drops.erase(std::remove_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Acid;}),drops.end());
+    clearAcidMarks();
+}
+void coatAcidActor(mobj_t *actor,fixed_t x,fixed_t y) {
+    if(!acidLiquidOn()||!settings.acidMonsterCoating||!actor||actor->player||
+       !(actor->flags&MF_SHOOTABLE)||!actor->info||
+       (!(actor->info->flags&MF_COUNTKILL)&&Game_ThingRole(actor->type)!=GAME_THING_UNCOUNTED_MONSTER))return;
+    if(acidCoatings.size()>=24&&!acidCoatings.count(actor))return;
+    float facing=float(actor->angle*(2*doomPi/4294967296.0));
+    float direction=std::atan2(units(y)-units(actor->y),units(x)-units(actor->x));
+    uint32_t seed=hash32((uint32_t)actor->x^(uint32_t)actor->y^(uint32_t)leveltime);
+    acidCoatings[actor]={direction-facing,leveltime,leveltime+12+int(seed%13),seed};
+}
+bool acidCoatingPosition(const mobj_t *actor,float eyeX,float eyeY,float &u,float &v) {
+    if(!acidLiquidOn()||!settings.acidMonsterCoating)return false;
+    auto it=acidCoatings.find(actor);if(it==acidCoatings.end()||leveltime-it->second.born>=10*TICRATE)return false;
+    float facing=float(actor->angle*(2*doomPi/4294967296.0))+it->second.localYaw;
+    float view=std::atan2(eyeY-units(actor->y),eyeX-units(actor->x));
+    float delta=view-facing;if(std::cos(delta)<.1f)return false;
+    u=.5f+.22f*std::sin(delta);v=.42f;return true;
+}
+static void tickAcidCoatings() {
+    if(!acidLiquidOn()||!settings.acidMonsterCoating){acidCoatings.clear();return;}
+    for(auto it=acidCoatings.begin();it!=acidCoatings.end();) {
+        auto &c=it->second;const mobj_t *actor=it->first;
+        if(leveltime<c.born||leveltime-c.born>=10*TICRATE){it=acidCoatings.erase(it);continue;}
+        if(leveltime>=c.next&&leveltime-c.born<6*TICRATE) {
+            float a=float(actor->angle*(2*doomPi/4294967296.0))+c.localYaw;
+            float x=units(actor->x)+std::cos(a)*units(actor->radius)*.7f;
+            float y=units(actor->y)+std::sin(a)*units(actor->radius)*.7f;
+            float z=units(actor->z)+units(actor->height)*.55f;
+            auto saved=impactRandom;impactRandom.seed(c.seed?c.seed:1);
+            BloodSourceScope tint(LIQUID_TINT_ACID);
+            throwDrop(x,y,z,units(actor->momx)*TICRATE,units(actor->momy)*TICRATE,0,1.f,4.f,BLOOD_SPECK,nullptr,nullptr,DropVisual::Blood,sprayGravity,nullptr,LiquidMaterial::Acid);
+            impactRandom=saved;c.seed=hash32(c.seed+1);c.next=leveltime+12+int(c.seed%13);
+        }
+        ++it;
+    }
+}
 static void checkSprayLevel() {
     if(sprayLevelSerial==r_levelserial)return;
-    drops.clear();slides.clear();clearGiblets();goreEventOrdinal=0;sprayLevelSerial=r_levelserial;
+    clearAcidVisuals();drops.clear();slides.clear();clearGiblets();goreEventOrdinal=0;sprayLevelSerial=r_levelserial;
 }
 static const sector_t *sectorAt(float x,float y) {return R_PointInSubsector((fixed_t)(x*FRACUNIT),(fixed_t)(y*FRACUNIT))->sector;}
 static bool bleeds(const mobj_t &thing) {
@@ -47,7 +93,7 @@ static bool sprayOn() {return settings.bloodSpray&&bloodOn();}
 // a second; splat: the size of what it leaves (0 none).
 static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float size,float splat,int kind,int *wallBudget=nullptr,
                       const uint32_t *decorationSeed=nullptr,DropVisual visual=DropVisual::Blood,float gravity=sprayGravity,
-                      int *flatBudget=nullptr) {
+                      int *flatBudget=nullptr,LiquidMaterial material=LiquidMaterial::Blood) {
     float now=decorationSeed?leveltime/float(TICRATE):gameSeconds();
     const sector_t *start=sectorAt(x,y);
     if(ceilZ(start)-floorZ(start)<1.f)return false;
@@ -110,30 +156,54 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
             WallSpan span;bool valid=!wallBudget||(*wallBudget>0&&wallSpan(line,hit.side,hit.section,span)&&span.texture>0&&span.texture!=skytexture&&lz>=span.bottom&&lz<=span.top);
             if(valid&&wallBudget&&SV_Active()&&SV_Trace(x,y,z,lx-x,ly-y,lz-z,nullptr,nullptr)<.98f)valid=false;
             if(valid&&bloodWallSplat(hit,lx,ly,lz,splat,std::clamp(1/std::max(facing,0.35f),1.0f,2.4f),now+t,
-                                    kind,kind==BLOOD_SPLAT&&splat>=18,!wallBudget)&&wallBudget) {
-                --*wallBudget;++combatFeedbackStats.wallSplats;
+                                    kind,kind==BLOOD_SPLAT&&splat>=18,!wallBudget,material)&&wallBudget) {
+                --*wallBudget;if(material==LiquidMaterial::Blood)++combatFeedbackStats.wallSplats;
             }
         } else {
             const bool sky=(where==CEILING?endSector->ceilingpic:endSector->floorpic)==skyflatnum;
-            const bool edited=wallBudget&&(SV_Edited(lx,ly,lz)||SV_Edited(lx,ly,lz+(where==CEILING?2.f:-2.f)));
-            if((where==CEILING||!liquid)&&(!wallBudget||!sky)&&!edited&&(!flatBudget||*flatBudget>0)) {
+            const bool edited=(wallBudget||material==LiquidMaterial::Acid)&&(SV_Edited(lx,ly,lz)||SV_Edited(lx,ly,lz+(where==CEILING?2.f:-2.f)));
+            if((where==CEILING||!liquid)&&(!(wallBudget||material==LiquidMaterial::Acid)||!sky)&&!edited&&(!flatBudget||*flatBudget>0)) {
                 // Drops coming in low stretch along their way.
                 float stretch=where==CEILING?1:1+std::clamp(h/std::max(60.0f,std::abs(fall))*0.6f,0.0f,1.2f);
                 const float angle=decorationSeed?doom_decor::unit(*decorationSeed)*float(2*doomPi):std::atan2(vy,vx);
                 const bool admitted=bloodFloorSplat(lx,ly,(int)endIndex,splat,angle,stretch,where==CEILING,now+t,
-                                                    kind,decorationSeed,!wallBudget);
+                                                    kind,decorationSeed,!wallBudget,material);
                 if(admitted&&flatBudget)--*flatBudget;
                 floorSplat=admitted&&where==FLOOR&&!sky;
             }
         }
     }
     if(decorationSeed&&!settings.bloodSpray)return floorSplat;
-    if(drops.size()>=maxDrops)drops.erase(drops.begin(),drops.begin()+(drops.size()-maxDrops+1));
+    if(material==LiquidMaterial::Acid) {
+        if(std::count_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Acid;})>=128)return floorSplat;
+    } else {
+        auto count=std::count_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Blood;});
+        if(count>=maxDrops) {auto it=std::find_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Blood;});if(it!=drops.end())drops.erase(it);}
+    }
     const float shade=decorationSeed?.25f+.2f*doom_decor::unit(*decorationSeed^0xc63u):
                       visual==DropVisual::BlueGut?randomRange(.68f,.95f):randomRange(.35f,.7f);
     const auto color=visual==DropVisual::Bone?paletteColor({shade+.25f,shade+.20f,shade+.12f}):bloodColor(shade);
-    drops.push_back({x,y,z,vx,vy,vz,now,now+t+(restBone?.42f:0),size,gravity,t,color,decorationSeed!=nullptr,visual});
+    drops.push_back({x,y,z,vx,vy,vz,now,now+t+(restBone?.42f:0),size,gravity,t,color,decorationSeed!=nullptr,visual,material});
     return floorSplat;
+}
+
+void emitAcidBurst(fixed_t fx,fixed_t fy,fixed_t fz,fixed_t height) {
+    if(!acidLiquidOn())return;
+    checkSprayLevel();
+    const auto oldRandom=impactRandom;
+    const uint32_t seed=hash32((uint32_t)fx^((uint32_t)fy*33u)^(uint32_t)leveltime);
+    impactRandom.seed(seed?seed:1);
+    BloodSourceScope tint(LIQUID_TINT_ACID);
+    int walls=6,flats=18;
+    float x=units(fx),y=units(fy),z=units(fz)+units(height)*.5f;
+    for(int i=0;i<18;++i) {
+        float a=(i+randomRange(-.35f,.35f))*float(2*doomPi/18),speed=randomRange(85,210);
+        bool heavy=i<6;
+        throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,randomRange(70,240),
+                  heavy?1.6f:1.f,heavy?randomRange(18,25):randomRange(5,9),
+                  heavy?BLOOD_SPLAT:BLOOD_SPECK,&walls,nullptr,DropVisual::Blood,sprayGravity,&flats,LiquidMaterial::Acid);
+    }
+    impactRandom=oldRandom;
 }
 
 void decorationBloodDrop(const mobj_t &source,float x,float y,float z,uint32_t seed) {
@@ -618,15 +688,19 @@ static void drip(const mobj_t &thing) {
     }
 }
 void watchSpray() {
+    checkSprayLevel();
+    if(!acidLiquidOn())clearAcidVisuals();
+    tickAcidCoatings();
     const bool goreOnly=settings.accelerated&&settings.goreLevel&&settings.blood&&totalkills<200;
-    if((!sprayOn()&&!goreOnly)||levelSerial!=r_levelserial) {drops.clear();slides.clear();clearGiblets();return;}
+    if(levelSerial!=r_levelserial) {drops.clear();slides.clear();clearGiblets();return;}
+    if(!sprayOn()&&!goreOnly&&!acidLiquidOn()) {drops.clear();slides.clear();clearGiblets();return;}
     checkSprayLevel();
     if(activeGiblets()) {
         const float now=gameSeconds();
         const int procedural=int(std::count_if(drops.begin(),drops.end(),[&](const Drop &d){
             return d.visual>=DropVisual::Flesh&&d.end>now;
         }));
-        tickGiblets(drops.size(),procedural);
+        tickGiblets(std::count_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Blood;}),procedural);
     }
     if(!sprayOn()){slides.clear();return;}
     for(auto &entry:slides)entry.second.seen=false;
@@ -672,7 +746,8 @@ void buildSpray(const Uniforms &camera) {
     const bool showGore=settings.accelerated&&settings.goreLevel==1&&settings.blood&&totalkills<200&&
                         !netgame&&!demoplayback&&!demorecording;
     drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){
-        return now>=d.end||now<d.born-0.1f||(d.decoration&&!showDecor)||
+        if(d.material==LiquidMaterial::Acid)return now>=d.end||!acidLiquidOn();
+        return now>=d.end||now<d.born-0.1f||(d.visual==DropVisual::Blood&&!sprayOn()&&!showGore)||(d.decoration&&!showDecor)||
                (d.visual!=DropVisual::Blood&&(!showGore||
                   (d.visual==DropVisual::GoreBlood?!settings.goreWallBlood:d.visual==DropVisual::GoreDrip?
                       (!settings.goreBodyDamage||!settings.bloodSpray):!settings.goreFragments)));
@@ -717,5 +792,10 @@ void buildSpray(const Uniforms &camera) {
         } else pixelBlock(particleVertices,camera,x,y,z,d.size,tall,lit,false,&d.color);
     }
 }
-void sprayShutdown() {drops.clear();slides.clear();clearGiblets();resetBlastCapture();}
+void sprayShutdown() {clearAcidVisuals();drops.clear();slides.clear();clearGiblets();resetBlastCapture();}
 } // namespace doom3d
+
+#ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestAcidDrops() {return int(std::count_if(doom3d::drops.begin(),doom3d::drops.end(),[](const doom3d::Drop &d){return d.material==doom3d::LiquidMaterial::Acid;}));}
+extern "C" int I_TestAcidCoatings() {return int(doom3d::acidCoatings.size());}
+#endif

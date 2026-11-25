@@ -195,6 +195,10 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Combat",{
                 check("corrosive_barrels","Corrosive Barrels",&s.corrosiveBarrels,
                     "Damaged barrels seep green acid; ruptures splash nearby actors and leave persistent corrosive pools. Monsters and players take 5 HP every 17 tics, with two seconds of residual exposure; Radiation Suits protect the player. Single-player only; disabled in multiplayer and demos. Acid decals require the accelerated 3D renderer. Off preserves classic barrel behavior."),
+                check("acid_splatters","Acid Splatters and Wall Runoff",&s.acidSplatters,
+                    "Acid spray sticks to walls and leaves cosmetic floor splatters. Does not increase acid damage.",[](const Settings &d){return d.accelerated&&d.corrosiveBarrels;}),
+                check("acid_monster_coating","Monster Acid Contamination",&s.acidMonsterCoating,
+                    "Exposed monsters receive temporary localized acid splashes and droplets. Cosmetic only.",[](const Settings &d){return d.accelerated&&d.corrosiveBarrels&&d.acidSplatters;}),
                 check("incendiary_barrels","Incendiary Barrels",&s.incendiaryBarrels,
                     "Burning barrels become destructible. Their explosions spill burning oil that hurts monsters and players until it burns out. Independent of Corrosive Barrels. Single-player only. Oil effects use the accelerated 3D renderer.",
                     [](const Settings &){return !netgame&&!demoplayback&&!demorecording;}),

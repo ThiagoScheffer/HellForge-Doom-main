@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="94f8a0f0159ebacac535c4cf4963a33915afd67f62d6224628803027f5dcbe0e">
+<settings source="platform/settings_panel.cpp" source_sha256="8a772c60892b26ab22e2725c4ef1269d468e918eb4b0a3b2da7e3f48b640b3d1">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -58,6 +58,8 @@
   <option key="hanging_fragments" title="Delay before fragments fall" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="collapse_size" title="Largest detached fragment" category="Destruction" kind="choice" choices="4=Small|12=Medium|24=Large" />
   <option key="corrosive_barrels" title="Corrosive Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="acid_splatters" title="Acid Splatters and Wall Runoff" category="Combat" kind="check" choices="0=Off|1=On" />
+  <option key="acid_monster_coating" title="Monster Acid Contamination" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="incendiary_barrels" title="Incendiary Barrels" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="critical_parts" title="Critical parts" category="Combat" kind="check" choices="0=Off|1=On" />
   <option key="enhanced_weak_points" title="Enhanced Monster Weak Points" category="Destruction" kind="check" choices="0=Off|1=On" />

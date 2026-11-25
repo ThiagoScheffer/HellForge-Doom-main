@@ -22,6 +22,10 @@ typedef struct {
     int hasOwner;
 } p_acid_pool_view_t;
 
+extern void (*P_AcidVisualCoat)(mobj_t *actor, fixed_t x, fixed_t y);
+extern void (*P_AcidVisualForget)(const mobj_t *actor);
+extern void (*P_AcidVisualClear)(void);
+extern void (*P_AcidVisualBurst)(fixed_t x,fixed_t y,fixed_t z,fixed_t height);
 void P_AcidConfigure(int enabled);
 int P_AcidEnabled(void);
 void P_DamageMobjAcid(mobj_t *target,mobj_t *source,int damage);

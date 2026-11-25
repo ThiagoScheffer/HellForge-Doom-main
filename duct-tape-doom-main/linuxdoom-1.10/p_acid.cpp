@@ -17,6 +17,13 @@ extern "C" {
 #include "r_state.h"
 }
 
+extern "C" {
+void (*P_AcidVisualBurst)(fixed_t,fixed_t,fixed_t,fixed_t)=nullptr;
+void (*P_AcidVisualCoat)(mobj_t*,fixed_t,fixed_t)=nullptr;
+void (*P_AcidVisualForget)(const mobj_t*)=nullptr;
+void (*P_AcidVisualClear)(void)=nullptr;
+}
+
 namespace {
 constexpr int acidDamage = 5;
 constexpr int acidDamageInterval = 17; /* About twice per second. */
@@ -159,6 +166,7 @@ void splashExposure(mobj_t *barrel, mobj_t *source) {
         const double dz = (actorMid - barrelMid) / FRACUNIT;
         const double reach = 64.0 + (double)actor->radius / FRACUNIT;
         if (dx*dx + dy*dy + dz*dz > reach*reach || !P_CheckSight(barrel, actor)) continue;
+        if(!actor->player && P_AcidVisualCoat) P_AcidVisualCoat(actor,barrel->x,barrel->y);
         auto &exposure = exposures[actor];
         if(!exposure.nextDamage||exposure.until<leveltime)exposure.nextDamage = leveltime + acidDamageInterval;
         exposure.until = leveltime + acidAfterExposure;
@@ -201,6 +209,7 @@ extern "C" void P_AcidConfigure(int value) {
 }
 
 extern "C" void P_AcidClear(void) {
+    if(P_AcidVisualClear)P_AcidVisualClear();
     pools.clear();
     exposures.clear();
     rupturedBarrels.clear();
@@ -246,6 +255,7 @@ extern "C" void P_AcidBarrelExplode(mobj_t *barrel, mobj_t *source) {
             return pool.kind == P_ACID_POOL_LEAK && pool.owner == barrel;
         });
     if(!source&&leak!=pools.end())source=leak->source;
+    if(P_AcidVisualBurst)P_AcidVisualBurst(barrel->x,barrel->y,barrel->z,barrel->height);
     splashExposure(barrel,source);
     if (leak != pools.end()) {
         leak->radius = 48 * FRACUNIT;
@@ -328,6 +338,7 @@ extern "C" void P_AcidTick(mobj_t *actor) {
 }
 
 extern "C" void P_AcidForget(mobj_t *actor) {
+    if(P_AcidVisualForget)P_AcidVisualForget(actor);
     if (!actor) return;
     exposures.erase(actor);
     rupturedBarrels.erase(actor);

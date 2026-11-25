@@ -35,6 +35,13 @@ static void run(){
   }
  }
  check(seen.size()==registry.size(),"all settings reachable exactly once");
+ check(Settings{}.acidSplatters==1&&Settings{}.acidMonsterCoating==1&&!Settings{}.corrosiveBarrels,"acid visual defaults preserve the master default");
+ choose("acid_splatters");check(!strcmp(panel.tabs[panel.tab].title,"Combat")&&!strcmp(currentPage().title,"Barrels"),"acid settings appear with barrel controls");
+ Settings acidSettings;acidSettings.accelerated=1;check(!selectedOption().isEnabled(acidSettings),"acid visuals require their master");
+ acidSettings.corrosiveBarrels=1;check(selectedOption().isEnabled(acidSettings),"acid visuals enable with their master");
+ choose("acid_monster_coating");acidSettings.acidSplatters=0;check(!selectedOption().isEnabled(acidSettings)&&acidSettings.acidMonsterCoating==1,"disabled parent preserves coating preference");
+ readOption(acidSettings,"acid_splatters",0);readOption(acidSettings,"acid_monster_coating",0);
+ check(!acidSettings.acidSplatters&&!acidSettings.acidMonsterCoating,"acid settings deserialize through the canonical registry");
  auto original=panel.tabs;for(int i=0;i<25;++i){auto t=panel.tabs[0];t.title="Extra category";panel.tabs.push_back(std::move(t));}selectTab((int)panel.tabs.size()-1);check(panel.tab-panel.tabScroll<visibleLines,"sidebar overflow scrolls");I_Render3DSettingsClick(24,listRow*cellHeight+8,1);check(panel.tab==panel.tabScroll,"sidebar click after scroll");panel.tabs=std::move(original);selectTab(0);paint();
  choose("window_strength");check(!strcmp(panel.tabs[panel.tab].title,"Lighting")&&!strcmp(currentPage().title,"Windows"),"window settings located correctly");panel.draft.bakedLights=0;panel.draft.windowLight=1;float strength=panel.draft.windowStrength;check(!selectedOption().isEnabled(panel.draft)&&dependencyHint(selectedOption()).find("Lighting / Baked")!=std::string::npos,"dependency points to correct sub-tab");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.windowStrength==strength,"disabled controls locked");
  choose("fov");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_TAB,0);check(panel.draft.fov==95&&settings.fov==90,"navigation preserves draft only");choose("fov");I_Render3DSettingsKey(SDL_SCANCODE_R,0);check(panel.draft.fov==90,"reset default");I_Render3DSettingsKey(SDL_SCANCODE_F10,0);check(!panel.open&&applied==0&&settings.bakedLights,"discard draft");

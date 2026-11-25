@@ -1,5 +1,6 @@
 /* Runtime fixture for stock actors, the vanilla explosion and real saves. */
 extern "C" void A_Explode(mobj_t *);
+extern "C" int I_TestAcidDrops(),I_TestAcidCoatings(),I_TestAcidFloorMarks(),I_TestAcidWallMarks(),I_TestAcidWallDrips();
 static std::vector<unsigned char> acidState() {
     std::vector<unsigned char> data(P_AcidSave(nullptr));
     if(!data.empty())check(P_AcidSave(data.data())==data.size(),"AC01 sizing matches bytes written");
@@ -158,6 +159,7 @@ static void acidVisualFrame() {
         player->player->viewz=player->z+41*FRACUNIT;
         barrel=P_SpawnMobj(fx(190),fx(100),ONFLOORZ,MT_BARREL);
         P_DamageMobj(barrel,nullptr,player,4);
+        P_SpawnMobj(fx(225),fx(100),ONFLOORZ,MT_HEAD);
         began=leveltime;
     }
     const int age=leveltime-began;
@@ -166,7 +168,15 @@ static void acidVisualFrame() {
         I_Render3DScreenshotTo(leakPath.c_str());
     }
     if(age==14&&barrel) {
-        barrel->target=player;A_Explode(barrel);P_RemoveMobj(barrel);barrel=nullptr;
+        barrel->target=player;A_Explode(barrel);
+        check(I_TestAcidDrops()>0&&I_TestAcidDrops()<=128,"shared acid drops emitted with blood disabled and bounded");
+        check(I_TestAcidCoatings()>0&&I_TestAcidCoatings()<=24,"visible monster receives bounded acid coating");
+        check(I_TestAcidFloorMarks()+I_TestAcidWallMarks()>0,"shared trajectory deposits cosmetic acid marks");
+        auto *nearWall=P_SpawnMobj(fx(500),fx(128),ONFLOORZ,MT_BARREL);
+        P_AcidBarrelExplode(nearWall,player);
+        check(I_TestAcidWallMarks()>0&&I_TestAcidWallDrips()>0,"nearby solid wall receives shared splatters and drip runs");
+        P_RemoveMobj(nearWall);
+        P_RemoveMobj(barrel);barrel=nullptr;
     }
     if(age>=21&&!barrel&&rupturePath.empty()) {
         rupturePath=output+"/acid-rupture.png";
@@ -178,6 +188,8 @@ static void acidVisualFrame() {
             check(file!=nullptr,"acid GPU capture saved");
             std::fclose(file);
         }
+        P_AcidClear();
+        check(!I_TestAcidDrops()&&!I_TestAcidCoatings()&&!I_TestAcidFloorMarks()&&!I_TestAcidWallMarks(),"acid visual state clears with gameplay state");
         std::puts("PASS Vulkan acid leak and airborne rupture with blood disabled");
         I_Quit();
     }
