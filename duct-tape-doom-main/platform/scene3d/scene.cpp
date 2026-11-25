@@ -153,6 +153,7 @@ static void beforeTic() {
     ragdollTestTic();
     watchBodies();
     watchSpray();
+    if(const mobj_t *local=players[consoleplayer].mo)tickWallAmbience(*local);
     watchGlass();
     watchWeather();
     watchWear();
@@ -244,7 +245,7 @@ static int flashlightIlluminates(const mobj_t *monster) {
 void applySettings() {
     if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
-    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();sprayShutdown();};
+    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -424,7 +425,7 @@ void sceneShutdown() {
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
     rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
-    weatherShutdown();wearShutdown();decorationAmbienceReset();corpseDecayReset();
+    weatherShutdown();wearShutdown();decorationAmbienceReset();resetWallAmbience();corpseDecayReset();
 }
 // A new level, or the first after shutdown: each part forgets the last
 // level, then the map and what is built from it at level load.
@@ -439,6 +440,7 @@ static void startLevel() {
     glassLightShutdown(); // Drops Image pointers before their owners are reclaimed.
     bodyMotionShutdown(); // Includes wound/classification caches keyed by Image*.
     decorationAmbienceReset(); // Drop local flies/worms and their emitter state.
+    resetWallAmbience();
     corpseDecayReset(); // Reset ages on level transition or save reload.
     monsterSkinReset(); // Variant counts and rejected-art identities are map-local.
     corpseDecayImageReset(); // Release/reset the bounded dry-sprite variant cache.
@@ -545,7 +547,7 @@ SurfaceBinding surfaceBinding(int key) {
     }
     SurfaceBinding binding={&image,next,blend};
     // frameMean.a is an exact small integer: base material in bits 0-3,
-    // worn-plate marker in bit 4, Living Surface profile in the upper bits.
+    // worn plates in bit 4, Living Surface profile in bits 5-8, wall eyes in bit 9.
     unsigned metadata=(unsigned)std::lround(surfaceMaterial(sourceKey,pic,flat));
     if(settings.wornPlates&&wornPlate(sourceKey,pic,flat)) metadata|=16u;
     float floor=flat?liquidDetailFloor(pic):0;
@@ -559,6 +561,14 @@ SurfaceBinding surfaceBinding(int key) {
         for(int axis=0;axis<3;++axis)binding.frameMean[axis]=(float)image.livingBounds[axis];
         binding.cycleMean[0]=(float)image.livingBounds[3];
         binding.cycleMean[1]=(float)image.livingVariant;
+    }
+    if(image.wallEyes) {
+        metadata|=LS_WALL_EYE_MAP;
+        if(next==&image&&settings.livingSurfaces&&(settings.textureSkullEyes||settings.textureReactiveEyes)) {
+            const player_t &viewer=players[consoleplayer];
+            if(const mobj_t *player=viewer.mo)
+                binding.wallEyeViewer={units(player->x),units(player->y),units(viewer.viewz),1};
+        }
     }
     binding.frameMean[3]=(float)metadata;
     static unsigned meanLevel=~0u;
@@ -651,7 +661,8 @@ FrameView prepareFrame(int w,int h) {
     camera.map[0]=mapOrigin[0];camera.map[1]=mapOrigin[1];camera.map[2]=1/mapCell;
     unsigned mapFlags=settings.softLight&&seamTexture&&worldPending?WORLD_SOFT_LIGHT:0u;
     if(settings.livingSurfaces&&worldPending) {
-        mapFlags|=LS_ENABLED|(settings.livingMorph?LS_MORPH:0u)|
+        mapFlags|=LS_ENABLED|(settings.textureSkullEyes?LS_SKULL_DOTS:0u)|
+            (settings.textureReactiveEyes?LS_REACTIVE_EYES:0u)|(settings.livingMorph?LS_MORPH:0u)|
             (settings.livingPulse?LS_PULSE:0u)|(settings.livingWetness?LS_WETNESS:0u)|
             ((unsigned)std::clamp(settings.livingIntensity,1,3)<<LS_INTENSITY_SHIFT);
     }

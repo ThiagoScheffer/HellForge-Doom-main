@@ -467,6 +467,16 @@ void pixelBlock(std::vector<Vertex> &out,const Uniforms &camera,float x,float y,
 // crests brighten what is under them, so overlapping ones would compound.
 extern std::unordered_set<uint64_t> crestCells;
 bool wallSpan(const line_t &line,int side,int section,WallSpan &span);
+bool wallAmbienceSpan(const WallHit &hit,WallSpan &span,bool simulation=false);
+void tickWallAmbience(const mobj_t &player);
+void drawWallAmbience(const Uniforms &camera);
+void resetWallAmbience();
+void syncWallAmbienceSettings();
+bool wallBloodEnabled();
+void tickWallAmbienceBlood();
+void clearWallAmbienceBlood();
+void wallBloodDrop(float x,float y,float z,float nx,float ny,uint32_t seed);
+void clearWallBloodDrops();
 void wallImpact(line_t *line,int side,fixed_t fx,fixed_t fy,fixed_t fz);
 void barrelBlast(const mobj_t &thing,float x,float y,float z);
 void buildImpacts(const Uniforms &camera);
@@ -537,9 +547,10 @@ void buildBlood(const Uniforms &camera);
 // Splats shown from born on: a splat, a drop's speck, or a body's smear
 // (thick end forward along angle). size across, stretched along angle.
 enum { BLOOD_SPLAT,BLOOD_SPECK,BLOOD_SMEAR };
-bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood);
+enum class LiquidSource : uint8_t { Normal, Environment };
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood,LiquidSource source=LiquidSource::Normal);
 // On the wall hit at (x,y,z), stretched along it; drips: one or two run down from it.
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood);
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood,const uint32_t *environmentSeed=nullptr);
 
 // spray.cpp
 // What a hitscan hit throws: an exit spray past the body along the shot, a speck or two back.

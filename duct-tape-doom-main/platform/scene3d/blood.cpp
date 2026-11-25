@@ -212,8 +212,10 @@ static int variantOf(int kind,const uint32_t *seed=nullptr) {
     return kind==BLOOD_SPECK?bloodSpeckFirst+pick%bloodSpecks:kind==BLOOD_SMEAR?bloodSmear:1+pick%bloodSplats;
 }
 struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling;bool decoration=false; };
-struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; };
+struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; int texture=0; fixed_t offset=0; };
 struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
+static std::vector<BloodFloor> environmentFloors;
+static std::vector<BloodWall> environmentWalls;
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
 static std::vector<BloodFloor> acidFloors;
 static std::vector<BloodWall> acidWalls;
@@ -465,43 +467,71 @@ static void buildSevereBlood(const Uniforms &camera) {
     }
 }
 constexpr size_t maxFloorBlood=320,maxWallBlood=160;
+void clearWallAmbienceBlood() {
+    environmentFloors.clear();environmentWalls.clear();clearWallBloodDrops();
+}
+void tickWallAmbienceBlood() {
+    const float now=leveltime/float(TICRATE);
+    environmentFloors.erase(std::remove_if(environmentFloors.begin(),environmentFloors.end(),
+        [now](const BloodFloor &d){return now-d.born>18.f;}),environmentFloors.end());
+    environmentWalls.erase(std::remove_if(environmentWalls.begin(),environmentWalls.end(),[now](const BloodWall &d) {
+        WallSpan span;
+        if(now-d.born>12.f||!wallAmbienceSpan({d.line,d.side,d.section},span,true)||
+           span.texture!=d.texture||sides[lines[d.line].sidenum[d.side]].textureoffset!=d.offset)return true;
+        const float z=span.anchor+d.dz;
+        if(z<span.bottom||z>span.top)return true;
+        if(!SV_Active())return false;
+        const float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy);
+        if(len<1.f)return true;
+        const float x=span.a.x+dx*d.along/len,y=span.a.y+dy*d.along/len;
+        return SV_Edited(x,y,z)||SV_Edited(x+dy/len,y-dx/len,z)||SV_Edited(x-dy/len,y+dx/len,z);
+    }),environmentWalls.end());
+}
 static void checkBloodLevel() {
     if(bloodLevelSerial==r_levelserial)return;
     bloodFloors.clear();bloodWalls.clear();acidFloors.clear();acidWalls.clear();bloodPools.clear();pooledCorpses.clear();
+    clearWallAmbienceBlood();
     bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
-bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld,LiquidMaterial material) {
+bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld,LiquidMaterial material,LiquidSource source) {
     if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn())||sector<0||sector>=numsectors)return false;
     checkBloodLevel();
-    auto &marks=material==LiquidMaterial::Acid?acidFloors:bloodFloors;
-    const size_t limit=material==LiquidMaterial::Acid?96:maxFloorBlood;
+    const bool environment=source==LiquidSource::Environment;
+    auto &marks=environment?environmentFloors:material==LiquidMaterial::Acid?acidFloors:bloodFloors;
+    const size_t limit=environment?24:material==LiquidMaterial::Acid?96:maxFloorBlood;
     if(marks.size()>=limit) {
         if(!replaceOld)return false;
         marks.erase(marks.begin());
     }
     const int variant=variantOf(kind,decorationSeed)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint);
     const bool flip=kind!=BLOOD_SMEAR&&(decorationSeed?((hash32(*decorationSeed)&4u)!=0):randomRange(0,1)<.5f);
-    marks.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr});
+    marks.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr&&!environment});
     return true;
 }
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld,LiquidMaterial material) {
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld,LiquidMaterial material,const uint32_t *environmentSeed) {
     if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn()))return false;
     if(hit.line<0||hit.line>=numlines||hit.side<0||hit.side>1)return false;
     checkBloodLevel();
-    WallSpan span;if(!wallSpan(lines[hit.line],hit.side,hit.section,span))return false;
+    WallSpan span;if(!(environmentSeed?wallAmbienceSpan(hit,span,true):wallSpan(lines[hit.line],hit.side,hit.section,span)))return false;
     float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);if(len<1)return false;
     if(z<span.bottom||z>span.top)return false;
     float along=std::clamp(((x-span.a.x)*ex+(y-span.a.y)*ey)/len,0.0f,len);
     if(material==LiquidMaterial::Acid&&(span.texture<=0||span.texture==skytexture))return false;
-    auto &marks=material==LiquidMaterial::Acid?acidWalls:bloodWalls;
-    const size_t limit=material==LiquidMaterial::Acid?64:maxWallBlood;
+    auto &marks=environmentSeed?environmentWalls:material==LiquidMaterial::Acid?acidWalls:bloodWalls;
+    const size_t limit=environmentSeed?32:material==LiquidMaterial::Acid?64:maxWallBlood;
     if(marks.size()>=limit) {
         if(!replaceOld)return false;
         marks.erase(marks.begin());
     }
-    BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variantOf(kind)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint),randomRange(0,1)<0.5f,0,{},{}};
+    const int variant=variantOf(kind,environmentSeed)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint);
+    const bool flip=environmentSeed?(hash32(*environmentSeed)&4u)!=0:randomRange(0,1)<.5f;
+    BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variant,flip,0,{},{}};
     // Runs from a heavy splat: one or two, down from its lower half.
-    if(drips) {
+    if(environmentSeed) {
+        wall.texture=span.texture;
+        wall.offset=sides[lines[hit.line].sidenum[hit.side]].textureoffset;
+        wall.drips=drips?1:0;wall.dripU[0]=-1.5f;wall.dripLength[0]=11.f;
+    } else if(drips) {
         wall.drips=1+(randomRange(0,1)<0.4f);
         for(int n=0;n<wall.drips;++n) {wall.dripU[n]=randomRange(-0.3f,0.3f)*size;wall.dripLength[n]=randomRange(8,26);}
     }
@@ -756,8 +786,9 @@ void buildBlood(const Uniforms &camera) {
     } // blood-only pools
     bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){return now-d.born>180;}),bloodFloors.end());
     acidFloors.erase(std::remove_if(acidFloors.begin(),acidFloors.end(),[&](const BloodFloor &d){return now-d.born>25;}),acidFloors.end());
-    for(const auto *marks:{&bloodFloors,&acidFloors})for(const auto &d:*marks) {
-        if((marks==&bloodFloors&&!showBlood)||(marks==&acidFloors&&!showAcid))continue;
+    for(const auto *marks:{&bloodFloors,&acidFloors,&environmentFloors})for(const auto &d:*marks) {
+        if(marks==&acidFloors?!showAcid:!showBlood)continue;
+        if(marks==&environmentFloors&&!wallBloodEnabled())continue;
         if(now<d.born)continue;
         if(d.ceiling?camera.eye[2]>ceilZ(&sectors[d.sector]):camera.eye[2]<floorZ(&sectors[d.sector]))continue; // Back of the flat.
         float wet,dark;bloodAge(now-d.born,0,3,wet,dark);
@@ -780,15 +811,20 @@ void buildBlood(const Uniforms &camera) {
     acidWalls.erase(std::remove_if(acidWalls.begin(),acidWalls.end(),[&](const BloodWall &d){return now-d.born>30;}),acidWalls.end());
     severeWallMarks.erase(std::remove_if(severeWallMarks.begin(),severeWallMarks.end(),
         [&](const BloodWall &d){return now<d.born||now-d.born>45;}),severeWallMarks.end());
-    for(const auto *wallMarks:{&bloodWalls,&severeWallMarks,&acidWalls})for(const auto &d:*wallMarks) {
+    for(const auto *wallMarks:{&bloodWalls,&severeWallMarks,&acidWalls,&environmentWalls})for(const auto &d:*wallMarks) {
         if((wallMarks==&acidWalls&&!showAcid)||(wallMarks!=&acidWalls&&!showBlood))continue;
         if(now<d.born)continue;
-        WallSpan span;if(!wallSpan(lines[d.line],d.side,d.section,span))continue;
+        const bool environment=wallMarks==&environmentWalls;
+        if(environment&&!wallBloodEnabled())continue;
+        WallSpan span;
+        if(!(environment?wallAmbienceSpan({d.line,d.side,d.section},span):wallSpan(lines[d.line],d.side,d.section,span)))continue;
+        if(environment&&(span.texture!=d.texture||
+           sides[lines[d.line].sidenum[d.side]].textureoffset!=d.offset))continue;
         float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
         if(len<1||ex*(camera.eye[1]-span.a.y)-ey*(camera.eye[0]-span.a.x)>0)continue; // Back of the wall.
         const Image &image=bloodImage(d.variant);
         float zc=span.anchor+d.dz,h=d.size*0.5f,hu=h*d.stretch*image.width/std::max(1,image.height);
-        if(wallMarks==&acidWalls&&SV_Active()) {
+        if((wallMarks==&acidWalls||environment)&&SV_Active()) {
             float px=span.a.x+ex*d.along/len,py=span.a.y+ey*d.along/len;
             if(SV_Edited(px,py,zc)||SV_Edited(px+ey/len,py-ex/len,zc)||SV_Edited(px-ey/len,py+ex/len,zc))continue;
         }
@@ -822,13 +858,16 @@ void buildBlood(const Uniforms &camera) {
             float top=zc-h*0.35f,bottom=std::max(span.bottom,top-length);
             if(length<1||top<=bottom||u<0.5f||u>len-1.5f)continue;
             float shown=std::min((float)drip.height,top-bottom);
-            quad(batches[bloodKeyBase+bloodDrip+(d.variant/32)*32],vertex(u,top,0,drip.height-shown),vertex(u+drip.width,top,(float)drip.width,drip.height-shown),
-                 vertex(u+drip.width,bottom,(float)drip.width,(float)drip.height),vertex(u,bottom,0,(float)drip.height));
+            float width=environment?1.2f:float(drip.width);
+            if(environment)u+=.9f;
+            quad(batches[bloodKeyBase+bloodDrip+(d.variant/32)*32],vertex(u,top,0,drip.height-shown),vertex(u+width,top,(float)drip.width,drip.height-shown),
+                 vertex(u+width,bottom,(float)drip.width,(float)drip.height),vertex(u,bottom,0,(float)drip.height));
         }
     }
     buildSpray(camera);
 }
 void bloodShutdown() {
+    clearWallAmbienceBlood();
     bloodFootprints.clear();footsteps={};
     severeBursts={};severeLevel=~0u;
     severeWallMarks.clear();

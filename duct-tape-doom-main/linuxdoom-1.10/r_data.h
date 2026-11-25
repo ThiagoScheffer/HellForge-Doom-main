@@ -49,8 +49,12 @@ void R_TextureDimensions(int texture, int *width, int *height);
 void R_TextureName(int texture, char name[9]);
 // Returns the named patch and its clipped texture-space bounds (left, top, right, bottom).
 boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4]);
+/* Returns the lump, or -1 at the end. rect holds original x, y, width, height. */
+int R_TexturePatchPlacement(int texture, int part, char name[9], int rect[4]);
 boolean R_TextureFromBaseWad(int texture);
 void R_CopyIndexedTexture(int texture, byte *index_and_alpha);
+/* Optional per-texel painter order, -1 for transparent pixels. */
+void R_CopyIndexedTextureOwners(int texture, byte *index_and_alpha, short *owners);
 
 
 // Retrieval.

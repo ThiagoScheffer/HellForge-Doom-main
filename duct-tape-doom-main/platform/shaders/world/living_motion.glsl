@@ -84,6 +84,14 @@ float engravedBlink(float clock,float seed) {
     return max(blink,variation>0.77?reflex:0.0);
 }
 
+float engravedAperture(vec2 p,float open,float edge) {
+    float along=p.x/0.87;
+    float oval=sqrt(max(0.0,1.0-along*along));
+    return smoothstep(-edge,edge,p.y+oval*(0.66*open-0.15))*
+           smoothstep(-edge,edge,oval*(0.19+0.17*open)-p.y)*
+           smoothstep(0.0,0.21,oval)*smoothstep(0.0,0.19,open);
+}
+
 float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float strength,float footprint,
                    vec3 normal,vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 rgb) {
     if(!morph&&!pulse)return 1.0;
@@ -125,10 +133,7 @@ float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float
     float edge=clamp(footprint*0.48,0.16,0.46);
     float along=p.x/(radius.x*0.87);
     float oval=sqrt(max(0.0,1.0-along*along));
-    float upper=oval*radius.y*(0.66*open-0.15);
-    float lower=oval*radius.y*(0.19+0.17*open);
-    float aperture=smoothstep(-edge,edge,p.y+upper)*smoothstep(-edge,edge,lower-p.y)*
-                   smoothstep(0.0,0.21,oval)*(1.0-smoothstep(0.81,1.0,close));
+    float aperture=engravedAperture(p/radius,open,edge/radius.y);
 
     vec2 irisAt=(p-gaze*radius*vec2(0.40,0.22))/vec2(radius.y*0.76,radius.y*0.89);
     float ring=length(irisAt);

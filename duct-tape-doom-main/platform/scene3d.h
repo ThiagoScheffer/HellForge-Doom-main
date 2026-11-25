@@ -91,6 +91,7 @@ struct Settings {
     int ps2Style=0; // Optional chunky texture / stepped-lighting preset.
     int detail=1; // Derived normal maps and palette gloss.
     int livingSurfaces=0,livingIntensity=2,livingMorph=1,livingPulse=1,livingWetness=1;
+    int textureWallBlood=1,textureWallAmbience=1,textureSkullEyes=1,textureReactiveEyes=1;
     int variedHighlights=1; // Gloss highlights tighten on smooth artwork and spread on busy artwork, per palette ramp.
     int unevenTiles=1; // Tiles painted into floors each lie a little crooked, with a lit or shadowed lip where they meet.
     int unevenWalls=1; // The same for the tiles, plates and bricks painted into walls and ceilings.
@@ -284,7 +285,11 @@ enum class SkyArtwork {
     Inferno=SKY_ART_INFERNO, OrangeClouds=SKY_ART_ORANGE_CLOUDS, BrownClouds=SKY_ART_BROWN_CLOUDS,
     BurningCity=SKY_ART_BURNING_CITY, BloodHell=SKY_ART_BLOOD_HELL, Count
 };
-struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; uint64_t skyPalette=0; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens,eyeDamageMask; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
+struct WallAmbienceRegion {
+    std::array<int,4> bounds; // Half-open composite texel rectangle.
+    bool bleeding;
+};
+struct Image { bool opaque=true; SkyArtwork skyArtwork=SkyArtwork::Unknown; uint64_t skyPalette=0; unsigned livingProfile=0,livingVariant=0; std::array<int,4> livingBounds{}; std::vector<byte> pixels; GpuTextureRef texture,glassFrame,relief; int width=0,height=0,left=0,top=0; std::array<float,3> glow={1,1,1}; float glowWeight=0,glowHeight=0.85f; std::array<float,3> emissionColor={}; float emissionWeight=0,emissionCoverage=0,emissionU=0,emissionV=0; std::vector<byte> emission,screens,eyeDamageMask; std::vector<WallAmbienceRegion> wallAmbience; bool wallEyes=false; std::array<float,3> average={},brightest={}; bool averaged=false,brightened=false; bool leaded=false,liquidEmitter=false,switchIndicator=false; };
 
 // Frame profiling for the performance smoke test (I_Render3DProfile).
 struct Profile { bool enabled=false; unsigned skip=0; const char *screenshotPath=nullptr; I_Render3DFrameProfile frame={}; };
@@ -371,7 +376,7 @@ struct FrameView {
 // frameMean's alpha packs material bits 0-3, worn-plate bit 4 and optional
 // Living Surface profile above bit 4 (surfaceBinding in scene3d/scene.cpp).
 // For a profiled nonliquid, frameMean.rgb and cycleMean.r hold the patch rectangle; cycleMean.g holds its variant.
-struct SurfaceBinding { const Image *image,*next; float blend; std::array<float,4> frameMean{},cycleMean{}; bool poolBloom=false; };
+struct SurfaceBinding { const Image *image,*next; float blend; std::array<float,4> frameMean{},cycleMean{}; bool poolBloom=false; std::array<float,4> wallEyeViewer{}; };
 struct SpriteDraw { const Image *image; std::vector<Vertex> vertices; bool additive=false; };
 
 // Lifecycle: init reads options and graphics.cfg, the backend may override

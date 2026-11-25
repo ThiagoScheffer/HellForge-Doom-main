@@ -8,6 +8,7 @@
 #include "../monster_skin_damage.h"
 #include "../monster_skin_regions.h"
 #include "../corpse_decomposition.h"
+#include "../wall_immersion_regions.h"
 
 namespace doom3d {
 std::vector<unsigned> paletteLUTColors(const unsigned *palette) {
@@ -145,9 +146,11 @@ static std::vector<byte> screenGlass(const char *name,bool flat,int w,int h,cons
     return glass;
 }
 // Uploads the screen frame beside the image the shader refracts through it.
-static Image &withGlassFrame(Image &image,const std::vector<byte> &frame) {
+static Image &withGlassFrame(Image &image,const std::vector<byte> &frame,int width=0,int height=0) {
     if(frame.empty())return image;
-    image.glassFrame=gpuCreateTexture(GpuFormat::RGBA8,image.width,image.height,frame.data(),image.width*4);
+    if(!width)width=image.width;
+    if(!height)height=image.height;
+    image.glassFrame=gpuCreateTexture(GpuFormat::RGBA8,width,height,frame.data(),width*4);
     if(!image.glassFrame)I_Error((char*)"Could not allocate a GPU texture");
     return image;
 }
@@ -277,8 +280,174 @@ static Image &withLeadedRelief(Image &image) {
     if(!image.relief)I_Error((char*)"Could not allocate a GPU texture");
     return image;
 }
+using doom_wall_immersion::Effect;
+using doom_wall_immersion::Rect;
+struct ImmersivePatch {
+    const doom_wall_immersion::Artwork *art;
+    Rect placement;
+    int part;
+};
+
+static std::vector<ImmersivePatch> immersivePatches(int texture) {
+    std::vector<ImmersivePatch> result;
+    for(int part=0;;++part) {
+        char name[9];Rect placement;
+        const int lump=R_TexturePatchPlacement(texture,part,name,placement.data());
+        if(lump<0)break;
+        const auto *art=doom_wall_immersion::findArtwork(name);
+        if(!art||placement[2]!=art->width||placement[3]!=art->height)continue;
+        const int size=W_LumpLength(lump);
+        if(size<8||size>65536)continue;
+        const auto *data=static_cast<const byte*>(W_CacheLumpNum(lump,PU_CACHE));
+        uint32_t fingerprint=2166136261u;
+        for(int i=0;i<size;++i)fingerprint=(fingerprint^data[i])*16777619u;
+        if(fingerprint==art->fingerprint)result.push_back({art,placement,part});
+    }
+    return result;
+}
+
+static Rect clippedArtwork(const ImmersivePatch &patch,Rect region,int w,int h) {
+    return {std::clamp(region[0]+patch.placement[0],0,w),std::clamp(region[1]+patch.placement[1],0,h),
+            std::clamp(region[2]+patch.placement[0],0,w),std::clamp(region[3]+patch.placement[1],0,h)};
+}
+
+struct PatchEmission {
+    uint64_t led=0,diffuse=0;
+};
+
+static PatchEmission correctPatchEmission(const std::vector<ImmersivePatch> &patches,
+        const std::vector<short> &owners,int w,int h,const byte *pixels,const byte *palette,std::vector<byte> &mask) {
+    PatchEmission emission;
+    for(const auto &patch:patches) {
+        const auto &art=*patch.art;
+        if(art.effect!=Effect::RedLED&&art.effect!=Effect::GreenLED&&art.effect!=Effect::Fluorescent)continue;
+        const Rect body=clippedArtwork(patch,{0,0,art.width,art.height},w,h);
+        for(int y=body[1];y<body[3];++y)for(int x=body[0];x<body[2];++x) {
+            const size_t i=(size_t)y*w+x;
+            if(owners[i]==patch.part)mask[i]=0;
+        }
+        for(const Rect &region:art.regions) {
+            const Rect bounds=clippedArtwork(patch,region,w,h);
+            for(int y=bounds[1];y<bounds[3];++y)for(int x=bounds[0];x<bounds[2];++x) {
+                const size_t i=(size_t)y*w+x;
+                if(owners[i]!=patch.part)continue;
+                const byte *rgb=palette+pixels[i*2]*3;
+                const int r=rgb[0],g=rgb[1],b=rgb[2];
+                if(art.effect==Effect::Fluorescent) {
+                    if(r>=110&&g>=90&&r>=g&&r-g<=85&&b<g*.85f) {
+                        mask[i]=(byte)std::clamp(72+(r+g-200)*3/4,72,144);
+                        emission.diffuse+=mask[i];
+                    }
+                } else if(art.effect==Effect::RedLED?(r>g*2&&r>b*2):(g>r*1.4f&&g>b*1.2f)) {
+                    // Match the stock door panel's saturation and brightness curve.
+                    mask[i]=doom_emissive_pixel(DOOM_EMISSIVE_PANEL,rgb,pixels[i*2+1]);
+                    emission.led+=mask[i];
+                }
+            }
+        }
+    }
+    return emission;
+}
+
+// The crawl envelopes are small. Find the largest fully visible rectangle
+// within each one so a partially overpainted body can still host crawlers.
+static Rect visibleCrawlerBounds(Rect bounds,int part,int width,const std::vector<short> &owners) {
+    Rect best={};
+    int bestArea=0;
+    for(int left=bounds[0];left+8<=bounds[2];++left) {
+        for(int top=bounds[1];top+10<=bounds[3];++top) {
+            int right=bounds[2];
+            for(int y=top;y<bounds[3];++y) {
+                int x=left;
+                while(x<right&&owners[(size_t)y*width+x]==part)++x;
+                right=x;
+                if(right-left<8)break;
+                const int height=y+1-top,area=(right-left)*height;
+                if(height>=10&&area>bestArea) {best={left,top,right,y+1};bestArea=area;}
+            }
+        }
+    }
+    return best;
+}
+
+static void setWallImmersion(Image &image,const std::vector<ImmersivePatch> &patches,
+        const std::vector<short> &owners,std::vector<byte> &frame,int &frameWidth,int &frameHeight) {
+    const int w=image.width,h=image.height;
+    std::vector<byte> eyes;
+    for(const auto &patch:patches) {
+        const auto &art=*patch.art;
+        if(art.effect==Effect::BleedingBody||art.effect==Effect::CorpseAmbience||art.effect==Effect::SkullEyes) {
+            for(const Rect &region:art.regions) {
+                Rect bounds=clippedArtwork(patch,region,w,h);
+                if(bounds[0]>=bounds[2]||bounds[1]>=bounds[3])continue;
+                if(art.effect==Effect::SkullEyes) {
+                    const size_t i=(size_t)bounds[1]*w+bounds[0];
+                    if(owners[i]!=patch.part)continue;
+                    if(eyes.empty())eyes.resize((size_t)w*h*4);
+                    eyes[i*4]=255;
+                } else {
+                    const bool blood=art.effect==Effect::BleedingBody;
+                    if(blood) {
+                        if(owners[(size_t)bounds[1]*w+bounds[0]]!=patch.part)continue;
+                    } else {
+                        bounds=visibleCrawlerBounds(bounds,patch.part,w,owners);
+                        if(bounds[2]<=bounds[0])continue;
+                    }
+                    image.wallAmbience.push_back({bounds,blood});
+                }
+            }
+        } else if(art.effect==Effect::ReactiveEyes) {
+            const auto &pair=art.eyes;
+            const float mx=(pair.lx+pair.rx)*.5f,my=(pair.ly+pair.ry)*.5f;
+            for(int side=0;side<2;++side) {
+                const float cx=side?pair.rx:pair.lx,cy=side?pair.ry:pair.ly;
+                const Rect bounds=clippedArtwork(patch,
+                    {(int)cx-5,(int)cy-5,(int)cx+6,(int)cy+6},w,h);
+                for(int y=bounds[1];y<bounds[3];++y)for(int x=bounds[0];x<bounds[2];++x) {
+                    const size_t i=(size_t)y*w+x;
+                    if(owners[i]!=patch.part)continue;
+                    const float u=float(x-patch.placement[0]),v=float(y-patch.placement[1]);
+                    const float dx=(u-cx)/pair.width;
+                    const float dy=(v-cy-(u-cx)*pair.tilt*(side?-1.f:1.f))/pair.height;
+                    if(dx*dx+dy*dy>=1.f)continue;
+                    if(eyes.empty())eyes.resize((size_t)w*h*4);
+                    // RG is the tilted socket ellipse; BA is the offset to the
+                    // shared face center (half-texel units, signed about 128).
+                    eyes[i*4]=(byte)std::lround(128.f+dx*120.f);
+                    eyes[i*4+1]=(byte)std::lround(128.f+dy*120.f);
+                    eyes[i*4+2]=(byte)std::lround(128.f+(u-mx)*2.f);
+                    eyes[i*4+3]=(byte)std::lround(128.f+(v-my)*2.f);
+                }
+            }
+        }
+    }
+    if(eyes.empty())return;
+    // The existing frame sampler can hold both data planes. Real CRT data
+    // stays at the original coordinates, with eye data next to or below it.
+    if(frame.empty()) {
+        frame=std::move(eyes);
+    } else if(h<=4096) {
+        frame.insert(frame.end(),eyes.begin(),eyes.end());
+        frameHeight=h*2;
+    } else if(w<=4096) {
+        std::vector<byte> combined(frame.size()*2);
+        const size_t row=(size_t)w*4;
+        for(int y=0;y<h;++y) {
+            memcpy(combined.data()+2*y*row,frame.data()+y*row,row);
+            memcpy(combined.data()+(2*y+1)*row,eyes.data()+y*row,row);
+        }
+        frame.swap(combined);
+        frameWidth=w*2;
+    } else {
+        return; // A full-size frame already occupies the texture limit.
+    }
+    image.wallEyes=true;
+}
+
 // Masks live beside graphics.cfg, or in the directory selected by -emissive.
-static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,const byte *pixels) {
+static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,const byte *pixels,
+        const std::vector<ImmersivePatch> *patches=nullptr,const std::vector<short> *owners=nullptr,
+        PatchEmission *emission=nullptr) {
     std::vector<byte> mask((size_t)w*h,0);
     int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     if(W_LumpLength(paletteLump)<768) I_Error((char*)"Invalid emissive palette");
@@ -299,6 +468,7 @@ static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,con
                     doom_switch_pixel(palette+pixels[2*i]*3,palette+paired[2*i]*3):0;
         }
     }
+    if(patches) *emission=correctPatchEmission(*patches,*owners,w,h,pixels,palette,mask);
     std::string root=graphicsConfig;
     size_t slash=root.find_last_of("/\\");
     root=slash==std::string::npos?"Emissive":root.substr(0,slash+1)+"Emissive";
@@ -314,6 +484,7 @@ static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,con
         } else {
             for(size_t i=0;i<mask.size();++i)
                 mask[i]=pixels[i*2+1]?(byte)std::clamp(values[i]*255.0f,0.0f,255.0f):0;
+            if(emission)*emission={};
             fprintf(stderr,"Loaded emissive mask: %s\n",file.c_str());
         }
     }
@@ -374,9 +545,6 @@ static LivingMaterial livingSurfaceProfile(const char *name) {
         {"W102_1",{LS_DRY_SKIN,1}}, {"W102_2",{LS_DRY_SKIN,1}},
         {"WALL25_1",{LS_TORTURED_FACES}},
         {"MWALL4_1",{LS_MARBLE_FACES}}, {"MWALL4_2",{LS_MARBLE_FACES,1}}, {"MWALL5_1",{LS_MARBLE_FACES,2}},
-        {"BODY_1",{LS_PINNED_BODY}}, {"BODY_2",{LS_PINNED_BODY,1}},
-        {"WALL50_1",{LS_PINNED_BODY,2}}, {"WALL50_2",{LS_PINNED_BODY,3}},
-        {"WALL51_2",{LS_PINNED_BODY,4}}, {"WALL51_3",{LS_PINNED_BODY,5}},
         {"GATE1",{LS_TELEPORT}}, {"GATE2",{LS_TELEPORT}}, {"GATE3",{LS_TELEPORT}}, {"GATE4",{LS_TELEPORT,1}},
         {"RP2_1",{LS_BLOOD_FLOW}}, {"RP2_2",{LS_BLOOD_FLOW}}, {"RP2_3",{LS_BLOOD_FLOW}}, {"RP2_4",{LS_BLOOD_FLOW}},
         {"WALL58_1",{LS_BLOOD_FLOW,1}}, {"WALL58_2",{LS_BLOOD_FLOW,1}}, {"WALL58_3",{LS_BLOOD_FLOW,1}},
@@ -459,9 +627,13 @@ Image &wallImage(int index) {
     loadingTick();
     int w,h; R_TextureDimensions(index,&w,&h);
     if(w<1||h<1||w>8192||h>8192) I_Error((char*)"Unsupported texture dimensions");
-    std::vector<byte> pixels((size_t)w*h*2); R_CopyIndexedTexture(index,pixels.data());
+    const auto patches=immersivePatches(index);
+    std::vector<short> owners(patches.empty()?0:(size_t)w*h);
+    std::vector<byte> pixels((size_t)w*h*2);
+    R_CopyIndexedTextureOwners(index,pixels.data(),owners.empty()?nullptr:owners.data());
     char name[9]; R_TextureName(index,name);
-    auto mask=emissionMask(name,false,w,h,pixels.data());
+    PatchEmission patchEmission;
+    auto mask=emissionMask(name,false,w,h,pixels.data(),&patches,&owners,&patchEmission);
     bool glowing=std::any_of(mask.begin(),mask.end(),[](byte p){return p!=0;});
     std::vector<byte> frame;auto glass=screenGlass(name,false,w,h,pixels.data(),frame);
     // Masked walls (bars, fences) show what lies behind instead of tiles;
@@ -469,6 +641,18 @@ Image &wallImage(int index) {
     int next;bool animated=P_PicAnimationNext(true,index,&next)>0;
     Image &image=speckledPanel(images.emplace(index,upload(w,h,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
         glass.empty()?nullptr:glass.data(),true)).first->second,name,false);
+    if(patchEmission.led||patchEmission.diffuse) {
+        const float pixels255=float(w)*h*255.f;
+        const float led=patchEmission.led/pixels255,diffuse=patchEmission.diffuse/pixels255;
+        const float total=image.emissionCoverage;
+        const float generic=std::max(0.f,total-led-diffuse);
+        // Only treat the corrected part as a small indicator or diffuser.
+        // Preserve the ordinary weight of emission on other composite patches.
+        if(total>0.f)image.emissionWeight=(generic*image.emissionWeight+
+            led*std::min(.45f,led*8.f)+diffuse*.5f*std::clamp(diffuse*8.f,.25f,1.f))/total;
+    }
+    int frameWidth=w,frameHeight=h;
+    setWallImmersion(image,patches,owners,frame,frameWidth,frameHeight);
     image.switchIndicator=doom_switch_texture(name);
     image.skyArtwork=classifySkyArtwork(image,index,name);
     if(image.skyArtwork!=SkyArtwork::Unknown) {
@@ -489,8 +673,9 @@ Image &wallImage(int index) {
         }
     }
     setLivingWallProfile(image,index,name);
-    if(image.leaded)return withLeadedRelief(withGlassFrame(image,frame));
-    return withRelief(withGlassFrame(image,frame),image.opaque&&!animated?wallTiles:nullptr);
+    withGlassFrame(image,frame,frameWidth,frameHeight);
+    if(image.leaded)return withLeadedRelief(image);
+    return withRelief(image,image.opaque&&!animated?wallTiles:nullptr);
 }
 Image &lumpImage(int lump,bool flat) {
     int key=-1-lump; auto found=images.find(key); if(found!=images.end()) return found->second;

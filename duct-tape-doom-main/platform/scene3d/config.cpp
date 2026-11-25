@@ -51,7 +51,7 @@ static bool saveSettings() {
     SDL_RemovePath(temporary.c_str());
     return saveFailure(reason);
 }
-void settingsChanged() {AM_SetEnhancedAutomap(settings.enhancedAutomap);applySettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;}
+void settingsChanged() {AM_SetEnhancedAutomap(settings.enhancedAutomap);applySettings();syncWallAmbienceSettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;}
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER

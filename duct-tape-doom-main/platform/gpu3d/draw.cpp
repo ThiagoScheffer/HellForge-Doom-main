@@ -224,6 +224,8 @@ void bindSurface(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,int key,U
     // liquid's frame and cycle averages.
     float blend[36]={binding.blend};
     if(!world) blend[1]=binding.poolBloom?1.f:0.f;
+    // World surfaces can use the weapon-only slot for the gameplay eye.
+    std::copy(binding.wallEyeViewer.begin(),binding.wallEyeViewer.end(),blend+4);
     std::copy(binding.frameMean.begin(),binding.frameMean.end(),blend+28);
     std::copy(binding.cycleMean.begin(),binding.cycleMean.end(),blend+32);
     SDL_PushGPUFragmentUniformData(command,blendSlot,blend,world?sizeof(blend):4*sizeof(float));

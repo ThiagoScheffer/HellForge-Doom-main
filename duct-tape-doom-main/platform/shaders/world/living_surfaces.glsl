@@ -2,6 +2,42 @@ struct LivingShading { vec2 slope; float gloss,sharpness,finish,glowTransmission
 #include "living_motion.glsl"
 #include "living_hazards.glsl"
 
+// The wall-eye map stores only visible socket texels. Each socket encodes
+// its distance to the same center, even across clipped or repeated patches.
+vec3 wallEyeShading(uint flags,float footprint,vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 rgb) {
+    float detail=1.0-smoothstep(0.75,1.65,footprint);
+    if(detail<=0.0)return vec3(0);
+    ivec2 size=textureSize(image,0);
+    ivec2 at=wrapTexel(ivec2(floor(vUV)),size)+textureSize(glassFrame,0)-size;
+    vec4 eye=round(texelFetch(glassFrame,at,0)*255.0);
+    if(eye.r==0.0)return vec3(0);
+    if(eye.r==255.0)
+        return (flags&LS_SKULL_DOTS)!=0u?vec3(0.40,0.075,0.022)*detail:vec3(0);
+    if((flags&LS_REACTIVE_EYES)==0u)return vec3(0);
+
+    float determinant=duv1.x*duv2.y-duv1.y*duv2.x;
+    if(abs(determinant)<1e-8)return vec3(0);
+    vec3 worldU=(dp1*duv2.y-dp2*duv1.y)/determinant;
+    vec3 worldV=(dp2*duv1.x-dp1*duv2.x)/determinant;
+    vec2 centerOffset=(eye.ba-128.0)*0.5+fract(vUV)-0.5;
+    vec3 center=vWorld-worldU*centerOffset.x-worldV*centerOffset.y;
+    float open=1.0-smoothstep(128.0,256.0,length(weaponProbe[0].xyz-center));
+    if(open<=0.0)return vec3(0);
+
+    vec2 p=(eye.rg-128.0)/120.0;
+    float aperture=engravedAperture(p,open,clamp(footprint*0.21,0.09,0.23));
+    float socket=1.0-smoothstep(0.67,1.0,length(p));
+    vec2 irisAt=p/vec2(0.43,0.88);
+    float iris=1.0-smoothstep(0.72,1.04,length(irisAt));
+    float pupil=1.0-smoothstep(0.65,1.10,length(irisAt/vec2(0.32,0.74)));
+    float glint=1.0-smoothstep(0.12,0.37,length(irisAt-vec2(-0.28,-0.32)));
+    vec3 globe=mix(vec3(0.12,0.052,0.027),vec3(0.66,0.23,0.062),iris*(1.0-pupil));
+    globe+=vec3(0.30,0.19,0.10)*glint*iris;
+    float weight=socket*detail*open;
+    rgb=mix(rgb,mix(rgb*0.46,globe,aperture),weight);
+    return globe*(weight*aperture*0.68);
+}
+
 LivingShading livingSurface(uint profile,uint flags,vec2 uv,vec2 pixel,float lod,float footprint,
                             vec3 normal,vec3 dp1,vec3 dp2,vec2 duv1,vec2 duv2,inout vec3 rgb) {
     LivingShading result=LivingShading(vec2(0),0.0,0.0,0.0,1.0);

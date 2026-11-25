@@ -44,7 +44,8 @@ float glassCracks(vec2 uv,vec2 origin,vec2 extent,uint seed,out uint shard) {
 // Returns the texture coordinate to read in place of uv.
 vec2 readoutCell(vec2 uv,uint section) {
     ivec2 p=ivec2(floor(uv));
-    vec4 f=texelFetch(glassFrame,wrapTexel(p,textureSize(glassFrame,0)),0)*255.0;
+    ivec2 frameSize=min(textureSize(glassFrame,0),textureSize(image,0));
+    vec4 f=texelFetch(glassFrame,wrapTexel(p,frameSize),0)*255.0;
     if(f.b<0.5) return uv;
     ivec2 bytes=ivec2(round(f.ba)),local=ivec2(round(f.rg));
     ivec2 cell=ivec2(1)+ivec2(notEqual(bytes&128,ivec2(0))),extent=bytes&127;

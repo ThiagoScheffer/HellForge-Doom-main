@@ -68,7 +68,8 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // over its whole animation; cycleMean.a is the contrast it keeps far away,
 // 0 for everything that is not a liquid (surfaceBinding in scene3d/scene.cpp).
 // frameMean.a packs material (bits 0-3), worn plates (bit 4) and Living
-// Surface profile (bits 5 and up), assigned by surfaceBinding in scene3d/scene.cpp.
+// Surface profile (bits 5-8) and wall-eye map (bit 9), assigned by surfaceBinding.
+// World wall eyes use weaponProbe[0].xyz for the gameplay eye position.
 // Profiled nonliquids store patch bounds in frameMean.rgb and cycleMean.r,
 // and the artwork variant in cycleMean.g.
 // Material 1 remains ice floors (iceFlat): deep grooves, glassy shine.
@@ -131,6 +132,8 @@ void main() {
     // color has darkened while drying, and the rain on it (blood.cpp
     // rainWash): its pale step (0-4) times two plus how much is washed away.
     bool blood=(vMode&MODE_BLOOD)!=0u;
+    uint surfaceMeta=uint(frameMean.a);
+    bool wallEyeMap=(surfaceMeta&LS_WALL_EYE_MAP)!=0u;
     uint bakeFlags=uint(c.flashlightTint.w);
     // FEATURE_GLOSSY_SCREENS: monitor glass in computer textures. Its curved CRT dome
     // shapes light highlights and an edge sheen, and like a weak lens it
@@ -172,7 +175,8 @@ void main() {
     }
     // FEATURE_LIVE_READOUTS: LED readouts change their cells (readoutCell);
     // a shot-out panel's stay dark and still.
-    if(!sprite&&!blood&&!glassy&&!dead&&(bakeFlags&FEATURE_LIVE_READOUTS)!=0u&&c.effects.z==0.0)
+    if(!sprite&&!blood&&!glassy&&!dead&&(bakeFlags&FEATURE_LIVE_READOUTS)!=0u&&c.effects.z==0.0&&
+       (!wallEyeMap||any(notEqual(textureSize(glassFrame,0),textureSize(image,0)))))
         uv=readoutCell(uv,vStatic);
     vec4 color;
     if(sprite) color=indexed(image,palette,uv,(vMode&MODE_VOXEL)==0u&&c.effects.w==1.0,false);
@@ -232,10 +236,13 @@ void main() {
     // Map surfaces carry sector+1 in mode bits 12+; 0 means no sector.
     bool mapped=(vMode>>MODE_SECTOR_SHIFT)>0u&&!sprite&&c.effects.z==0.0;
     LivingShading living=LivingShading(vec2(0),0.0,0.0,0.0,1.0);
-    uint surfaceMeta=uint(frameMean.a);
     uint mapFlags=uint(c.map.w);
-    if(mapped&&!blood&&!glassy&&(vMode&MODE_ROCK)==0u&&color.a>=0.98&&(mapFlags&LS_ENABLED)!=0u)
-        living=livingSurface(surfaceMeta>>5u,mapFlags,uv,texelPixel,lod,footprint,normal,dp1,dp2,duv1,duv2,color.rgb);
+    vec3 wallEyeLight=vec3(0);
+    if(mapped&&!blood&&!glassy&&(vMode&MODE_ROCK)==0u&&color.a>=0.98&&(mapFlags&LS_ENABLED)!=0u) {
+        living=livingSurface((surfaceMeta>>5u)&LS_PROFILE_MASK,mapFlags,uv,texelPixel,lod,footprint,normal,dp1,dp2,duv1,duv2,color.rgb);
+        if(wallEyeMap&&weaponProbe[0].w>0.0&&!isGlass(vUV))
+            wallEyeLight=wallEyeShading(mapFlags,footprint,dp1,dp2,duv1,duv2,color.rgb);
+    }
     uint sector=(vMode>>MODE_SECTOR_SHIFT)-1u;
     // Excavation changes the slope, not the source lightmap. Steep crater
     // sides must not switch to a wall atlas or wall-floor contact shadow.
@@ -372,6 +379,7 @@ void main() {
             color.rgb=unlit+(color.rgb-unlit)*((rolled-base)/(lit-base));
         }
     }
+    if(any(greaterThan(wallEyeLight,vec3(0))))color.rgb=max(color.rgb,wallEyeLight);
     color.rgb+=specular;
     if(mapped&&(bakeFlags&FEATURE_CAUSTICS)!=0u&&(abs(normal.z)<=0.5||(normal.z<-0.5&&(bakeFlags&FEATURE_CEILING_CAUSTICS)!=0u))) color.rgb+=caustics(vWorld,normal,sector,false);
     // FEATURE_CAUSTICS_SPRITES: things in the world (not the weapon or effect sprites)

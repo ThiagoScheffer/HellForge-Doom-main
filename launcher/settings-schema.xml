@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="fe907c67b6a07b88cc759af921ef3627de3eeb036cc922c80b43231ba11b3ca5">
+<settings source="platform/settings_panel.cpp" source_sha256="cef71804b7e7bc6e1d2e7ab6d090ed55d6a67dc2b2fb55e3bfc8b06d3a3353b0">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -116,6 +116,10 @@
   <option key="living_morph" title="Morph" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="living_pulse" title="Organic pulse" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="living_wetness" title="Wetness" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_wall_blood" title="Environmental Wall Blood" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_wall_ambience" title="Wall Corpse Ambience" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_skull_eyes" title="Glowing Skull Eyes" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_reactive_eyes" title="Reactive Demon Eyes" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="emissive" title="Emissive textures" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="glossy_screens" title="Glossy monitor screens" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="live_readouts" title="Live readouts" category="Textures" kind="check" choices="0=Off|1=On" />

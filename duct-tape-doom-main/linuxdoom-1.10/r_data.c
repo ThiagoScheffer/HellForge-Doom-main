@@ -166,19 +166,31 @@ void R_TextureName(int texture, char name[9])
     name[8] = 0;
 }
 
-boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4])
+int R_TexturePatchPlacement(int texture, int part, char name[9], int rect[4])
 {
     if (texture < 0 || texture >= numtextures) I_Error("Invalid GPU texture");
     const texture_t *tex = textures[texture];
-    if (part < 0 || part >= tex->patchcount) return false;
+    if (part < 0 || part >= tex->patchcount) return -1;
     const texpatch_t *source = &tex->patches[part];
     const patch_t *patch = W_CacheLumpNum(source->patch, PU_CACHE);
     memcpy(name, lumpinfo[source->patch].name, 8);
     name[8] = 0;
-    bounds[0] = source->originx > 0 ? source->originx : 0;
-    bounds[1] = source->originy > 0 ? source->originy : 0;
-    int right = source->originx + SHORT(patch->width);
-    int bottom = source->originy + SHORT(patch->height);
+    rect[0] = source->originx;
+    rect[1] = source->originy;
+    rect[2] = SHORT(patch->width);
+    rect[3] = SHORT(patch->height);
+    return source->patch;
+}
+
+boolean R_TexturePatchInfo(int texture, int part, char name[9], int bounds[4])
+{
+    int rect[4];
+    if (R_TexturePatchPlacement(texture, part, name, rect) < 0) return false;
+    const texture_t *tex = textures[texture];
+    bounds[0] = rect[0] > 0 ? rect[0] : 0;
+    bounds[1] = rect[1] > 0 ? rect[1] : 0;
+    int right = rect[0] + rect[2];
+    int bottom = rect[1] + rect[3];
     bounds[2] = right < tex->width ? right : tex->width;
     bounds[3] = bottom < tex->height ? bottom : tex->height;
     return true;
@@ -199,10 +211,11 @@ boolean R_TextureFromBaseWad(int texture)
     return true;
 }
 
-void R_CopyIndexedTexture(int texture, byte *pixels)
+void R_CopyIndexedTextureOwners(int texture, byte *pixels, short *owners)
 {
     texture_t *tex = textures[texture];
     memset(pixels, 0, (size_t)tex->width * tex->height * 2);
+    if (owners) memset(owners, 0xff, (size_t)tex->width * tex->height * sizeof(*owners));
     for (int n = 0; n < tex->patchcount; ++n)
     {
         texpatch_t *part = &tex->patches[n];
@@ -232,6 +245,7 @@ void R_CopyIndexedTexture(int texture, byte *pixels)
                     size_t pixel = ((size_t)desty * tex->width + destx) * 2;
                     pixels[pixel] = post[3 + y];
                     pixels[pixel + 1] = 255;
+                    if (owners) owners[pixel / 2] = (short)n;
                 }
                 offset += post[1] + 4;
             }
@@ -239,6 +253,11 @@ void R_CopyIndexedTexture(int texture, byte *pixels)
     }
 }
 
+
+void R_CopyIndexedTexture(int texture, byte *pixels)
+{
+    R_CopyIndexedTextureOwners(texture, pixels, NULL);
+}
 
 int*			texturewidthmask;
 // needed for texture pegging

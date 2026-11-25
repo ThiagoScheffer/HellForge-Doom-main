@@ -385,6 +385,84 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             }
         }
     }
+    // The renderer and its attached effects use the same texel anchor and
+    // clipping for one-sided, pegged and masked wall sections.
+    static bool mappedWallTexture(const line_t &line,const side_t &side,const sector_t *back,int part,
+                                  float floor,float ceil,float bf,float bc,WallSpan &span)
+    {
+        switch(part)
+        {
+        case 0:
+            span.bottom=floor;span.top=ceil;span.texture=side.midtexture;
+            span.anchor=span.texture&&(line.flags&ML_DONTPEGBOTTOM)?
+                floor+units(textureheight[span.texture]):ceil;
+            break;
+        case 1:
+            if(bc>=ceil||(side.sector->ceilingpic==skyflatnum&&back->ceilingpic==skyflatnum))return false;
+            span.bottom=std::max(bc,floor);span.top=ceil;span.texture=side.toptexture;
+            span.anchor=(line.flags&ML_DONTPEGTOP)?ceil:bc+(span.texture?units(textureheight[span.texture]):0);
+            break;
+        case 2:
+            if(bf<=floor)return false;
+            span.bottom=floor;span.top=std::min(bf,ceil);span.texture=side.bottomtexture;
+            span.anchor=(line.flags&ML_DONTPEGBOTTOM)?ceil:bf;
+            break;
+        case 3:
+        {
+            if(!side.midtexture)return false;
+            span.texture=side.midtexture;
+            const float low=std::max(floor,bf),high=std::min(ceil,bc);
+            int width,height;
+            R_TextureDimensions(texturetranslation[span.texture],&width,&height);
+            span.anchor=((line.flags&ML_DONTPEGBOTTOM)?low+height:high)+units(side.rowoffset);
+            span.bottom=std::max(low,span.anchor-height);
+            span.top=std::min(high,span.anchor);
+            return true;
+        }
+        default:return false;
+        }
+        span.anchor+=units(side.rowoffset);
+        return true;
+    }
+
+    bool wallAmbienceSpan(const WallHit &hit,WallSpan &span,bool simulation)
+    {
+        if(hit.line<0||hit.line>=numlines||hit.side<0||hit.side>1)return false;
+        const line_t &line=lines[hit.line];
+        if(line.sidenum[hit.side]<0)return false;
+        const side_t &side=sides[line.sidenum[hit.side]];
+        const sector_t *front=side.sector,*back=hit.side?line.frontsector:line.backsector;
+        if((back==nullptr)!=(hit.section==0))return false;
+        if(digMeshEnabled()&&((front->tag==19001)||(back&&back->tag==19001)))return false;
+        float damage[4];
+        if(P_GlobalDigEnabled()&&P_GlobalDigBounds(hit.line,hit.side,damage))return false;
+#ifdef DOOM_BOOM_SECTORS
+        if(hit.section==3&&line.tranlump)return false;
+#endif
+        auto heights=[&](const sector_t *sector,int facing,float &floor,float &ceil) {
+            (void)facing;
+            floor=simulation?units(sector->floorheight):floorZ(sector);
+            ceil=simulation?units(sector->ceilingheight):ceilZ(sector);
+#ifdef DOOM_BOOM_SECTORS
+            sector_t fake;
+            if(P_BoomRenderSector(const_cast<sector_t*>(sector),&fake,facing)!=sector) {
+                floor=units(fake.floorheight);ceil=units(fake.ceilingheight);
+            }
+#endif
+        };
+        float floor,ceil,bf=0,bc=0;
+        heights(front,0,floor,ceil);
+        if(back)heights(back,1,bf,bc);
+        else P_GlobalDigBreachRoomBounds(int(front-sectors),&floor,&ceil);
+        if(!mappedWallTexture(line,side,back,hit.section,floor,ceil,bf,bc,span)||
+           span.texture<=0||span.top<=span.bottom)return false;
+        span.texture=texturetranslation[span.texture];
+        if(span.texture<=0||span.texture==skytexture)return false;
+        const vertex_t *a=hit.side?line.v2:line.v1,*b=hit.side?line.v1:line.v2;
+        span.a={units(a->x),units(a->y)};span.b={units(b->x),units(b->y)};
+        return true;
+    }
+
     // The upper, lower, middle and one-sided wall sections of every line side,
     // and sky walls along the edges of sky ceilings.
     // allSides: also wall sides facing away from the eye, for frames that
@@ -423,7 +501,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     float damage[4];
                     facing = P_GlobalDigBounds(i, side, damage) != 0;
                 }
-                float floor = floorZ(front), ceil = ceilZ(front), row = units(s.rowoffset), light = lighting(front);
+                float floor = floorZ(front), ceil = ceilZ(front), light = lighting(front);
 #ifdef DOOM_BOOM_SECTORS
                 sector_t boomFront, boomBack;
                 const sector_t *vf = P_BoomRenderSector(const_cast<sector_t *>(front), &boomFront, 0);
@@ -438,45 +516,21 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     light = std::max(0.1f, light - 0.04f);
                 if (std::abs(b.x - a.x) < 0.01)
                     light = std::min(1.0f, light + 0.04f);
-                if (!back)
-                {
-                    P_GlobalDigBreachRoomBounds(int(front - sectors), &floor, &ceil);
-                    float anchor = ceil;
-                    if (s.midtexture && (line.flags & ML_DONTPEGBOTTOM))
-                        anchor = floor + units(textureheight[s.midtexture]);
-                    addWall(line, side, a, b, floor, ceil, s.midtexture, anchor + row, light, facing, 0);
-                }
-                else
-                {
-                    float bf = floorZ(back), bc = ceilZ(back);
+                float bf = back ? floorZ(back) : 0, bc = back ? ceilZ(back) : 0;
 #ifdef DOOM_BOOM_SECTORS
-                    if (vb != back)
-                    {
-                        bf = units(vb->floorheight);
-                        bc = units(vb->ceilingheight);
-                    }
+                if (back && vb != back)
+                {
+                    bf = units(vb->floorheight);
+                    bc = units(vb->ceilingheight);
+                }
 #endif
-                    bool sharedSky = front->ceilingpic == skyflatnum && back->ceilingpic == skyflatnum;
-                    if (bc < ceil && !sharedSky)
-                    {
-                        float anchor = (line.flags & ML_DONTPEGTOP) ? ceil : bc + (s.toptexture ? units(textureheight[s.toptexture]) : 0);
-                        addWall(line, side, a, b, std::max(bc, floor), ceil, s.toptexture, anchor + row, light, facing, 1);
-                    }
-                    if (bf > floor)
-                    {
-                        float anchor = (line.flags & ML_DONTPEGBOTTOM) ? ceil : bf;
-                        addWall(line, side, a, b, floor, std::min(bf, ceil), s.bottomtexture, anchor + row, light, facing, 2);
-                    }
-                    if (s.midtexture)
-                    {
-                        int tex = texturetranslation[s.midtexture];
-                        Image &image = wallImage(tex);
-                        float low = std::max(floor, bf), high = std::min(ceil, bc);
-                        float anchor = (line.flags & ML_DONTPEGBOTTOM) ? low + image.height : high;
-                        anchor += row;
-                        float top = std::min(high, anchor), bottom = std::max(low, anchor - image.height);
-                        addWall(line, side, a, b, bottom, top, s.midtexture, anchor, light, facing, 3);
-                    }
+                if (!back)
+                    P_GlobalDigBreachRoomBounds(int(front - sectors), &floor, &ceil);
+                for(int part=back?1:0;part<=(back?3:0);++part)
+                {
+                    WallSpan span;
+                    if(mappedWallTexture(line,s,back,part,floor,ceil,bf,bc,span))
+                        addWall(line,side,a,b,span.bottom,span.top,span.texture,span.anchor,light,facing,part);
                 }
                 if (!rejected&&front->ceilingpic == skyflatnum)
                     skyWall(front, a, b, back && back->ceilingpic == skyflatnum ? std::max(skyTop[back - sectors], floor) : ceil, skyTop[front - sectors]);
@@ -1305,6 +1359,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             }
         }
         drawDecorationCritters(camera);
+        drawWallAmbience(camera);
         // addThing queues enhanced monster shots; draw them only after the
         // actor pass, and after buildImpacts has cleared the FX batches.
         drawMonsterProjectileEffects(camera);

@@ -5,6 +5,11 @@
 #include "internal.h"
 #include "../decoration_ambience_rules.h"
 #include "../corpse_decomposition.h"
+#include "../wall_immersion_regions.h"
+extern "C" {
+#include "p_local.h"
+#include "p_solid.h"
+}
 #include <cstdint>
 #include <unordered_set>
 
@@ -481,6 +486,213 @@ int corpseDecayStage(const mobj_t *thing) {
     return 3;
 }
 
+namespace {
+constexpr float wallActivate=256.f,wallDeactivate=384.f;
+constexpr size_t wallEmitterLimit=8;
+struct WallPanel {
+    WallHit hit;
+    int texture,region,repeatU,repeatV;
+    fixed_t offset;
+    uint32_t seed;
+    float distance2;
+    int nextDrip=0,detach=0;
+    uint32_t dropSeed=0;
+};
+struct PanelPlacement {
+    WallSpan span;
+    float length,tx,ty,loU,hiU,loZ,hiZ;
+    const sector_t *sector;
+    std::array<float,3> point(float u,float z,float lift) const {
+        return {span.a.x+tx*u+ty*lift,span.a.y+ty*u-tx*lift,z};
+    }
+};
+
+std::vector<WallPanel> bleedingPanels,corpsePanels;
+std::unordered_set<int> ordinaryWallTextures;
+int wallScanTic=-1;
+bool wallBloodWasOn=false,wallCrittersWereOn=false;
+bool wallEffectsOn() {
+    return settings.accelerated&&settings.livingSurfaces&&levelSerial==r_levelserial&&
+           gamestate==GS_LEVEL&&totalkills<int(doom_decor::monsterLimit);
+}
+bool wallCrittersEnabled() {return wallEffectsOn()&&settings.textureWallAmbience;}
+
+const Image *ambienceImage(int texture) {
+    auto found=images.find(texture);
+    if(found!=images.end())return &found->second;
+    if(ordinaryWallTextures.count(texture))return nullptr;
+    char name[9];int bounds[4];
+    for(int part=0;R_TexturePatchInfo(texture,part,name,bounds);++part) {
+        const auto *art=doom_wall_immersion::findArtwork(name);
+        using E=doom_wall_immersion::Effect;
+        if(art&&(art->effect==E::BleedingBody||art->effect==E::CorpseAmbience))
+            return &wallImage(texture);
+    }
+    ordinaryWallTextures.insert(texture);
+    return nullptr;
+}
+
+bool placePanel(const WallPanel &panel,PanelPlacement &p,bool simulation) {
+    if(!wallAmbienceSpan(panel.hit,p.span,simulation)||p.span.texture!=panel.texture)return false;
+    const side_t &side=sides[lines[panel.hit.line].sidenum[panel.hit.side]];
+    if(side.textureoffset!=panel.offset)return false;
+    const auto image=images.find(panel.texture);
+    if(image==images.end()||panel.region>=int(image->second.wallAmbience.size()))return false;
+    const auto &art=image->second;
+    const auto &region=art.wallAmbience[panel.region];
+    p.sector=side.sector;
+    p.tx=p.span.b.x-p.span.a.x;p.ty=p.span.b.y-p.span.a.y;
+    p.length=std::hypot(p.tx,p.ty);
+    if(p.length<1.f)return false;
+    p.tx/=p.length;p.ty/=p.length;
+    const float tileU=panel.repeatU*float(art.width)-units(panel.offset);
+    const float tileZ=p.span.anchor-panel.repeatV*float(art.height);
+    p.loU=std::max(tileU+region.bounds[0],0.f);
+    p.hiU=std::min(tileU+region.bounds[2],p.length);
+    p.loZ=std::max(tileZ-region.bounds[3],p.span.bottom);
+    p.hiZ=std::min(tileZ-region.bounds[1],p.span.top);
+    if(p.hiU-p.loU<(region.bleeding?.99f:7.f)||p.hiZ-p.loZ<(region.bleeding?.99f:8.f))return false;
+    if(SV_Active()) {
+        const auto at=p.point((p.loU+p.hiU)*.5f,(p.loZ+p.hiZ)*.5f,0);
+        if(SV_Edited(at[0],at[1],at[2])||SV_Edited(at[0]+p.ty,at[1]-p.tx,at[2])||
+           SV_Edited(at[0]-p.ty,at[1]+p.tx,at[2]))return false;
+    }
+    return true;
+}
+
+bool samePanel(const WallPanel &a,const WallPanel &b) {
+    return a.hit.line==b.hit.line&&a.hit.side==b.hit.side&&a.hit.section==b.hit.section&&
+           a.texture==b.texture&&a.region==b.region&&a.repeatU==b.repeatU&&a.repeatV==b.repeatV&&a.offset==b.offset;
+}
+
+void selectPanel(std::vector<WallPanel> &next,const std::vector<WallPanel> &previous,WallPanel panel) {
+    const auto old=std::find_if(previous.begin(),previous.end(),[&](const WallPanel &p){return samePanel(p,panel);});
+    if(old==previous.end()&&panel.distance2>wallActivate*wallActivate)return;
+    if(old!=previous.end()) {
+        panel.nextDrip=old->nextDrip;panel.detach=old->detach;panel.dropSeed=old->dropSeed;
+    } else {
+        panel.nextDrip=leveltime+10+int(doom_decor::hash(panel.seed)%TICRATE);
+    }
+    // Keep only the nearest artwork repeats. Insertion order breaks ties
+    // deterministically, and a busy block cannot grow the emitter list.
+    const auto at=std::upper_bound(next.begin(),next.end(),panel.distance2,
+        [](float distance,const WallPanel &p){return distance<p.distance2;});
+    if(next.size()==wallEmitterLimit&&at==next.end())return;
+    next.insert(at,panel);
+    if(next.size()>wallEmitterLimit)next.pop_back();
+}
+
+void scanWallPanels(const mobj_t &player,bool blood,bool critters) {
+    std::vector<WallPanel> nextBlood,nextCritters;
+    nextBlood.reserve(wallEmitterLimit+1);nextCritters.reserve(wallEmitterLimit+1);
+    const float x=units(player.x),y=units(player.y),z=units(player.z)+units(player.height)*.67f;
+    const auto cell=[](float value,fixed_t origin){return int(std::floor((value-units(origin))/MAPBLOCKUNITS));};
+    const int x0=std::max(0,cell(x-wallDeactivate,bmaporgx)),x1=std::min(bmapwidth-1,cell(x+wallDeactivate,bmaporgx));
+    const int y0=std::max(0,cell(y-wallDeactivate,bmaporgy)),y1=std::min(bmapheight-1,cell(y+wallDeactivate,bmaporgy));
+    struct Block { int x,y; float distance2; };
+    std::vector<Block> blocks;
+    for(int by=y0;by<=y1;++by)for(int bx=x0;bx<=x1;++bx) {
+        const float dx=units(bmaporgx)+(bx+.5f)*MAPBLOCKUNITS-x;
+        const float dy=units(bmaporgy)+(by+.5f)*MAPBLOCKUNITS-y;
+        blocks.push_back({bx,by,dx*dx+dy*dy});
+    }
+    std::stable_sort(blocks.begin(),blocks.end(),[](const Block &a,const Block &b){return a.distance2<b.distance2;});
+    std::unordered_set<int> seen;
+    int entries=0;
+    constexpr int entryLimit=2048;
+    for(const auto &block:blocks)
+        for(const int32_t *entry=blockmaplump+blockmap[size_t(block.y)*bmapwidth+block.x];
+            *entry!=-1&&entries<entryLimit;++entry,++entries) {
+            const int line=*entry;
+            if(line<0||line>=numlines||!seen.insert(line).second)continue;
+            for(int side=0;side<2;++side)for(int part=0;part<4;++part) {
+                const WallHit hit{line,side,part};
+                WallSpan span;
+                if(!wallAmbienceSpan(hit,span,true))continue;
+                const float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,length=std::hypot(dx,dy);
+                if(length<1.f)continue;
+                const float normal=(x-span.a.x)*dy/length-(y-span.a.y)*dx/length;
+                if(normal<0.f||normal>wallDeactivate)continue;
+                const float along=((x-span.a.x)*dx+(y-span.a.y)*dy)/length;
+                const float u0=std::max(0.f,along-wallDeactivate),u1=std::min(length,along+wallDeactivate);
+                const float z0=std::max(span.bottom,z-wallDeactivate),z1=std::min(span.top,z+wallDeactivate);
+                if(u0>=u1||z0>=z1)continue;
+                const Image *image=ambienceImage(span.texture);
+                if(!image||image->wallAmbience.empty())continue;
+                const fixed_t offset=sides[lines[line].sidenum[side]].textureoffset;
+                const float scroll=units(offset);
+                const int left=int(std::floor((u0+scroll)/image->width)),right=int(std::floor((u1+scroll)/image->width));
+                const int top=int(std::floor((span.anchor-z1)/image->height)),bottom=int(std::floor((span.anchor-z0)/image->height));
+                for(int i=0;i<int(image->wallAmbience.size());++i) {
+                    const bool bleed=image->wallAmbience[i].bleeding;
+                    if(bleed?!blood:!critters)continue;
+                    for(int v=top;v<=bottom;++v)for(int u=left;u<=right;++u) {
+                        WallPanel panel{hit,span.texture,i,u,v,offset,0,0};
+                        PanelPlacement p;
+                        if(!placePanel(panel,p,true))continue;
+                        const float uc=(p.loU+p.hiU)*.5f,zc=(p.loZ+p.hiZ)*.5f;
+                        panel.distance2=normal*normal+(uc-along)*(uc-along)+(zc-z)*(zc-z);
+                        if(panel.distance2>wallDeactivate*wallDeactivate)continue;
+                        panel.seed=doom_decor::hash(uint32_t(line)*13u+side*4u+part)^
+                            doom_decor::hash(uint32_t(u)*971u+uint32_t(v)*787u+uint32_t(i)*433u);
+                        if(bleed)selectPanel(nextBlood,bleedingPanels,panel);
+                        else selectPanel(nextCritters,corpsePanels,panel);
+                    }
+                }
+            }
+        }
+    bleedingPanels.swap(nextBlood);corpsePanels.swap(nextCritters);
+}
+} // namespace
+
+bool wallBloodEnabled() {return wallEffectsOn()&&settings.textureWallBlood&&settings.blood;}
+void resetWallAmbience() {
+    bleedingPanels.clear();corpsePanels.clear();ordinaryWallTextures.clear();
+    wallScanTic=-1;wallBloodWasOn=wallCrittersWereOn=false;
+    clearWallAmbienceBlood();
+}
+
+void syncWallAmbienceSettings() {
+    const bool blood=wallBloodEnabled()&&bloodOn(),critters=wallCrittersEnabled();
+    if(blood!=wallBloodWasOn||critters!=wallCrittersWereOn) {
+        if(blood!=wallBloodWasOn) {bleedingPanels.clear();clearWallAmbienceBlood();}
+        if(critters!=wallCrittersWereOn)corpsePanels.clear();
+        wallBloodWasOn=blood;wallCrittersWereOn=critters;wallScanTic=-1;
+    }
+}
+
+void tickWallAmbience(const mobj_t &player) {
+    syncWallAmbienceSettings();
+    const bool blood=wallBloodWasOn,critters=wallCrittersWereOn;
+    if(blood)tickWallAmbienceBlood();
+    if(!(blood||critters)||!blockmap||!blockmaplump||bmapwidth<=0||bmapheight<=0)return;
+    if(wallScanTic<0||leveltime<wallScanTic||leveltime-wallScanTic>=TICRATE/4) {
+        scanWallPanels(player,blood,critters);wallScanTic=leveltime;
+    }
+    const float x=units(player.x),y=units(player.y),z=units(player.z)+units(player.height)*.67f;
+    for(auto &panel:bleedingPanels) {
+        if(leveltime<panel.nextDrip&&(!panel.detach||leveltime<panel.detach))continue;
+        PanelPlacement p;
+        if(!placePanel(panel,p,true))continue;
+        const float u=(p.loU+p.hiU)*.5f,height=(p.loZ+p.hiZ)*.5f;
+        const auto at=p.point(u,height,0.f);
+        if(panel.detach&&leveltime>=panel.detach) {
+            panel.detach=0;
+            const auto release=p.point(u,std::max(p.span.bottom+.5f,height-8.f),.7f);
+            wallBloodDrop(release[0],release[1],release[2],p.ty,-p.tx,panel.dropSeed);
+        }
+        const float dx=x-at[0],dy=y-at[1],dz=z-at[2];
+        if(leveltime<panel.nextDrip||dx*dx+dy*dy+dz*dz>wallActivate*wallActivate||dx*p.ty-dy*p.tx<0.f)continue;
+        const uint32_t seed=doom_decor::hash(panel.seed^uint32_t(leveltime));
+        panel.nextDrip=leveltime+TICRATE*3/2+int(seed%(TICRATE*5/2+1));
+        const BloodSourceScope red(0);
+        if(bloodWallSplat(panel.hit,at[0],at[1],at[2],3.3f,1.f,leveltime/float(TICRATE),
+                          BLOOD_SPECK,true,false,LiquidMaterial::Blood,&seed)&&(seed&3u)==0u) {
+            panel.detach=leveltime+TICRATE*6/5;panel.dropSeed=seed;
+        }
+    }
+}
+
 void decorationAmbienceReset() {
     known.clear();selected.clear();lastScan=-1;currentLevel=~0u;
     checkedArt={};decorationCritterCount=0;
@@ -545,6 +757,30 @@ void queueDecorationCritter(const mobj_t &thing,const DecorationArt &art,const I
     decorationCritters[decorationCritterCount++]={x+rx*across+ry*.6f,y+ry*across-rx*.6f,z,reach,age,light,spider,detaches};
 }
 
+// The hanging decorations and wall panels draw the same spider and larva
+// silhouettes. The callback supplies their movement plane.
+template<class Block>
+static void decorationSpider(float age,float light,const Block &block) {
+    const std::array<float,3> body={.08f+.10f*light,.047f+.06f*light,.035f+.046f*light};
+    block(0,0,1.1f,.85f,body,.95f);
+    for(int side:{-1,1})for(int leg=0;leg<3;++leg) {
+        const float offset=side*(.66f+.2f*leg);
+        const float step=.12f*std::sin(age*8.f+leg+side);
+        block(offset,.24f-.24f*leg+step,.44f,.25f,body,.9f);
+    }
+    block(0,-.43f,.66f,.48f,body,.95f);
+}
+
+template<class Segment>
+static void decorationLarva(float age,float light,float alpha,const Segment &draw) {
+    const std::array<float,3> pale={.53f+.31f*light,.44f+.28f*light,.28f+.22f*light};
+    for(int segment=0;segment<3;++segment) {
+        const float phase=age*4.f-segment*.9f;
+        const float offset=.42f*std::sin(phase)+.28f*std::sin(age*1.15f);
+        draw(offset,-segment*.45f+.15f*std::sin(phase),.8f-.09f*segment,.64f,pale,alpha);
+    }
+}
+
 void drawDecorationCritters(const Uniforms &camera) {
     unsigned larvae=0,spiders=0;
     auto block=[&](float x,float y,float z,float w,float h,const std::array<float,3> &color,float alpha) {
@@ -557,7 +793,6 @@ void drawDecorationCritters(const Uniforms &camera) {
             ++spiders;
             const float descent=c.reach*std::clamp(std::min(c.age/2.f,(5.4f-c.age)/2.4f),0.f,1.f);
             const float z=c.z-descent;
-            const std::array<float,3> body={.08f+.10f*c.light,.047f+.06f*c.light,.035f+.046f*c.light};
             if(descent>.15f) {
                 const float sx=camera.right[0]*.13f,sy=camera.right[1]*.13f;
                 Vertex a={c.x-sx,c.y-sy,c.z,0,0,.62f,0};
@@ -566,27 +801,75 @@ void drawDecorationCritters(const Uniforms &camera) {
                 b.x+=2*sx;b.y+=2*sy;d=b;d.z=z;e.z=z;
                 quad(particleVertices,a,b,d,e);
             }
-            block(c.x,c.y,z,1.1f,.85f,body,.95f);
-            for(int side:{-1,1})for(int leg=0;leg<3;++leg) {
-                const float offset=side*(.66f+.2f*leg);
-                const float step=.12f*std::sin(c.age*8.f+leg+side);
-                block(c.x+camera.right[0]*offset,c.y+camera.right[1]*offset,
-                      z+.24f-.24f*leg+step,.44f,.25f,body,.9f);
-            }
-            block(c.x,c.y,z-.43f,.66f,.48f,body,.95f);
+            decorationSpider(c.age,c.light,[&](float u,float v,float w,float h,const auto &color,float alpha) {
+                block(c.x+camera.right[0]*u,c.y+camera.right[1]*u,z+v,w,h,color,alpha);
+            });
         } else {
             const float fall=c.detaches?std::max(0.f,c.age-3.f):0.f;
             const float drop=260.f*fall*fall;
             if(drop>=c.reach||larvae>=doom_decor::maxLarvae||!reserveCritter(3*wormBlocksPerSegment))continue;
             ++larvae;
-            const std::array<float,3> pale={.53f+.31f*c.light,.44f+.28f*c.light,.28f+.22f*c.light};
             const float alpha=.92f*std::clamp(std::min(c.age*5.f,(3.4f-c.age)*5.f),0.f,1.f);
-            for(int segment=0;segment<3;++segment) {
-                const float phase=c.age*4.f-segment*.9f;
-                const float offset=.42f*std::sin(phase)+.28f*std::sin(c.age*1.15f);
-                const float z=c.z-drop-segment*.45f+.15f*std::sin(phase);
-                roundedWormSegment(camera,c.x+camera.right[0]*offset,c.y+camera.right[1]*offset,
-                                   z,.8f-.09f*segment,.64f,pale,alpha);
+            decorationLarva(c.age,c.light,alpha,[&](float u,float v,float w,float h,const auto &color,float opacity) {
+                roundedWormSegment(camera,c.x+camera.right[0]*u,c.y+camera.right[1]*u,
+                                   c.z-drop+v,w,h,color,opacity);
+            });
+        }
+    }
+}
+
+void drawWallAmbience(const Uniforms &camera) {
+    if(!wallCrittersEnabled()||camera.effects[2]!=0)return;
+    unsigned flies=0,spiders=0,larvae=0;
+    size_t slots=doom_decor::emitterLimit-selected.size();
+    const float t=gameSeconds();
+    for(const auto &panel:corpsePanels) {
+        if(!slots)break;
+        PanelPlacement p;
+        if(!placePanel(panel,p,false)||
+           (camera.eye[0]-p.span.a.x)*p.ty-(camera.eye[1]-p.span.a.y)*p.tx<=0.f)continue;
+        --slots;
+        const float light=std::clamp(lighting(p.sector),.12f,1.f);
+        const float fade=std::clamp((wallDeactivate-std::sqrt(panel.distance2))/(wallDeactivate-wallActivate),0.f,1.f);
+        const float u=(p.loU+p.hiU)*.5f,z=(p.loZ+p.hiZ)*.5f;
+        const float du=(p.hiU-p.loU)*.5f-2.5f,dz=(p.hiZ-p.loZ)*.5f-2.5f;
+        const std::array<float,3> flyColor={.10f+.07f*light,.09f+.06f*light,.075f+.055f*light};
+        const unsigned flyCount=3+doom_decor::hash(panel.seed^0x732ac9u)%3u;
+        for(unsigned n=0;n<flyCount&&flies<32&&fliesDrawn<doom_decor::flyLimit;++n,++flies,++fliesDrawn) {
+            const float phase=float(2*doomPi)*doom_decor::unit(panel.seed+n*971u);
+            const float a=phase+t*(1.1f+doom_decor::unit(panel.seed+n*13u)*1.5f);
+            const auto pos=p.point(u+du*std::cos(a),z+dz*std::sin(t*3.3f+phase),2.6f+1.4f*std::sin(a));
+            pixelBlock(particleVertices,camera,pos[0],pos[1],pos[2],.62f,1.1f,
+                       flyColor,false,nullptr,true,nullptr,.78f*fade);
+        }
+
+        Uniforms wallCamera=camera;
+        wallCamera.right[0]=p.tx;wallCamera.right[1]=p.ty;wallCamera.right[2]=0;
+        wallCamera.up[0]=wallCamera.up[1]=0;wallCamera.up[2]=1;
+        for(int kind=0;kind<2;++kind) {
+            const bool spider=kind==0;
+            unsigned &count=spider?spiders:larvae;
+            const unsigned limit=spider?12:24;
+            const unsigned perPanel=spider?1+doom_decor::hash(panel.seed^0x36a3u)%2u:
+                                           2+doom_decor::hash(panel.seed^0x318fu)%3u;
+            for(unsigned n=0;n<perPanel&&count<limit;++n,++count) {
+                if(!reserveCritter(spider?9:3*wormBlocksPerSegment))break;
+                const uint32_t seed=panel.seed^doom_decor::hash(n+kind*73u);
+                const float phase=float(2*doomPi)*doom_decor::unit(seed);
+                const float age=t*(spider?1.f:.63f)+phase;
+                const float a=age*.84f,b=age*.61f+phase;
+                const float uc=u+du*std::sin(a),zc=z+dz*std::sin(b);
+                const float heading=std::atan2(dz*.61f*std::cos(b),du*.84f*std::cos(a))+float(doomPi*.5);
+                const float cosine=std::cos(heading),sine=std::sin(heading);
+                auto draw=[&](float across,float up,float w,float h,const auto &color,float alpha) {
+                    const auto pos=p.point(uc+across*cosine-up*sine,zc+across*sine+up*cosine,.8f);
+                    if(spider)
+                        pixelBlock(particleVertices,wallCamera,pos[0],pos[1],pos[2],w,h/w,color,false,nullptr,true,nullptr,alpha*fade);
+                    else
+                        roundedWormSegment(wallCamera,pos[0],pos[1],pos[2],w,h,color,alpha*fade);
+                };
+                if(spider)decorationSpider(age,light,draw);
+                else decorationLarva(age,light,.92f,draw);
             }
         }
     }
