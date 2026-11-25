@@ -342,13 +342,41 @@ wall50_1 wall50_2 wall51_2 wall51_3 - immersion  add some flies near the wall, s
 
 
 
-Cacodemon and painelemental - if hit eye and blinded - improve it by making the eye part closed or like a woundblood - it restaure if it recovery health
+Cacodemon and painelemental - eye injuries system - if hit eye and get blinded - improve it by making the eye part closed or like a woundblood so player can visually see that the monster Eye is hurt - if it recovery health and can see again, remove the hurt effect on the eye.
 
 
 
+Immersion improvements:
+outside places with rain:
+dead bodies with blood will be washed away, so blood will spread larger and small blood will clean faster.
+
+barrels with acid when exploding near walls, will also drip and spill on walls and monsters - same as the blood effect.
+
+flashlight can trigger monster attention - so if monster are idle and a flashlight is on them, they will initiate attack on player.
+
+imp and mancubus fireball - can create a melt super hot effect on walls, similar to termite melting it.
+
+critical bleeding - will trigger a bleeding like ruptered vein
+
+optmization and AI:
+imps will not trigger attacking anymore if there are other imps in from of them, this should save process usage and also increase immersion on combat - so if many imps are trying to attack the player with fireball but other imps are in front of sign aligment with player, they will not waste time on shooting it.
+
+bigmedkits: will break out into small ones of player health is full after it got it and still have some value left: example: player is 90 of life, pass and get a bigmedikt health go 100 and the medkit still have health points on it, it will drop a smallpack of left health, or a small pack of the ingame small medkit on ground, so player can use it later.
+
+texture immersion:
+on acid and lava textures grounds, create options to show small bubles forming and poping up - to increase immerison when player lookt at it.
 
 
+Hud speedrun improvements:
+add options to add colored infos,like Health,Armor,Keys - to improve UX for user to see it, not all text in white.
 
+
+emissive texture rework
+
+sample 
+
+Approved: write a precise and detailed with codes guides codex prompt - keep token saving, no need testing, as all will be manually tested later, to preserve tokens.
+focus on implementation and correct guided details here so vscode codex will write it.
 
 
 

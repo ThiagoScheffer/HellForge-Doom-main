@@ -167,7 +167,103 @@ inline void modernHud(unsigned *out) {
 }
 // Geometry in the fixed HUD viewport: a movable row must never span the
 // independently docked modern-HUD atlas sections in widescreen.
-enum { SpeedrunPlayerStart=10,SpeedrunMetricCount=13 };
+enum SpeedrunMetric {
+    SpeedrunMapMetric,SpeedrunAttemptsMetric,SpeedrunDeathsMetric,SpeedrunStreakMetric,
+    SpeedrunAttemptTimeMetric,SpeedrunRuntimeMetric,SpeedrunDealtMetric,SpeedrunTakenMetric,
+    SpeedrunSecretsMetric,SpeedrunItemsMetric,SpeedrunHealthMetric,SpeedrunArmorMetric,
+    SpeedrunAmmoMetric,SpeedrunKeysMetric,SpeedrunMetricCount
+};
+constexpr int SpeedrunPlayerStart=SpeedrunHealthMetric;
+
+// Speedrun HUD 2.0: semantic colors, using the existing ARGB atlas.
+constexpr unsigned speedrunNeutral=0xfff3e8deu;
+constexpr unsigned speedrunGreen=0xff83edb0u;
+constexpr unsigned speedrunBlue=0xff70b5ffu;
+constexpr unsigned speedrunYellow=0xffffd75au;
+constexpr unsigned speedrunRed=0xffff7766u;
+constexpr unsigned speedrunOrange=0xffffb15au;
+constexpr unsigned speedrunGray=0xff999999u;
+
+inline unsigned speedrunTint(unsigned target,float intensity) {
+    const float t=std::clamp(intensity,50.f,100.f)/100.f;
+    unsigned result=0xff000000u;
+    for(int shift=0;shift<=16;shift+=8) {
+        const int a=int((speedrunNeutral>>shift)&255u);
+        const int b=int((target>>shift)&255u);
+        result|=unsigned(std::lround(a+(b-a)*t))<<shift;
+    }
+    return result;
+}
+
+inline unsigned speedrunMetricColor(int line,const player_t &p,
+                                    bool secretsDone,bool itemsDone) {
+    const int mode=settings.speedrunColorMode;
+    if(line==SpeedrunMapMetric)return speedrunOrange;
+    // Preserve the original low-health warning in Classic mode.
+    if(mode!=1&&mode!=2)return line==SpeedrunHealthMetric&&p.health<=25?speedrunRed:speedrunNeutral;
+    const bool dynamic=mode==2;
+    unsigned color=speedrunNeutral;
+    switch(line) {
+        case SpeedrunDeathsMetric: color=speedrunRed;break;
+        case SpeedrunStreakMetric: color=0xffb78affu;break;
+        case SpeedrunDealtMetric: color=speedrunGreen;break;
+        case SpeedrunTakenMetric: color=speedrunRed;break;
+        case SpeedrunSecretsMetric: if(dynamic&&secretsDone)color=speedrunGreen;break;
+        case SpeedrunItemsMetric: if(dynamic&&itemsDone)color=speedrunGreen;break;
+        case SpeedrunHealthMetric:
+            color=!dynamic?speedrunRed:p.health<=25?0xffff5555u:
+                  p.health<=50?speedrunOrange:p.health>100?0xff77dfffu:speedrunGreen;
+            break;
+        case SpeedrunArmorMetric:
+            color=dynamic&&p.armorpoints<=0?speedrunGray:
+                  p.armortype==2?speedrunBlue:speedrunGreen;
+            break;
+        case SpeedrunAmmoMetric: {
+            const int weapon=p.readyweapon;
+            const int ammo=weapon>=0&&weapon<NUMWEAPONS?weaponinfo[weapon].ammo:am_noammo;
+            if(ammo<0||ammo>=NUMAMMO)break; // melee: neutral
+            color=speedrunYellow;
+            if(dynamic) {
+                // Nominal stock shot cost; HUD warning only, never gameplay logic.
+                const int cost=weapon==wp_bfg?40:weapon==wp_supershotgun?2:1;
+                const int rounds=std::max(0,p.ammo[ammo]);
+                const int capacity=std::max(0,p.maxammo[ammo]);
+                if(rounds<cost||rounds<=cost*2)color=0xffff5555u;
+                else if(rounds<=cost*5||(capacity>0&&rounds<=capacity/10))color=speedrunOrange;
+            }
+            break;
+        }
+    }
+    return speedrunTint(color,settings.speedrunColorIntensity);
+}
+
+inline void speedrunFormatKeys(char *dest,const player_t &p,bool detailed) {
+    const int cards[]={it_bluecard,it_yellowcard,it_redcard};
+    const int skulls[]={it_blueskull,it_yellowskull,it_redskull};
+    const char letters[]="BYR";
+    char c[4]={},s[4]={},combined[4]={};
+    for(int i=0;i<3;++i) {
+        c[i]=p.cards[cards[i]]?letters[i]:'-';
+        s[i]=p.cards[skulls[i]]?letters[i]:'-';
+        combined[i]=(p.cards[cards[i]]||p.cards[skulls[i]])?letters[i]:'-';
+    }
+    if(detailed)std::snprintf(dest,48,"KEYS C:%s S:%s",c,s);
+    else std::snprintf(dest,48,"KEYS %c %c %c",combined[0],combined[1],combined[2]);
+}
+
+inline unsigned speedrunKeyColor(char ch) {
+    if(settings.speedrunColorMode!=1&&settings.speedrunColorMode!=2)return speedrunNeutral;
+    unsigned color=speedrunNeutral;
+    switch(ch) {
+        case 'B':color=speedrunBlue;break;
+        case 'Y':color=speedrunYellow;break;
+        case 'R':color=speedrunRed;break;
+        case '-':color=speedrunGray;break;
+    }
+    return speedrunTint(color,settings.speedrunColorIntensity);
+}
+
+
 struct SpeedrunPanel {
     struct Cell {int line,x,y;};Cell cells[SpeedrunMetricCount]{};int count=0,x=0,y=0,width=115,height=0;
 };
@@ -211,53 +307,61 @@ inline void combatWidgets(unsigned *out,bool fixed=false,bool localPanel=false){
         const auto &stats=*P_SessionStats();
         if(!valid||std::memcmp(&stats,&previous,sizeof(stats))){
             previous=stats;valid=true;
-            std::snprintf(lines[1],48,"ATTEMPTS %llu",(unsigned long long)stats.attempts);
-            std::snprintf(lines[2],48,"DEATHS %llu",(unsigned long long)stats.deaths);
-            std::snprintf(lines[3],48,"KILLSTREAK %llu",(unsigned long long)stats.streak);
+            std::snprintf(lines[SpeedrunAttemptsMetric],48,"ATTEMPTS %llu",(unsigned long long)stats.attempts);
+            std::snprintf(lines[SpeedrunDeathsMetric],48,"DEATHS %llu",(unsigned long long)stats.deaths);
+            std::snprintf(lines[SpeedrunStreakMetric],48,"KILLSTREAK %llu",(unsigned long long)stats.streak);
             auto timer=[](char *dest,const char *title,uint64_t t){std::snprintf(dest,48,"%s %02llu:%02llu:%02llu.%02llu",title,(unsigned long long)(t/126000),(unsigned long long)(t/2100%60),(unsigned long long)(t/35%60),(unsigned long long)(t%35*100/35));};
-            timer(lines[4],"ATTEMPT",stats.attemptTics);timer(lines[5],"RUNTIME",stats.runtimeTics);
-            std::snprintf(lines[6],48,"DMG DEALT %llu",(unsigned long long)stats.dealt);
-            std::snprintf(lines[7],48,"DMG TAKEN %llu",(unsigned long long)stats.taken);
-            std::snprintf(compact[1],48,"ATT %llu",(unsigned long long)stats.attempts);
-            std::snprintf(compact[2],48,"DTH %llu",(unsigned long long)stats.deaths);
-            std::snprintf(compact[3],48,"KS %llu",(unsigned long long)stats.streak);
+            timer(lines[SpeedrunAttemptTimeMetric],"ATTEMPT",stats.attemptTics);timer(lines[SpeedrunRuntimeMetric],"RUNTIME",stats.runtimeTics);
+            std::snprintf(lines[SpeedrunDealtMetric],48,"DMG DEALT %llu",(unsigned long long)stats.dealt);
+            std::snprintf(lines[SpeedrunTakenMetric],48,"DMG TAKEN %llu",(unsigned long long)stats.taken);
+            std::snprintf(compact[SpeedrunAttemptsMetric],48,"ATT %llu",(unsigned long long)stats.attempts);
+            std::snprintf(compact[SpeedrunDeathsMetric],48,"DTH %llu",(unsigned long long)stats.deaths);
+            std::snprintf(compact[SpeedrunStreakMetric],48,"KS %llu",(unsigned long long)stats.streak);
             auto t=stats.attemptTics;
-            if(t>=126000)timer(compact[4],"TIME",t);
-            else std::snprintf(compact[4],48,"TIME %02llu:%02llu.%02llu",(unsigned long long)(t/2100),(unsigned long long)(t/35%60),(unsigned long long)(t%35*100/35));
-            t=stats.runtimeTics;std::snprintf(compact[5],48,"RUN %02llu:%02llu:%02llu",(unsigned long long)(t/126000),(unsigned long long)(t/2100%60),(unsigned long long)(t/35%60));
-            std::snprintf(compact[6],48,"DEALT %llu",(unsigned long long)stats.dealt);
-            std::snprintf(compact[7],48,"TAKEN %llu",(unsigned long long)stats.taken);
+            if(t>=126000)timer(compact[SpeedrunAttemptTimeMetric],"TIME",t);
+            else std::snprintf(compact[SpeedrunAttemptTimeMetric],48,"TIME %02llu:%02llu.%02llu",(unsigned long long)(t/2100),(unsigned long long)(t/35%60),(unsigned long long)(t%35*100/35));
+            t=stats.runtimeTics;std::snprintf(compact[SpeedrunRuntimeMetric],48,"RUN %02llu:%02llu:%02llu",(unsigned long long)(t/126000),(unsigned long long)(t/2100%60),(unsigned long long)(t/35%60));
+            std::snprintf(compact[SpeedrunDealtMetric],48,"DEALT %llu",(unsigned long long)stats.dealt);
+            std::snprintf(compact[SpeedrunTakenMetric],48,"TAKEN %llu",(unsigned long long)stats.taken);
         }
-        if(gamemode==commercial)std::snprintf(compact[0],48,"MAP%02d",gamemap);
-        else std::snprintf(compact[0],48,"E%dM%d",gameepisode,gamemap);
-        std::snprintf(lines[0],48,"SPEEDRUN - %s",compact[0]);
+        if(gamemode==commercial)std::snprintf(compact[SpeedrunMapMetric],48,"MAP%02d",gamemap);
+        else std::snprintf(compact[SpeedrunMapMetric],48,"E%dM%d",gameepisode,gamemap);
+        std::snprintf(lines[SpeedrunMapMetric],48,"SPEEDRUN - %s",compact[SpeedrunMapMetric]);
+        bool secretsDone=false,itemsDone=false;
         if(settings.speedrunSecrets||settings.speedrunItems) {
             const auto counts=hudMapCounts();
-            std::snprintf(lines[8],48,"SECRETS %d/%d",counts[1],totalsecret);
-            std::snprintf(lines[9],48,"ITEMS %d/%d",counts[2],totalitems);
-            std::snprintf(compact[8],48,"SEC %d/%d",counts[1],totalsecret);
-            std::snprintf(compact[9],48,"ITM %d/%d",counts[2],totalitems);
+            secretsDone=totalsecret>0&&counts[1]>=totalsecret;
+            itemsDone=totalitems>0&&counts[2]>=totalitems;
+            std::snprintf(lines[SpeedrunSecretsMetric],48,"SECRETS %d/%d",counts[1],totalsecret);
+            std::snprintf(lines[SpeedrunItemsMetric],48,"ITEMS %d/%d",counts[2],totalitems);
+            std::snprintf(compact[SpeedrunSecretsMetric],48,"SEC %d/%d",counts[1],totalsecret);
+            std::snprintf(compact[SpeedrunItemsMetric],48,"ITM %d/%d",counts[2],totalitems);
         }
         const auto &p=players[displayplayer];
         if(settings.speedrunHealth) {
-            std::snprintf(lines[10],48,"HEALTH %d",std::max(0,p.health));
-            std::snprintf(compact[10],48,"HP %d",std::max(0,p.health));
+            std::snprintf(lines[SpeedrunHealthMetric],48,"HEALTH %d",std::max(0,p.health));
+            std::snprintf(compact[SpeedrunHealthMetric],48,"HP %d",std::max(0,p.health));
         }
         if(settings.speedrunArmor) {
-            std::snprintf(lines[11],48,"ARMOR %d",std::max(0,p.armorpoints));
-            std::snprintf(compact[11],48,"AR %d",std::max(0,p.armorpoints));
+            std::snprintf(lines[SpeedrunArmorMetric],48,"ARMOR %d",std::max(0,p.armorpoints));
+            std::snprintf(compact[SpeedrunArmorMetric],48,"AR %d",std::max(0,p.armorpoints));
         }
         if(settings.speedrunAmmo) {
             int ammo=p.readyweapon>=0&&p.readyweapon<NUMWEAPONS?weaponinfo[p.readyweapon].ammo:am_noammo;
-            if(ammo>=0&&ammo<NUMAMMO)std::snprintf(lines[12],48,"AMMO %d/%d",p.ammo[ammo],p.maxammo[ammo]);
-            else std::snprintf(lines[12],48,"AMMO -");
-            std::snprintf(compact[12],48,"%s",lines[12]);
+            if(ammo>=0&&ammo<NUMAMMO)std::snprintf(lines[SpeedrunAmmoMetric],48,"AMMO %d/%d",p.ammo[ammo],p.maxammo[ammo]);
+            else std::snprintf(lines[SpeedrunAmmoMetric],48,"AMMO -");
+            std::snprintf(compact[SpeedrunAmmoMetric],48,"%s",lines[SpeedrunAmmoMetric]);
+        }
+        if(settings.speedrunKeys) {
+            speedrunFormatKeys(lines[SpeedrunKeysMetric],p,settings.speedrunKeyDisplay==1);
+            std::snprintf(compact[SpeedrunKeysMetric],48,"%s",lines[SpeedrunKeysMetric]);
         }
         bool session=P_WeakpointActive();
         int visible[]={settings.speedrunMapName,session&&settings.speedrunAttempts,session&&settings.speedrunDeaths,
             session&&settings.speedrunStreak,session&&settings.speedrunAttemptTime,session&&settings.speedrunRuntime,
             session&&settings.speedrunDealt,session&&settings.speedrunTaken,settings.speedrunSecrets,settings.speedrunItems,
-            settings.speedrunHealth,settings.speedrunArmor,settings.speedrunAmmo};
+            settings.speedrunHealth,settings.speedrunArmor,settings.speedrunAmmo,settings.speedrunKeys};
+        static_assert(sizeof(visible)/sizeof(visible[0])==SpeedrunMetricCount,"Speedrun visibility count");
         const auto &values=settings.speedrunLayout==1?compact:lines;
         int atlasX=0;
         auto draw=[&](int slot,int first,int last) {
@@ -272,9 +376,17 @@ inline void combatWidgets(unsigned *out,bool fixed=false,bool localPanel=false){
                 const auto &cell=panel.cells[i];
                 char clipped[48];
                 std::snprintf(clipped,sizeof(clipped),"%.*s",settings.speedrunLayout==1?47:27,values[cell.line]);
-                unsigned color=cell.line==0?0xffffb15au:0xfff3e8deu;
-                if(cell.line==10&&p.health<=25)color=0xffff7766u;
-                text(clipped,panel.x+cell.x,panel.y+cell.y,color);
+                const int x=panel.x+cell.x,y=panel.y+cell.y;
+                const unsigned color=speedrunMetricColor(cell.line,p,secretsDone,itemsDone);
+                if(settings.speedrunTextShadow)text(clipped,x+1,y+1,0xe0101010u);
+                if(cell.line==SpeedrunKeysMetric) {
+                    // The first five characters are the neutral "KEYS " prefix.
+                    // Draw per-glyph only on this row; retain identical measurement.
+                    for(int n=0;clipped[n];++n) {
+                        const char glyph[]={clipped[n],0};
+                        text(glyph,x+n*4,y,n<5?speedrunNeutral:speedrunKeyColor(clipped[n]));
+                    }
+                } else text(clipped,x,y,color);
             }
         };
         if(settings.speedrunLayout==2) {

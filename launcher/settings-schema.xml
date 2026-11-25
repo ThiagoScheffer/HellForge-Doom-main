@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="6fdad4395b17687d0c252d45d7dbb50299248055a67d973c8f8df3bafd95c81c">
+<settings source="platform/settings_panel.cpp" source_sha256="445de77189eeb37b2a361255dae9954b4831cc6741709a41406cf9470ba2cd04">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -288,6 +288,9 @@
   <option key="speedrun_hud" title="Enable Speedrun HUD" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_only" title="Speedrun HUD only" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_background_opacity" title="Background opacity" category="SPEEDRUN" kind="slider" min="0" max="100" step="5" />
+  <option key="speedrun_color_mode" title="Information colors" category="SPEEDRUN" kind="choice" choices="0=Classic|1=Colored|2=Dynamic" />
+  <option key="speedrun_color_intensity" title="Color intensity" category="SPEEDRUN" kind="slider" min="50" max="100" step="5" />
+  <option key="speedrun_text_shadow" title="Text shadow" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_layout" title="Info layout" category="SPEEDRUN" kind="choice" choices="0=Column|1=Row|2=Split Columns" />
   <option key="speedrun_x" title="X adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
   <option key="speedrun_y" title="Y adjustment" category="SPEEDRUN" kind="slider" min="-100" max="100" step="1" />
@@ -308,6 +311,8 @@
   <option key="speedrun_health" title="Health" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_armor" title="Armor" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
   <option key="speedrun_ammo" title="Ammo" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_keys" title="Keys" category="SPEEDRUN" kind="check" choices="0=Off|1=On" />
+  <option key="speedrun_key_display" title="Key display" category="SPEEDRUN" kind="choice" choices="0=Compact|1=Cards / Skulls" />
   <option key="encounter_threat_zombieman" title="Zombieman threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
   <option key="encounter_threat_shotgun_guy" title="Shotgun Guy threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />
   <option key="encounter_threat_chaingunner" title="Chaingunner threat" category="ED Advanced" kind="slider" min="1" max="128" step="1" />

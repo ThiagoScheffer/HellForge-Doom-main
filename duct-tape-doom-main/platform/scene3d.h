@@ -203,6 +203,10 @@ struct Settings {
     int incendiaryBarrels=0;
     int speedrunHUD=0,speedrunAttempts=1,speedrunDeaths=1,speedrunStreak=1,speedrunAttemptTime=1,speedrunRuntime=1,speedrunDealt=1,speedrunTaken=1,speedrunAnchor=0,speedrunLayout=0;
     int speedrunOnly=0,speedrunMapName=1,speedrunSecrets=0,speedrunItems=0,speedrunHealth=0,speedrunArmor=0,speedrunAmmo=0;
+    // Speedrun HUD 2.0: presentation only; Classic preserves existing appearance.
+    int speedrunColorMode=0; // 0 Classic, 1 Colored, 2 Dynamic
+    float speedrunColorIntensity=100;
+    int speedrunKeys=0,speedrunKeyDisplay=0,speedrunTextShadow=0;
     int speedrunPlayerAnchor=1;
     float speedrunPlayerX=0,speedrunPlayerY=0;
     float speedrunX=0,speedrunY=0;

@@ -835,6 +835,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
         check("speedrun_only","Speedrun HUD only",&s.speedrunOnly,"Hide the standard HUD, crosshair and gameplay notices. Menus, the automap, and the weapon wheel remain available.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         slider("speedrun_background_opacity","Background opacity",&s.speedrunBackgroundOpacity,0,100,5,
             "Speedrun panel background only. 0% shows the text without a dark box; 100% is fully opaque.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        choice("speedrun_color_mode","Information colors",&s.speedrunColorMode,{"Classic","Colored","Dynamic"},{0,1,2},"Classic preserves the original colors. Colored uses semantic colors. Dynamic also reflects player state.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        slider("speedrun_color_intensity","Color intensity",&s.speedrunColorIntensity,50,100,5,"Mixes semantic colors with neutral HUD text.",[](const Settings &d){return d.accelerated&&d.speedrunHUD&&d.speedrunColorMode!=0;}),
+        check("speedrun_text_shadow","Text shadow",&s.speedrunTextShadow,"Adds a one-pixel dark shadow behind Speedrun text.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         choice("speedrun_layout","Info layout",&s.speedrunLayout,{"Column","Row","Split Columns"},{0,1,2},"Row wraps when needed. Split Columns puts map and run stats on the left and player stats on the right.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         slider("speedrun_x","X adjustment",&s.speedrunX,-100,100,1,"Moves the panel horizontally. In Split Columns this moves the map and run column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
         slider("speedrun_y","Y adjustment",&s.speedrunY,-100,100,1,"Moves the panel vertically. In Split Columns this moves the map and run column.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
@@ -854,7 +857,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
         check("speedrun_items","Items",&s.speedrunItems,"Items collected out of the map total.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_health","Health",&s.speedrunHealth,"Current player health.",[](const Settings &d){return d.speedrunHUD!=0;}),
         check("speedrun_armor","Armor",&s.speedrunArmor,"Current player armor.",[](const Settings &d){return d.speedrunHUD!=0;}),
-        check("speedrun_ammo","Ammo",&s.speedrunAmmo,"Current and maximum ammo for the equipped weapon.",[](const Settings &d){return d.speedrunHUD!=0;})
+        check("speedrun_ammo","Ammo",&s.speedrunAmmo,"Current and maximum ammo for the equipped weapon.",[](const Settings &d){return d.speedrunHUD!=0;}),
+        check("speedrun_keys","Keys",&s.speedrunKeys,"Shows collected blue, yellow and red keys.",[](const Settings &d){return d.accelerated&&d.speedrunHUD;}),
+        choice("speedrun_key_display","Key display",&s.speedrunKeyDisplay,{"Compact","Cards / Skulls"},{0,1},"Compact combines matching colors. Cards / Skulls distinguishes all six keys.",[](const Settings &d){return d.accelerated&&d.speedrunHUD&&d.speedrunKeys;})
     }}}});
     return tabs;
 }
