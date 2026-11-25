@@ -271,7 +271,7 @@ enum
     ep2,
     ep3,
     ep4,
-   // ep5, <- need to check it is breaking current game doom.wad normal game start.
+    ep5,
     ep_end
 } episodes_e;
 
@@ -2045,6 +2045,13 @@ void M_Init(void)
     // Here we could catch other version dependencies,
     //  like HELP1/2, and four episodes.
 
+    /*
+     * Set the episode count explicitly.  Do not decrement the static
+     * menu count: M_Init may be called more than once, and the available
+     * episode count depends on the WADs loaded for this game.
+     */
+    EpiDef.numitems = ep_end;
+
     switch (gamemode)
     {
     case commercial:
@@ -2060,17 +2067,29 @@ void M_Init(void)
         ReadDef1.y = 165;
         ReadMenu1[0].routine = M_FinishReadThis;
         break;
+
     case shareware:
-        // Episode 2 and 3 are handled,
-        //  branching to an ad screen.
     case registered:
-        // We need to remove the fourth episode.
-        EpiDef.numitems--;
+        /* Preserve the original three-entry menu.  Shareware episodes
+         * 2 and 3 remain locked by M_Episode(). */
+        EpiDef.numitems = 3;
         break;
+
     case retail:
-      if (gamemode != retail || W_CheckNumForName("E5M1") < 0
-	    || W_CheckNumForName("M_EPI5") < 0)
-	    EpiDef.numitems--;
+        /* Ultimate DOOM requires both its map and menu artwork. */
+        EpiDef.numitems = 3;
+        if (W_CheckNumForName("E4M1") >= 0 &&
+            W_CheckNumForName("M_EPI4") >= 0)
+        {
+            EpiDef.numitems = 4;
+
+            /* SIGIL adds Episode 5 when both map and artwork exist. */
+            if (W_CheckNumForName("E5M1") >= 0 &&
+                W_CheckNumForName("M_EPI5") >= 0)
+                EpiDef.numitems = 5;
+        }
+        break;
+
     default:
         break;
     }

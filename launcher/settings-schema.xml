@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="234ad4a7fed2381151af5f94ea623517a2d3c638458a8adf544a6af45a25e246">
+<settings source="platform/settings_panel.cpp" source_sha256="7ad83eaeccf34d9afe4871315385b5753bcf8371e0663986bfe3fb0de7c6d08a">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -49,6 +49,8 @@
   <option key="outdoor_wind_density" title="Wind dust density" category="Environment" kind="slider" min="0.25" max="2" step="0.25" />
   <option key="electrical_damage" title="Damaged machinery sputtering" category="Environment" kind="check" choices="0=Off|1=On" />
   <option key="revenant_soul_release" title="Revenant Soul Release" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="fireball_wall_melt" title="Thermal Wall Impacts" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="fireball_wall_melt_intensity" title="Thermal intensity" category="Destruction" kind="slider" min="0" max="100" step="5" />
   <option key="breakable_walls" title="Breakable surfaces (experimental)" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="wall_damage" title="Wall damage" category="Destruction" kind="choice" choices="100=100%|150=150%|200=200%|250=250%|300=300%|350=350%|400=400%|450=450%|500=500%" />
   <option key="through_walls" title="Through-wall breaches (experimental)" category="Destruction" kind="check" choices="0=Off|1=On" />
