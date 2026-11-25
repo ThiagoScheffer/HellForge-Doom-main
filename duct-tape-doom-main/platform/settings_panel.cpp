@@ -147,7 +147,11 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Balance",{
                 choice("monster_weapon_drops","Monster Weapon Drops",&s.monsterWeaponDrops,
                     {"Classic","Ammo Instead","Scarce Ammo"},{MONSTER_DROPS_CLASSIC,MONSTER_DROPS_AMMO,MONSTER_DROPS_SCARCE},
-                    "Controls future Shotgun Guy and Chaingunner drops. Classic keeps their weapons. Ammo Instead drops ammo and Scarce Ammo drops less. Map pickups stay available. Strict modes can make some PWADs much harder. Single player only. Demos and Arcade use Classic.")}},
+                    "Controls future Shotgun Guy and Chaingunner drops. Classic keeps their weapons. Ammo Instead drops ammo and Scarce Ammo drops less. Map pickups stay available. Strict modes can make some PWADs much harder. Single player only. Demos and Arcade use Classic."),
+                choice("medikit_overflow","Medical Supply Recovery",&s.healthRecovery,
+                    {"Classic","Medikits only","Medikits and Stimpacks"},{0,1,2},
+                    "Preserve unused healing as a small recovery pack. No extra healing is created. Single player only; disabled in multiplayer, demos and Arcade.",
+                    [](const Settings &){return P_HealthRecoveryAllowed()!=0;})}},
             {"Combat and arenas",{
                 check("boost_chaingun","Enhanced chaingun",&s.boostChaingun,"50% faster chaingun fire. Backpack bullet capacity increases from 400 to 600; without a backpack it stays 200. Bullets are shared with the pistol. Turning off restores the normal cap and clips excess bullets. Works with classic and Fluid weapons; disabled in Arcade, demos and multiplayer."),
                 check("monster_recovery","Stuck monster recovery",&s.monsterRecovery,"Helps monsters after repeated failed movement. Tries small escape steps first. Trapped lockdown enemies can teleport to safe explored ground; ordinary monsters require invalid footing and a nearby visible safe spot. Disabled in Arcade, demos and multiplayer."),
@@ -886,7 +890,7 @@ void readOption(Settings &s,const char *key,double value) {
         if(strcmp(option.key,key))return;
         if(option.kind==OptionKind::Check)*option.flag=value!=0;
         else if(option.kind==OptionKind::Key){if(value==0||(value==std::floor(value)&&value>0&&value<SDL_SCANCODE_COUNT&&validPeekBinding((int)value)))*option.flag=(int)value;}
-        else if(option.kind==OptionKind::Choice) {for(int v:option.values)if(v==value)*option.flag=v;}
+        else if(option.kind==OptionKind::Choice) {if(!strcmp(option.key,"medikit_overflow"))*option.flag=HEALTH_RECOVERY_CLASSIC;for(int v:option.values)if(v==value)*option.flag=v;}
         else if(!strcmp(option.key,"encounter_stream_initial_count"))*option.number=(float)std::clamp(std::round(value),1.,1000000.);
         else *option.number=option.snap(value);
     });

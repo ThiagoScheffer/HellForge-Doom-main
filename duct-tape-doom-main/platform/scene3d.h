@@ -4,6 +4,7 @@
 #define DOOM_SCENE3D_H
 #include "../linuxdoom-1.10/p_encounter.h"
 #include "../linuxdoom-1.10/p_drop_policy.h"
+#include "../linuxdoom-1.10/p_health_recovery.h"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -219,6 +220,7 @@ struct Settings {
     int breachDoors=0;
     int keyArena=0,arenaRadius=512,monsterRecovery=1,boostChaingun=0;
     int monsterWeaponDrops=MONSTER_DROPS_CLASSIC;
+    int healthRecovery=HEALTH_RECOVERY_CLASSIC;
     int doorBlowout=0;
     int keyDoorShield=1,switchDoorShield=1;
     int wallDamage=250;

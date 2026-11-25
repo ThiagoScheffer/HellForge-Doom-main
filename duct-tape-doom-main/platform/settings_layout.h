@@ -32,7 +32,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
     if(!strcmp(k,"monster_recovery")||!strcmp(tab,"Monster AI"))return {"Monsters","AI"};
     if(settingIs(k,{"monster_feeding","headshot_frenzy"}))return {"Monsters","Survival"};
     if(!strcmp(k,"glowing_eyes"))return {"Monsters","Appearance"};
-    if(!strcmp(tab,"Gameplay"))return {"Gameplay",settingIs(k,{"key_arena","arena_radius"})?"Arenas":"Weapons"};
+    if(!strcmp(tab,"Gameplay"))return {"Gameplay",!strcmp(section,"Balance")?"Balance":settingIs(k,{"key_arena","arena_radius"})?"Arenas":"Weapons"};
     if(!strcmp(tab,"ENCOUNTER DIRECTOR"))return {"ENCOUNTER DIRECTOR","Overview"};
     if(!strncmp(tab,"ED ",3))return {"ENCOUNTER DIRECTOR",tab+3};
     if(settingIs(k,{"outdoor_wind","outdoor_wind_density"}))return {"Atmosphere","Particles"};
@@ -80,7 +80,7 @@ inline std::vector<OptionTab> settingsLayout(std::vector<OptionTab> source) {
         {"Display",{},{{"Video",{}},{"View",{}},{"Filters",{}}}},
         {"Controls",{},{{"Aiming",{}},{"Peeking",{}}}},
         {"HUD",{},{{"Layout",{}},{"Portrait",{}},{"Feedback",{}},{"Speedrun",{}},{"Run stats",{}}}},
-        {"Gameplay",{},{{"Weapons",{}},{"Arenas",{}}}},
+        {"Gameplay",{},{{"Weapons",{}},{"Balance",{}},{"Arenas",{}}}},
         {"Combat",{},{{"Hits",{}},{"Injuries",{}},{"Blood",{}},{"Gore",{}},{"Deaths",{}},{"Feedback",{}},{"Barrels",{}}}},
         {"Monsters",{},{{"AI",{}},{"Survival",{}},{"Appearance",{}}}},
         {"ENCOUNTER DIRECTOR",{},{{"Overview",{}},{"Monsters",{}},{"Reinforcements",{}},{"Items",{}},{"Population",{}},{"Advanced",{}}}},

@@ -347,6 +347,7 @@ Cacodemon and painelemental - eye injuries system - if hit eye and get blinded -
 
 
 Immersion improvements:
+
 outside places with rain:
 dead bodies with blood will be washed away, so blood will spread larger and small blood will clean faster.
 

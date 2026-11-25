@@ -57,6 +57,8 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #endif
 #include "p_inter.h"
 #include "p_drop_policy.h"
+#include "p_health_recovery.h"
+#include <stdio.h>
 #include "d_deh.h"
 
 unsigned p_toasty_serial;
@@ -91,6 +93,109 @@ void P_SetMonsterWeaponDrops(int mode)
 {
     monsterWeaponDrops = mode == MONSTER_DROPS_AMMO || mode == MONSTER_DROPS_SCARCE
         ? mode : MONSTER_DROPS_CLASSIC;
+}
+
+boolean P_GiveBody(player_t *player, int num);
+
+static int healthRecoveryMode;
+void P_SetHealthRecovery(int mode)
+{
+    healthRecoveryMode = mode == HEALTH_RECOVERY_MEDIKITS || mode == HEALTH_RECOVERY_ALL
+        ? mode : HEALTH_RECOVERY_CLASSIC;
+}
+int P_HealthRecoveryMode(void) { return healthRecoveryMode; }
+int P_HealthRecoveryAllowed(void)
+{
+    return !netgame && !lan_session && !deathmatch && !demoplayback && !demorecording && !arcade_active;
+}
+
+enum { RECOVERY_TAG_BASE = 0x4d00, RECOVERY_TAG_MASK = 0xff00, RECOVERY_MAX_POINTS = 24 };
+static boolean P_HasRecoveryTag(const mobj_t *item)
+{
+    return item && (item->monsterAmmoDrop & RECOVERY_TAG_MASK) == RECOVERY_TAG_BASE;
+}
+static int P_RecoveryPackHealth(const mobj_t *item)
+{
+    int points;
+    if (!P_HasRecoveryTag(item) || item->type != MT_MISC10 || item->sprite != SPR_STIM ||
+        (item->flags & (MF_SPECIAL | MF_DROPPED)) != (MF_SPECIAL | MF_DROPPED) ||
+        item->state != &states[S_STIM]) return 0;
+    points = item->monsterAmmoDrop & 0xff;
+    return points >= 1 && points <= RECOVERY_MAX_POINTS ? points : 0;
+}
+static void P_SetRecoveryPackHealth(mobj_t *item, int points)
+{
+    item->monsterAmmoDrop = (unsigned short)(RECOVERY_TAG_BASE | points);
+}
+typedef struct { int restored, remaining; } medical_recovery_t;
+static medical_recovery_t P_CalculateMedicalRecovery(int health, int capacity)
+{
+    medical_recovery_t result = {0, capacity > 0 ? capacity : 0};
+    if (health > 0 && health < MAXHEALTH && capacity > 0) {
+        int missing = MAXHEALTH - health;
+        result.restored = capacity < missing ? capacity : missing;
+        result.remaining -= result.restored;
+    }
+    return result;
+}
+/* Only mutate inert, stock-compatible actors; never run a patched state action. */
+static boolean P_MedicalConversionSafe(const mobj_t *item)
+{
+    const mobjinfo_t *src = &mobjinfo[item->type], *dst = &mobjinfo[MT_MISC10];
+    const state_t *a = &states[src->spawnstate], *b = &states[S_STIM];
+    return (item->type == MT_MISC10 || item->type == MT_MISC11) &&
+        src->spawnstate == (item->type == MT_MISC10 ? S_STIM : S_MEDI) &&
+        dst->spawnstate == S_STIM && item->state == a &&
+        a->sprite == (item->type == MT_MISC10 ? SPR_STIM : SPR_MEDI) &&
+        b->sprite == SPR_STIM && a->frame == 0 && b->frame == 0 &&
+        a->tics == -1 && b->tics == -1 && !a->action.acp1 && !b->action.acp1 &&
+        src->flags == MF_SPECIAL && dst->flags == MF_SPECIAL &&
+        item->radius == dst->radius && item->height == dst->height &&
+        src->radius == dst->radius && src->height == dst->height &&
+        !(item->flags & (MF_NOSECTOR | MF_NOBLOCKMAP));
+}
+typedef enum { MEDICAL_NOT_HANDLED, MEDICAL_REJECTED, MEDICAL_CONSUMED, MEDICAL_RETAINED } medical_pickup_result_t;
+static char recoveryMessages[MAXPLAYERS][80];
+static medical_pickup_result_t P_TouchMedicalRecovery(mobj_t *item, player_t *player)
+{
+    int pack = P_RecoveryPackHealth(item), capacity, index;
+    boolean medikit;
+    medical_recovery_t result;
+    /* A malformed tag must never fall through to standard Stimpack healing. */
+    if (item->type == MT_MISC10 && item->sprite == SPR_STIM && P_HasRecoveryTag(item) && !pack) return MEDICAL_REJECTED;
+    if (pack && !P_HealthRecoveryAllowed()) return MEDICAL_REJECTED;
+    medikit = item->type == MT_MISC11 && item->sprite == SPR_MEDI;
+    if (!pack && (!P_HealthRecoveryAllowed() || healthRecoveryMode == HEALTH_RECOVERY_CLASSIC ||
+        (!medikit && !(healthRecoveryMode == HEALTH_RECOVERY_ALL && item->type == MT_MISC10 && item->sprite == SPR_STIM))))
+        return MEDICAL_NOT_HANDLED;
+    capacity = pack ? pack : medikit ? 25 : 10;
+    result = P_CalculateMedicalRecovery(player->health, capacity);
+    if (!result.restored) return MEDICAL_REJECTED;
+    if (result.remaining && !pack && !P_MedicalConversionSafe(item)) return MEDICAL_NOT_HANDLED;
+    if (!P_GiveBody(player, result.restored)) return MEDICAL_REJECTED;
+    if (result.remaining) {
+        if (item->flags & MF_COUNTITEM) player->itemcount++;
+        item->flags = (item->flags | MF_SPECIAL | MF_DROPPED) & ~MF_COUNTITEM;
+        item->type = MT_MISC10;
+        item->info = &mobjinfo[MT_MISC10];
+        item->state = &states[S_STIM];
+        item->sprite = item->state->sprite;
+        item->frame = item->state->frame;
+        item->tics = item->state->tics;
+        P_SetRecoveryPackHealth(item, result.remaining);
+    }
+    if (pack || result.remaining) {
+        index = (int)(player - players);
+        if (index >= 0 && index < MAXPLAYERS) {
+            const char *label = pack ? "RECOVERY" : medikit ? "MEDIKIT" : "STIMPACK";
+            if (result.remaining)
+                snprintf(recoveryMessages[index], sizeof(recoveryMessages[index]), "%s +%d HP. %d HP LEFT.", label, result.restored, result.remaining);
+            else snprintf(recoveryMessages[index], sizeof(recoveryMessages[index]), "RECOVERY +%d HP.", result.restored);
+            player->message = recoveryMessages[index];
+        }
+    } else if (medikit) player->message = DEH_String(player->health < 25 ? GOTMEDINEED : GOTMEDIKIT);
+    else player->message = DEH_String(GOTSTIM);
+    return result.remaining ? MEDICAL_RETAINED : MEDICAL_CONSUMED;
 }
 
 typedef struct {
@@ -447,15 +552,22 @@ P_TouchSpecialThing
     if (toucher->health <= 0)
 	return;
 
+    medical_pickup_result_t medical = P_TouchMedicalRecovery(special, player);
+    if (medical == MEDICAL_REJECTED) return;
+    if (medical == MEDICAL_RETAINED) {
+        player->bonuscount += BONUSADD;
+        if (player == &players[consoleplayer]) S_StartSound(NULL, sound);
+        return;
+    }
     ammotype_t ammo;
-    const int amount = P_MonsterDropAmmo(special, &ammo);
+    const int amount = medical == MEDICAL_CONSUMED ? 0 : P_MonsterDropAmmo(special, &ammo);
     if (amount) {
         if (!P_GiveAmmoInternal(player, ammo, amount, false, false))
             return;
         player->message = DEH_String(ammo == am_shell ? "Picked up shotgun shells." : GOTCLIP);
     }
     // Ordinary pickups retain their sprite-based behavior.
-    else switch (special->sprite)
+    else if (medical != MEDICAL_CONSUMED) switch (special->sprite)
     {
 	// armor
       case SPR_ARM1:

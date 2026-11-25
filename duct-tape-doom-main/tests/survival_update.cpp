@@ -11,6 +11,7 @@ extern "C" {
 #include "p_weakpoints.h"
 #include "r_main.h"
 #include "p_drop_policy.h"
+#include "p_health_recovery.h"
 #include "p_acid.h"
 extern void G_DoSaveGame(void),G_DoLoadGame(void);
 void A_VileChase(mobj_t *);
@@ -163,6 +164,35 @@ static void monsterDrops(){
  check(!dropAt(0,y,MT_CLIP),"a fresh level clears prior pickups");
  P_SetMonsterWeaponDrops(MONSTER_DROPS_CLASSIC);
 }
+static void medicalRecovery(){
+ playerBody=players[0].mo;clearActors(); auto* player=playerBody->player;
+ auto health=[&](int hp){player->health=playerBody->health=hp;};
+ auto touch=[&](mobj_t* item){P_TouchSpecialThing(item,playerBody);};
+ P_SetHealthRecovery(99);check(P_HealthRecoveryMode()==0,"invalid recovery setting defaults to Classic");
+ P_SetHealthRecovery(HEALTH_RECOVERY_MEDIKITS);
+ for(int hp=1;hp<=200;++hp){
+  auto* item=P_SpawnMobj(playerBody->x,playerBody->y,playerBody->z,MT_MISC11);
+  health(hp);touch(item);
+  int restored=hp<100 ? (25<100-hp ? 25 : 100-hp) : 0;
+  check(player->health==hp+restored,"medical pickup healing is capped");
+  if(restored && restored<25){check(item->type==MT_MISC10 && item->monsterAmmoDrop==(0x4d00|25-restored),"exact overflow retained");P_RemoveMobj(item);}
+  else if(!restored) P_RemoveMobj(item);
+ }
+ auto* item=P_SpawnMobj(playerBody->x,playerBody->y,playerBody->z,MT_MISC11);
+ item->flags|=MF_COUNTITEM;int count=player->itemcount;health(90);touch(item);
+ check(player->health==100&&item->monsterAmmoDrop==0x4d0f&&player->itemcount==count+1,"90 HP medikit yields 15 and one item credit");
+ P_SetHealthRecovery(HEALTH_RECOVERY_CLASSIC);health(92);touch(item);
+ check(player->health==100&&item->monsterAmmoDrop==0x4d07&&player->itemcount==count+1,"partial pack survives Classic and earns no second credit");
+ G_SaveGame(5,(char*)"MEDICAL RECOVERY");G_DoSaveGame();gameaction=ga_nothing;
+ G_LoadGame((char*)"doomsav5.dsg");G_DoLoadGame();gameaction=ga_nothing;playerBody=players[0].mo;player=playerBody->player;
+ item=dropAt(playerBody->x,playerBody->y,MT_MISC10);
+ check(item&&item->monsterAmmoDrop==0x4d07,"remaining capacity survives native save/load");
+ health(80);touch(item);check(player->health==87&&player->itemcount==count+1,"last seven points consumed exactly");
+ P_SetHealthRecovery(HEALTH_RECOVERY_ALL);item=P_SpawnMobj(playerBody->x,playerBody->y,playerBody->z,MT_MISC10);
+ health(97);touch(item);check(item->monsterAmmoDrop==0x4d07,"stimpack overflow retains seven points");
+ netgame=true;health(80);touch(item);check(player->health==80&&item->monsterAmmoDrop==0x4d07,"restricted sessions reject existing packs");netgame=false;
+ P_RemoveMobj(item);P_SetHealthRecovery(0);clearActors();
+}
 static void tests(){
  R_BeforeTic=nullptr;playerBody=players[0].mo;clearActors();
  P_WeakpointConfigure(1,0,0);P_WeakpointConfigureExtras(0,1);p_wp_balance.frenzyChance=100;
@@ -228,6 +258,7 @@ static void tests(){
  check(vile->health==health+24&&prey->health==76,"Arch-vile hunts and steals only actual 24-HP prey damage without requiring bleeding");
  P_WeakpointConfigureFeeding(0);check(!P_WeakpointFeeding(vile)&&P_WeakpointWalkSpeed(vile,100*FRACUNIT)==100*FRACUNIT,"feeding toggle removes survival overrides");
  monsterDrops();
+ medicalRecovery();
  std::puts("PASS focused native survival update");std::exit(0);
 }
 int main(int argc,char** argv){
