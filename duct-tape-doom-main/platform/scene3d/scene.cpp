@@ -345,6 +345,7 @@ static int flashlightIlluminates(const mobj_t *monster) {
 void applySettings() {
     if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
+    if(!settings.accelerated||!settings.fireballWallMelt||settings.fireballWallMeltIntensity<=0.f)clearThermalWallMelts();
     R_BeforeLevelReset=+[]{resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();

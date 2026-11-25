@@ -9,7 +9,10 @@ extern "C" {
 extern "C" {
 #include "p_solid.h"
 #include "p_arena.h"
+#include "p_local.h"
 extern int p_missile_hit_actor;
+extern mobj_t *tmthing;
+extern fixed_t tmx,tmy,tmbbox[4];
 }
 #include "../../../map_world.h"
 extern const lab::MapWorld *SV_MapWorld();
@@ -70,18 +73,22 @@ void pixelBlock(std::vector<Vertex> &out,const Uniforms &camera,float x,float y,
     };
     quad(out,vertex(left,bottom+h),vertex(left+w,bottom+h),vertex(left+w,bottom),vertex(left,bottom));
 }
+static float impactSectorHeight(const sector_t *sector,bool ceiling,bool currentHeights) {
+    return currentHeights?units(ceiling?sector->ceilingheight:sector->floorheight):sectorHeight(sector,ceiling);
+}
 // Section 0 is a one-sided wall (anchored to its floor), 1 an upper wall
 // (anchored to the back ceiling, e.g. a door face), 2 a lower wall.
-bool wallSpan(const line_t &line,int side,int section,WallSpan &span) {
+bool wallSpan(const line_t &line,int side,int section,WallSpan &span,bool currentHeights) {
     if(line.sidenum[side]<0)return false;
     const side_t &s=sides[line.sidenum[side]];
     const sector_t *front=s.sector,*back=side?line.frontsector:line.backsector;
     span.a={units((side?line.v2:line.v1)->x),units((side?line.v2:line.v1)->y)};
     span.b={units((side?line.v1:line.v2)->x),units((side?line.v1:line.v2)->y)};
-    if(section==0) {if(back)return false;span.bottom=floorZ(front);span.top=ceilZ(front);span.anchor=span.bottom;span.texture=s.midtexture;}
+    auto height=[&](const sector_t *sector,bool ceiling){return impactSectorHeight(sector,ceiling,currentHeights);};
+    if(section==0) {if(back)return false;span.bottom=height(front,false);span.top=height(front,true);span.anchor=span.bottom;span.texture=s.midtexture;}
     else if(!back) return false;
-    else if(section==1) {span.bottom=ceilZ(back);span.top=ceilZ(front);span.anchor=span.bottom;span.texture=s.toptexture;}
-    else {span.bottom=floorZ(front);span.top=floorZ(back);span.anchor=span.top;span.texture=s.bottomtexture;}
+    else if(section==1) {span.bottom=height(back,true);span.top=height(front,true);span.anchor=span.bottom;span.texture=s.toptexture;}
+    else {span.bottom=height(front,false);span.top=height(back,false);span.anchor=span.top;span.texture=s.bottomtexture;}
     return span.top>span.bottom;
 }
 #include "impact_particles.inc"
@@ -679,7 +686,7 @@ void buildImpacts(const Uniforms &camera) {
 // within length, climbing dz per unit: one-sided lines, and two-sided ones
 // where the ray passes above the far ceiling or below the far floor, at the
 // current heights. side faces the ray's origin; section is as in wallSpan.
-bool firstSolidWall(float x,float y,float z,float dx,float dy,float dz,float length,WallHit &hit) {
+bool firstSolidWall(float x,float y,float z,float dx,float dy,float dz,float length,WallHit &hit,bool currentHeights) {
     std::vector<std::pair<float,int>> crossings;
     for(int i=0;i<numlines;++i) {
         const line_t &line=lines[i];
@@ -697,8 +704,8 @@ bool firstSolidWall(float x,float y,float z,float dx,float dy,float dz,float len
         if(!front)continue;
         float at=z+dz*t;int section=-1;
         if(!back)section=0;
-        else if(at>=ceilZ(back)&&!(front->ceilingpic==skyflatnum&&back->ceilingpic==skyflatnum))section=1;
-        else if(at<=floorZ(back))section=2;
+        else if(at>=impactSectorHeight(back,true,currentHeights)&&!(front->ceilingpic==skyflatnum&&back->ceilingpic==skyflatnum))section=1;
+        else if(at<=impactSectorHeight(back,false,currentHeights))section=2;
         if(section<0)continue;
         hit={i,side,section,t};return true;
     }

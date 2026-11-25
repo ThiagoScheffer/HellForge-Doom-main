@@ -469,7 +469,7 @@ void pixelBlock(std::vector<Vertex> &out,const Uniforms &camera,float x,float y,
 // Doom-pixel cells on screen already holding a liquid crest this frame:
 // crests brighten what is under them, so overlapping ones would compound.
 extern std::unordered_set<uint64_t> crestCells;
-bool wallSpan(const line_t &line,int side,int section,WallSpan &span);
+bool wallSpan(const line_t &line,int side,int section,WallSpan &span,bool currentHeights=false);
 bool wallAmbienceSpan(const WallHit &hit,WallSpan &span,bool simulation=false);
 void tickWallAmbience(const mobj_t &player);
 void drawWallAmbience(const Uniforms &camera);
@@ -483,7 +483,7 @@ void clearWallBloodDrops();
 void wallImpact(line_t *line,int side,fixed_t fx,fixed_t fy,fixed_t fz);
 void barrelBlast(const mobj_t &thing,float x,float y,float z);
 void buildImpacts(const Uniforms &camera);
-bool firstSolidWall(float x,float y,float z,float dx,float dy,float dz,float length,WallHit &hit);
+bool firstSolidWall(float x,float y,float z,float dx,float dy,float dz,float length,WallHit &hit,bool currentHeights=false);
 float valueNoise(float x,float y,float cell,uint32_t seed);
 
 // shot_lights.cpp
@@ -750,6 +750,7 @@ void tickImpactParticles();
 void fluidProjectileFlight(const mobj_t &thing);
 void fluidRocketLaunch(mobj_t *source);
 void fluidProjectileImpact(mobj_t *thing);
+void monsterProjectileWallMelt(mobj_t *mo);
 void collectGreenImpactFireLights(const Uniforms &camera);
 void resetGreenImpactFire();
 void beginMonsterProjectileFrame();
@@ -763,6 +764,7 @@ bool monsterProjectileSurfaceImpact(int type,float x,float y,float z,float nx,fl
 void tickMonsterProjectileEffects();
 void drawMonsterProjectileEffects(const Uniforms &camera);
 void clearMonsterProjectileEffects();
+void clearThermalWallMelts();
 void tickFluidEffects();
 void fluidBulletFlat(int sector,bool ceiling,float x,float y);
 void fluidBFGHit(mobj_t *ball,mobj_t *victim);

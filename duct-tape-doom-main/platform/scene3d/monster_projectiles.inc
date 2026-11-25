@@ -24,9 +24,12 @@ static bool monsterProjectileEnabled(){
     return settings.accelerated&&settings.fluidMonsters&&
            !netgame&&!demoplayback&&!demorecording;
 }
-static const MonsterProjectileProfile *monsterProjectileProfile(int type){
-    if(monsterProjectileEnabled())for(const auto &p:monsterProjectileProfiles)if(p.type==type)return &p;
+static const MonsterProjectileProfile *findMonsterProjectileProfile(int type){
+    for(const auto &p:monsterProjectileProfiles)if(p.type==type)return &p;
     return nullptr;
+}
+static const MonsterProjectileProfile *monsterProjectileProfile(int type){
+    return monsterProjectileEnabled()?findMonsterProjectileProfile(type):nullptr;
 }
 // Enhanced monster-projectile FX are intentionally local to the player.
 // 512 world units is eight classic 64-unit map blocks.
@@ -39,6 +42,7 @@ Distance	Value
 */
 static constexpr float monsterProjectileFxRange=640.0f;
 static bool monsterProjectileNearPlayer(float x,float y,float z){
+    if(displayplayer<0||displayplayer>=MAXPLAYERS)return false;
     const mobj_t *player=players[displayplayer].mo;
     if(!player)return false;
     float dx=x-units(player->x),dy=y-units(player->y);
@@ -66,18 +70,43 @@ bool monsterProjectileFxEligible(const mobj_t &mo){
 struct MonsterProjectileDraw {const MonsterProjectileProfile *profile;lab::Vec center,velocity;float phase,distance;};
 struct MoltenGlass {float x,y,z,radius,born,life;int sector;uint32_t seed;unsigned supportRevision;};
 struct MonsterImpactStamp {int type,tic;lab::Vec point;};
+struct ThermalWallMelt {
+    int line,side,section,projectileType,bornTic;
+    float u,relativeZ,nx,ny,radius,born,life;
+    uint32_t seed;
+    unsigned supportRevision=~0u;
+    float supportLow=0.f,supportHigh=0.f;
+};
 static std::vector<MonsterProjectileDraw> monsterProjectileDraws;
 static std::vector<FluidParticle> monsterProjectileMotes;
 static std::vector<MoltenGlass> moltenGlass;
 static std::vector<MonsterImpactStamp> monsterImpactStamps;
+static std::vector<ThermalWallMelt> thermalWallMelts;
+static constexpr size_t maxThermalWallMelts=48;
+static constexpr float thermalWallLife=15.f;
 static unsigned monsterProjectileLevel=~0u;
 static int monsterEmissionTic=-1,monsterEmissionCount=0;
-void clearMonsterProjectileEffects(){
-    monsterProjectileDraws.clear();monsterProjectileMotes.clear();moltenGlass.clear();monsterImpactStamps.clear();
-    monsterEmissionTic=-1;monsterEmissionCount=0;monsterProjectileLevel=r_levelserial;
+static bool thermalWallMeltEnabled(){
+    return settings.accelerated&&settings.fireballWallMelt&&settings.fireballWallMeltIntensity>0.f&&
+           gamestate==GS_LEVEL&&!netgame&&!demoplayback&&!demorecording;
 }
+static float thermalWallIntensity(){
+    return std::clamp(settings.fireballWallMeltIntensity/100.f,0.f,1.f);
+}
+static void clearFluidMonsterProjectiles(){
+    monsterProjectileDraws.clear();monsterProjectileMotes.clear();moltenGlass.clear();monsterImpactStamps.clear();
+    monsterEmissionTic=-1;monsterEmissionCount=0;
+}
+void clearMonsterProjectileEffects(){
+    clearFluidMonsterProjectiles();
+    clearThermalWallMelts();
+    monsterProjectileLevel=r_levelserial;
+}
+void clearThermalWallMelts(){thermalWallMelts.clear();}
 static void resetMonsterProjectileEffects(){
-    if(monsterProjectileLevel!=r_levelserial||!monsterProjectileEnabled())clearMonsterProjectileEffects();
+    if(monsterProjectileLevel!=r_levelserial)clearMonsterProjectileEffects();
+    if(!monsterProjectileEnabled())clearFluidMonsterProjectiles();
+    if(!thermalWallMeltEnabled())clearThermalWallMelts();
 }
 static constexpr size_t maxMonsterProjectileDraws=96;
 void beginMonsterProjectileFrame(){
@@ -246,9 +275,184 @@ bool monsterProjectileImpact(mobj_t *mo){
     }
     return monsterProjectileSurfaceImpact(mo->type,x,y,z,n.x,n.y,n.z,mo);
 }
+static float thermalBaseRadius(int type){return type==MT_FATSHOT?20.f:13.f;}
+
+static float addThermalWallMelt(const WallHit &hit,float u,float relativeZ,float nx,float ny,int type){
+    for(const auto &mark:thermalWallMelts)
+        if(mark.bornTic==leveltime&&mark.line==hit.line&&mark.side==hit.side&&mark.section==hit.section&&
+           std::abs(mark.u-u)<1.f&&std::abs(mark.relativeZ-relativeZ)<1.f)return 0.f;
+
+    float radius=thermalBaseRadius(type)*(.6f+.4f*thermalWallIntensity());
+    uint32_t seed=hash32(uint32_t(type)*2654435761u^uint32_t(hit.line));
+    seed=hash32(seed^uint32_t(leveltime)^uint32_t(hit.side*4+hit.section)*2246822519u);
+    seed=hash32(seed^uint32_t(std::lround(u*4))*73856093u^uint32_t(std::lround(relativeZ*4))*19349663u);
+    if(thermalWallMelts.capacity()<maxThermalWallMelts)
+        thermalWallMelts.reserve(maxThermalWallMelts);
+    if(thermalWallMelts.size()==maxThermalWallMelts)thermalWallMelts.erase(thermalWallMelts.begin());
+    thermalWallMelts.push_back({hit.line,hit.side,hit.section,type,leveltime,u,relativeZ,nx,ny,radius,gameSeconds(),thermalWallLife,seed});
+    return radius;
+}
+
+void monsterProjectileWallMelt(mobj_t *mo){
+    if(!mo||(mo->type!=MT_TROOPSHOT&&mo->type!=MT_FATSHOT)||!(mo->flags&MF_MISSILE)||
+       (mo->flags&MF_NOCLIP)||!thermalWallMeltEnabled()||!mo->subsector||!monsterProjectileTargetsPlayer(*mo))return;
+    if(!(mo->target->flags&MF_COUNTKILL))return;
+    if((tmthing==mo&&p_missile_hit_actor)||mo->z<=mo->floorz||mo->z+mo->height>=mo->ceilingz)return;
+
+    float x=units(mo->x),y=units(mo->y),z=units(mo->z);
+    float center=z+units(mo->height)*.5f;
+    if(!monsterProjectileNearPlayer(x,y,center))return;
+    float vx=units(mo->momx),vy=units(mo->momy),vz=units(mo->momz),speed=std::hypot(vx,vy);
+    if(speed<.01f)return;
+    float dx=vx/speed,dy=vy/speed;
+
+    // Failed classic moves leave the attempted position and collision box in p_map.
+    // A spawn check has already advanced the missile by half a step.
+    bool atSpawnStep=tmx==mo->x&&tmy==mo->y;
+    auto matchesHalfStep=[](fixed_t step,fixed_t momentum){
+        return step==momentum/2||step==(momentum>>1);
+    };
+    bool failedMove=tmthing==mo&&
+        ((tmx-mo->x==mo->momx&&tmy-mo->y==mo->momy)||
+         (matchesHalfStep(tmx-mo->x,mo->momx)&&matchesHalfStep(tmy-mo->y,mo->momy))||atSpawnStep);
+    float reach,traceZ=center,slope=0.f;
+    float solidHit[6];
+    if(failedMove){
+        if(atSpawnStep){x-=units(mo->momx>>1);y-=units(mo->momy>>1);}
+        reach=std::hypot(units(tmx)-x,units(tmy)-y)+units(mo->radius)*(std::abs(dx)+std::abs(dy))+.01f;
+    }else{
+        // Solid collision stops the missile about .2 units outside its contact.
+        // Confirm that nearby contact with the same trace used by SV_Missile.
+        if(SV_Trace(x,y,z,vx,vy,vz,solidHit,nullptr)>=1.f||std::abs(solidHit[5])>=.5f)return;
+        float separation=(x-solidHit[0])*solidHit[3]+(y-solidHit[1])*solidHit[4]+(z-solidHit[2])*solidHit[5];
+        if(std::abs(separation-.2f)>.06f)return;
+        reach=std::hypot(solidHit[0]-x,solidHit[1]-y)+1.f;
+        traceZ=z;
+        slope=vz/speed;
+    }
+
+    WallHit hit;
+    if(!firstSolidWall(x,y,traceZ,dx,dy,slope,reach,hit,true))return;
+    line_t &line=lines[hit.line];
+    if(failedMove&&((!SV_Active()&&line.validcount!=validcount)||
+       tmbbox[BOXRIGHT]<=line.bbox[BOXLEFT]||tmbbox[BOXLEFT]>=line.bbox[BOXRIGHT]||
+       tmbbox[BOXTOP]<=line.bbox[BOXBOTTOM]||tmbbox[BOXBOTTOM]>=line.bbox[BOXTOP]||
+       P_BoxOnLineSide(tmbbox,&line)!=-1))return;
+
+    WallSpan span;
+    if(!wallSpan(line,hit.side,hit.section,span,true)||span.texture<=0||span.texture==skytexture)return;
+    float hx=x+dx*hit.t,hy=y+dy*hit.t,hz=traceZ+slope*hit.t;
+    float ex=span.b.x-span.a.x,ey=span.b.y-span.a.y,len=std::hypot(ex,ey);
+    if(len<.01f||hz<=span.bottom||hz>=span.top||!monsterProjectileNearPlayer(hx,hy,hz))return;
+    float nx=ey/len,ny=-ex/len;
+    if(!failedMove&&(std::hypot(hx-solidHit[0],hy-solidHit[1])>1.f||nx*solidHit[3]+ny*solidHit[4]<.8f))return;
+    if(SV_Edited(hx,hy,hz))return;
+
+    resetMonsterProjectileEffects();
+    float u=std::clamp(((hx-span.a.x)*ex+(hy-span.a.y)*ey)/len,0.f,len);
+    float radius=addThermalWallMelt(hit,u,hz-span.anchor,nx,ny,mo->type);
+    if(radius>0.f&&settings.emissive){
+        const auto &palette=findMonsterProjectileProfile(mo->type)->palette;
+        sparkFlash(hx+nx,hy+ny,hz,radius*2.5f,.5f*thermalWallIntensity(),projectileColor(palette[3]));
+    }
+}
+
+static float thermalSmooth(float t){
+    t=std::clamp(t,0.f,1.f);
+    return t*t*(3.f-2.f*t);
+}
+
+// Returns true when the original wall face has lost support under the mark.
+static bool drawThermalWallMelt(ThermalWallMelt &mark,float age,const lab::MapWorld *world){
+    WallSpan span;
+    if(mark.line<0||mark.line>=numlines)return true;
+    if(!wallSpan(lines[mark.line],mark.side,mark.section,span))return false; // Wait for a moving wall to expose this span again.
+    if(span.texture<=0||span.texture==skytexture)return true;
+    float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy);
+    if(len<.01f||mark.u>len)return true;
+    float tx=dx/len,ty=dy/len,zc=span.anchor+mark.relativeZ;
+    float x=span.a.x+tx*mark.u,y=span.a.y+ty*mark.u;
+    float radius=mark.radius,scale=radius/thermalBaseRadius(mark.projectileType);
+    bool mancubus=mark.projectileType==MT_FATSHOT;
+    float maxDrip=(mancubus?42.f:26.f)*scale;
+    float left=std::max(0.f,mark.u-radius*1.45f),right=std::min(len,mark.u+radius*1.45f);
+    float low=std::max(span.bottom,zc-maxDrip-radius*.55f),high=std::min(span.top,zc+radius*1.2f);
+    if(left>=right||low>=high)return false;
+
+    float excavation[4];
+    if(P_GlobalDigBounds(mark.line,mark.side,excavation)&&
+       left<excavation[1]&&right>excavation[0]&&low<excavation[3]&&high>excavation[2])return true;
+    if(world&&(mark.supportRevision!=world->revision()||low-zc<mark.supportLow||high-zc>mark.supportHigh)){
+        // Sample the entire clipped footprint, including the potential drip paths.
+        if(zc>=span.bottom&&zc<=span.top&&world->removal({x,y,zc})>0.f)return true;
+        for(int i=0;i<=8;++i){
+            float u=left+(right-left)*i/8.f;
+            for(int j=0;j<=8;++j){
+                float z=low+(high-low)*j/8.f;
+                if(world->removal({span.a.x+tx*u,span.a.y+ty*u,z})>0.f)return true;
+            }
+        }
+        mark.supportRevision=world->revision();
+        mark.supportLow=low-zc;
+        mark.supportHigh=high-zc;
+    }
+    if(!monsterProjectileNearPlayer(x,y,zc))return false;
+
+    int mask=monsterSquareFireImage(),glow=monsterGlowImage();
+    auto rect=[&](int image,bool additive,float u,float z,float halfWidth,float halfHeight,
+                  const std::array<float,3> &color,float alpha,bool flip=false){
+        if(alpha<=0.f||halfWidth<=0.f||halfHeight<=0.f)return;
+        float u0=std::max(0.f,u-halfWidth),u1=std::min(len,u+halfWidth);
+        float z0=std::max(span.bottom,z-halfHeight),z1=std::min(span.top,z+halfHeight);
+        if(u0>=u1||z0>=z1)return;
+        auto vertex=[&](float across,float height){
+            float s=32.f+32.f*(across-u)/halfWidth,t=32.f-32.f*(height-z)/halfHeight;
+            Vertex v={span.a.x+tx*across+mark.nx*.25f,span.a.y+ty*across+mark.ny*.25f,
+                      height,flip?64.f-s:s,t,alpha,0};
+            v.red=color[0];v.green=color[1];v.blue=color[2];
+            return v;
+        };
+        auto &batch=additive?effectAddBatches[image]:decalBatches[image];
+        quad(batch,vertex(u0,z1),vertex(u1,z1),vertex(u1,z0),vertex(u0,z0));
+    };
+
+    const auto &palette=findMonsterProjectileProfile(mark.projectileType)->palette;
+    float fade=1.f-thermalSmooth((age-8.f)/(mark.life-8.f));
+    float flash=1.f-thermalSmooth(age/.4f);
+    float heat=(1.f-thermalSmooth((age-.4f)/4.4f))*thermalWallIntensity();
+    float spread=.75f+.25f*thermalSmooth(age/.65f);
+    auto charred=projectileColor(0x211617),edge=projectileColor(palette[0]);
+    for(size_t c=0;c<charred.size();++c)charred[c]+=(edge[c]*.55f-charred[c])*heat;
+
+    rect(mask,false,mark.u,zc,radius*1.16f*spread,radius*.95f*spread,charred,.85f*fade,mark.seed&1u);
+    rect(glow,true,mark.u,zc,radius*1.45f*spread,radius*1.2f*spread,projectileColor(palette[1]),heat*.85f);
+    rect(mask,true,mark.u,zc,radius*.83f*spread,radius*.61f*spread,projectileColor(palette[2]),heat*.75f,mark.seed&1u);
+    rect(glow,true,mark.u,zc,radius*.62f,radius*.49f,projectileColor(palette[3]),heat*(.65f+.30f*flash));
+    rect(glow,true,mark.u,zc,radius*.35f,radius*.28f,projectileColor(palette[4]),heat*(.22f+.78f*flash));
+
+    int drips=(mancubus?2:1)+int((mark.seed>>1)&1u);
+    for(int i=0;i<drips;++i){
+        float offset=((i+.5f)/drips-.5f)*1.5f+(hashUnit(i,1,mark.seed)-.5f)*.28f;
+        float delay=.10f+.45f*hashUnit(i,2,mark.seed);
+        float length=maxDrip*(.62f+.38f*hashUnit(i,3,mark.seed))*thermalSmooth((age-delay)/2.3f);
+        if(length<=0.f)continue;
+        float width=radius*(.08f+.07f*hashUnit(i,4,mark.seed));
+        float u=mark.u+radius*offset,top=zc-radius*.30f,tip=top-length;
+        float dripHeat=heat*(.70f+.30f*hashUnit(i,5,mark.seed));
+        rect(mask,false,u,top-length*.5f,width*1.2f,length*.5f,charred,.72f*fade,i%2!=0);
+        rect(glow,true,u,top-length*.5f,width,length*.5f,projectileColor(palette[2]),dripHeat);
+        rect(glow,true,u,tip+width,width*.85f,width*1.2f,projectileColor(palette[3]),dripHeat*.85f);
+    }
+    return false;
+}
+
 void tickMonsterProjectileEffects(){
     tickGreenImpactFires();
     resetMonsterProjectileEffects();
+    float now=gameSeconds();
+    thermalWallMelts.erase(std::remove_if(thermalWallMelts.begin(),thermalWallMelts.end(),[&](const auto &mark){
+        return now-mark.born>=mark.life;
+    }),thermalWallMelts.end());
     for(auto &p:monsterProjectileMotes){++p.age;p.x+=p.vx;p.y+=p.vy;p.z+=p.vz;p.vz+=p.az;p.size+=p.growth;}
     monsterProjectileMotes.erase(std::remove_if(monsterProjectileMotes.begin(),monsterProjectileMotes.end(),[](const auto &p){
         return p.age>=p.life||p.size<=0||!monsterProjectileNearPlayer(p.x,p.y,p.z);
@@ -300,6 +504,11 @@ void drawMonsterProjectileEffects(const Uniforms &camera){
         projectileQuad(camera,{x,y,z},p.size,p.size,0,p.color,p.alpha*std::clamp(1-(p.age+f)/p.life,0.f,1.f),true);
     }
     const auto *world=SV_MapWorld();
+    for(auto mark=thermalWallMelts.begin();mark!=thermalWallMelts.end();){
+        float age=now-mark->born;
+        if(age>=mark->life||drawThermalWallMelt(*mark,std::max(0.f,age),world))mark=thermalWallMelts.erase(mark);
+        else ++mark;
+    }
     moltenGlass.erase(std::remove_if(moltenGlass.begin(),moltenGlass.end(),[&](auto &p){
         if(now<p.born||now-p.born>=p.life||p.sector<0||p.sector>=numsectors||units(sectors[p.sector].floorheight)!=p.z||
            !monsterProjectileNearPlayer(p.x,p.y,p.z))return true;

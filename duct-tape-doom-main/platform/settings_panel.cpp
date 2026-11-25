@@ -198,7 +198,13 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Monster Effects",{
                 check("revenant_soul_release","Revenant Soul Release",&s.revenantSoulRelease,
                     "A faint soul struggles free when a Revenant dies. Requires the accelerated 3D renderer.",
-                    [](const Settings &d){return d.accelerated!=0;})}},
+                    [](const Settings &d){return d.accelerated!=0;}),
+                check("fireball_wall_melt","Thermal Wall Impacts",&s.fireballWallMelt,
+                    "Imp and Mancubus fireballs leave superheated molten wall marks with glowing centers, downward drips and cooling scorch marks. Cosmetic only.",
+                    [](const Settings &d){return d.accelerated!=0;}),
+                slider("fireball_wall_melt_intensity","Thermal intensity",&s.fireballWallMeltIntensity,0,100,5,
+                    "Controls molten glow, impact size and the intensity of wall drips.",
+                    [](const Settings &d){return d.accelerated&&d.fireballWallMelt;})}},
             {"Destruction and doors",{
                 check("breakable_walls","Breakable surfaces (experimental)",&s.breakableWalls,solidMapText("Rocket and barrel blasts excavate shared wall, floor and ceiling geometry. Off prevents new damage; existing passages remain until restarting the level. New solid-map saves retain damage.","Rocket impacts excavate walls, floors and ceilings. Wall depth stops before the next map boundary. Off restores original surfaces and collision; existing damage returns when enabled.")),
                 choice("wall_damage","Wall damage",&s.wallDamage,{"100%","150%","200%","250%","300%","350%","400%","450%","500%"},{100,150,200,250,300,350,400,450,500},solidMapText("Strength of new excavation: 100% is normal; 500% digs up to five times deeper per impact. Does not change damage to actors.","Excavation strength per hit against walls and doors. 100% is normal; 500% adds five times as much damage per hit, so breaches take fewer shots. Applies to new damage only. Monster damage and floor/ceiling craters are unchanged."),[](const Settings &d){return d.breakableWalls!=0;}),

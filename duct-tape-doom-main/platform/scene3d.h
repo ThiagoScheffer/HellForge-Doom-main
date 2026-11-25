@@ -249,6 +249,8 @@ struct Settings {
     int spriteFiltering=0;
     int ambushSightReuse=0;
     int fluidWeapons=1,fluidSounds=1,fluidMonsters=1;
+    int fireballWallMelt=1;
+    float fireballWallMeltIntensity=75.f;
     int greenImpactFire=0;
     int revenantSoulRelease=0;
     int fluidRocketFire=1;
