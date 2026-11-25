@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="1cc219c22a49f88cd5d48f2d4fba2fd7639a0e63da7d81f690b150a200ebeee0">
+<settings source="platform/settings_panel.cpp" source_sha256="7286218cbfbdcb028dc111791fdb51a84ec0b3f853c93b8ded12e1d992c1bc23">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -23,6 +23,10 @@
   <option key="ps2_style" title="PS2-style filter" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="retro" title="Retro scanlines" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="palette" title="Doom palette colors" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="chromatic_aberration" title="Chromatic aberration" category="Display" kind="choice" choices="0=Off|1=Cinematic|2=Terror|3=Hybrid" />
+  <option key="chromatic_aberration_intensity" title="Aberration intensity" category="Display" kind="slider" min="0" max="100" step="5" />
+  <option key="chromatic_damage_response" title="Damage response" category="Display" kind="check" choices="0=Off|1=On" />
+  <option key="chromatic_low_health" title="Low-health distortion" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="enhanced_automap" title="Enhanced Automap" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="monster_hibernation" title="Idle monster hibernation" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="swarm_debug" title="Swarm diagnostics" category="Gameplay" kind="check" choices="0=Off|1=On" />

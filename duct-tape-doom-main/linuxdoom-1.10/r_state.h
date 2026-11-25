@@ -133,6 +133,8 @@ extern void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int healthAfter,
 extern void (*R_GoreShotEnd)(mobj_t *shooter,uint64_t discharge);
 // Death clears actor presentation while the current pellet still resolves.
 extern void (*R_GoreForget)(const mobj_t *actor,int death);
+// Confirmed loss of player health for the display effect.
+extern void (*R_PlayerTerrorDamage)(player_t *player, int healthLost);
 // Every damage event, before it is applied (renderer only: who hit what, with what).
 extern void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
 extern void (*R_VileHurt)(const mobj_t *vile);

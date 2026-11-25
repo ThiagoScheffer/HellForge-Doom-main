@@ -75,6 +75,7 @@ void (*R_BloodHit)(mobj_t *target, mobj_t *shooter, fixed_t x, fixed_t y, fixed_
 void (*R_GoreHit)(mobj_t *target,mobj_t *source,int kind,int healthAfter,int extreme,int healthLoss);
 void (*R_GoreShotEnd)(mobj_t *shooter,uint64_t discharge);
 void (*R_GoreForget)(const mobj_t *actor,int death);
+void (*R_PlayerTerrorDamage)(player_t *player, int healthLost) = NULL;
 void (*R_DamageHit)(mobj_t *target, mobj_t *inflictor, mobj_t *source, int damage);
 void (*R_VileHurt)(const mobj_t *vile);
 void (*R_RevenantDeath)(const mobj_t *revenant);

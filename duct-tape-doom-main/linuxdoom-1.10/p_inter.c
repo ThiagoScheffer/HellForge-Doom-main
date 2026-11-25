@@ -1099,10 +1099,14 @@ damageMobj
 	    player->armorpoints -= saved;
 	    damage -= saved;
 	}
+	const int healthBeforeDamage = player->health;
 	player->health -= damage; 	// mirror mobj health here for Dave
 	if (player->health < 0)
 	    player->health = 0;
 	
+	const int healthLost = healthBeforeDamage - player->health;
+	if (R_PlayerTerrorDamage && healthLost > 0)
+	    R_PlayerTerrorDamage(player, healthLost);
 	P_NoticeDamage(player,damage,source);
 	player->attacker = source;
 	player->damagecount += damage;	// add damage after armor / invuln

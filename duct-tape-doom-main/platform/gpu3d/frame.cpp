@@ -23,6 +23,15 @@ static std::vector<Vertex> settingsQuad;
 static std::vector<Vertex> toastyQuad,romeroQuad,arcadePodiumQuad;
 static std::vector<Vertex> arcadeRankQuad;
 static float settingsOrigin[2]={},settingsScale=1;
+struct alignas(16) PresentUniforms {
+    float photo[4];
+    float shutter[4];
+    float chromatic[4];
+    float sceneRect[4];
+    float speedrunHudRects[2][4];
+};
+static_assert(sizeof(PresentUniforms)==96,"Present uniform layout mismatch");
+
 static void present(SDL_GPUCommandBuffer *command,SDL_GPUTexture *target,const FrameView &view) {
     SDL_GPUColorTargetInfo info={};
     info.texture=target;info.load_op=SDL_GPU_LOADOP_DONT_CARE;info.store_op=SDL_GPU_STOREOP_STORE;
@@ -31,8 +40,21 @@ static void present(SDL_GPUCommandBuffer *command,SDL_GPUTexture *target,const F
     float hudRect[8]={view.uiX/width,view.uiY/height,view.uiWidth/width,view.uiHeight/height,settings.hudLayout==1?0.f:1.f,0,0,0};
     SDL_PushGPUFragmentUniformData(command,0,hudRect,sizeof(hudRect));
     SDL_PushGPUFragmentUniformData(command,1,&view.camera,sizeof(view.camera));
-    float photo[8]={(float)r_photoactive,(float)r_photodof,r_photofocus,(float)r_photostyle,I_PhotoFlash(),0,0,0};
-    SDL_PushGPUFragmentUniformData(command,2,photo,sizeof(photo));
+    PresentUniforms uniforms={
+        {(float)r_photoactive,(float)r_photodof,r_photofocus,(float)r_photostyle},
+        {I_PhotoFlash(),0,0,0},
+        {view.chromaticDisplacement,0.35f,1.f,0.f},{},{}
+    };
+    if(view.chromaticDisplacement>0.f) {
+        // Intersect the viewport's covered pixel centers with setView's integer scissor.
+        uniforms.sceneRect[0]=std::max((float)(int)view.worldX,std::ceil(view.worldX-0.5f));
+        uniforms.sceneRect[1]=std::max((float)(int)view.worldY,std::ceil(view.worldY-0.5f));
+        uniforms.sceneRect[2]=std::min((float)((int)view.worldX+(int)view.worldW),std::ceil(view.worldX+view.worldW-0.5f));
+        uniforms.sceneRect[3]=std::min((float)((int)view.worldY+(int)view.worldH),std::ceil(view.worldY+view.worldH-0.5f));
+        for(int i=0;i<2;++i)
+            std::copy_n(view.speedrunHudRects[i],4,uniforms.speedrunHudRects[i]);
+    }
+    SDL_PushGPUFragmentUniformData(command,2,&uniforms,sizeof(uniforms));
     SDL_GPUTextureSamplerBinding samplers[]={{colorTexture,linearClamp},{bloomTexture,linearClamp},{hudTexture,linearClamp},{paletteLUT,nearestClamp},{sampleCount!=SDL_GPU_SAMPLECOUNT_1?sceneDepth:depthTexture,nearestClamp}};
     SDL_BindGPUFragmentSamplers(pass,0,samplers,5);
     SDL_DrawGPUPrimitives(pass,3,1,0,0);
@@ -486,6 +508,9 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
         const int anchor=i?(settings.speedrunPlayerAnchor|1):split?(settings.speedrunAnchor&~1):settings.speedrunAnchor;
         auto panel=hudScreenPosition((float)width,view.uiHeight,view.uiWidth,region.width,region.height,anchor,
             i?settings.speedrunPlayerX:settings.speedrunX,i?settings.speedrunPlayerY:settings.speedrunY,settings.hudLayout==2,split);
+        auto &rect=view.speedrunHudRects[i];
+        rect[0]=panel.x;rect[1]=view.uiY+panel.y;
+        rect[2]=panel.x+panel.w;rect[3]=view.uiY+panel.y+panel.h;
         screenQuad(hud,-1+2*panel.x/width,1-2*panel.y/view.uiHeight,2*panel.w/width,2*panel.h/view.uiHeight,
             region.x/320.f,2.f/3,(region.x+region.width)/320.f,2.f/3+region.height/600.f);
     }

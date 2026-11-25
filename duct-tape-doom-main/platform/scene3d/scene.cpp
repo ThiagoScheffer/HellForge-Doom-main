@@ -1,4 +1,5 @@
 #include "../level_lifecycle.h"
+#include "../terror_immersion.h"
 extern "C" {
 #include "i_lan.h"
 }
@@ -125,7 +126,81 @@ static double worldInterpolation(uint64_t now){
     else if(last&&now>=last)progress+=(now-last)/(1e9/TICRATE)*rate;
     last=now;return std::clamp(progress,0.0,1.0);
 }
+static struct {
+    doom_terror::Envelope lowHealth;
+    doom_terror::DamageEnvelope damage;
+    const mobj_t *actor = nullptr;
+    unsigned level = 0;
+    float renderedFraction = 1.f;
+} terrorState;
+
+static const player_t *localTerrorView() {
+    if(gamestate!=GS_LEVEL||consoleplayer<0||consoleplayer>=MAXPLAYERS||displayplayer!=consoleplayer)
+        return nullptr;
+    const auto &player=players[consoleplayer];
+    return player.mo?&player:nullptr;
+}
+
+static const player_t *terrorPlayer() {
+    const auto *player=localTerrorView();
+    return player&&player->playerstate==PST_LIVE&&player->health>0?player:nullptr;
+}
+
+static void resetTerror() {terrorState={};}
+
+static void syncTerror(const player_t *player) {
+    const auto *actor=player?player->mo:nullptr;
+    if(terrorState.level!=r_levelserial||terrorState.actor!=actor) {
+        resetTerror();
+        terrorState.level=r_levelserial;
+        terrorState.actor=actor;
+    }
+}
+
+static void playerTerrorDamage(player_t *player,int healthLost) {
+    const auto *local=terrorPlayer();
+    if(!local||local!=player||doom_terror::intensityGain(settings.chromaticAberrationIntensity)<=0.f)
+        return;
+    syncTerror(local);
+    terrorState.damage.hit(healthLost);
+}
+
+static void updateTerror() {
+    if(!doom_terror::dynamicMode(settings.chromaticAberration))return;
+    const auto *player=terrorPlayer();
+    syncTerror(player);
+    if(!player||doom_terror::intensityGain(settings.chromaticAberrationIntensity)<=0.f)return;
+    // P_Ticker invokes beforeTic only after its pause and slow-motion checks.
+    constexpr float dt=1.f/TICRATE;
+    if(settings.chromaticDamageResponse)terrorState.damage.advance(dt);
+    if(settings.chromaticLowHealth)doom_terror::advanceLowHealth(terrorState.lowHealth,player->health,dt);
+}
+
+static float chromaticDisplacement(float fraction) {
+    const int mode=settings.chromaticAberration;
+    const bool dynamic=doom_terror::dynamicMode(mode);
+    if(!settings.accelerated||(!dynamic&&mode!=doom_terror::Cinematic)||!worldPending)
+        return 0.f;
+    const float gain=doom_terror::intensityGain(settings.chromaticAberrationIntensity);
+    if(gain<=0.f||!localTerrorView()||automapactive||menuactive||I_Render3DSettingsOpen()||
+       r_photoactive||director_watch||director_edit||director_menu||director_view_active||
+       wheelActive||Arcade_MenuOpen()||Menu_BrandOpen())
+        return 0.f;
+
+    float strength=mode==doom_terror::Cinematic||mode==doom_terror::Hybrid?0.25f:0.f;
+    const auto *player=dynamic?terrorPlayer():nullptr;
+    if(player&&terrorState.level==r_levelserial&&terrorState.actor==player->mo) {
+        // Cache the presentation fraction so a pause holds the last displayed envelope.
+        if(!paused)terrorState.renderedFraction=fraction;
+        const float t=terrorState.renderedFraction;
+        if(settings.chromaticLowHealth)strength+=terrorState.lowHealth.interpolate(t);
+        if(settings.chromaticDamageResponse)strength+=terrorState.damage.interpolate(t);
+    }
+    return std::min(strength,1.f)*gain*doom_terror::maxDisplacement1080;
+}
+
 static void beforeTic() {
+    updateTerror();
     if(!paused)tickBloodFootsteps();
     if(gamestate==GS_LEVEL&&!paused)tickHellfire();
     if(gamestate!=GS_LEVEL||!players[displayplayer].mo||paused) {tickTime=0;return;}
@@ -245,7 +320,7 @@ static int flashlightIlluminates(const mobj_t *monster) {
 void applySettings() {
     if(!settings.accelerated||!settings.blood||settings.goreLevel!=1||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
-    R_BeforeLevelReset=+[]{stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();};
+    R_BeforeLevelReset=+[]{resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -288,6 +363,12 @@ void applySettings() {
     st_helmet_style=settings.helmetFace;
     P_PeekOriginHook=I_Render3DPeekOrigin;
     R_BeforeTic=settings.accelerated?beforeTic:nullptr;
+    const bool dynamicTerror=settings.accelerated&&doom_terror::dynamicMode(settings.chromaticAberration)&&
+        doom_terror::intensityGain(settings.chromaticAberrationIntensity)>0.f;
+    if(!dynamicTerror)resetTerror();
+    if(!settings.chromaticDamageResponse)terrorState.damage={};
+    if(!settings.chromaticLowHealth)terrorState.lowHealth={};
+    R_PlayerTerrorDamage=dynamicTerror&&settings.chromaticDamageResponse?playerTerrorDamage:nullptr;
     awarenessBeam={};R_UpdateFlashlightAwareness=settings.accelerated&&settings.flashlightMonsterAwareness?updateFlashlightAwareness:nullptr;
     R_FlashlightIlluminates=settings.accelerated&&settings.flashlightMonsterAwareness?flashlightIlluminates:nullptr;
     R_WheelSlowMotion=+[]()->int{return wheelActive;};
@@ -404,6 +485,7 @@ static void clearLevelGeometry() {
     translucentWorld.clear();transferredSkies.clear();rubbleEmissionVertices.clear();
 }
 void sceneShutdown() {
+    R_PlayerTerrorDamage=nullptr;resetTerror();
     R_RevenantDeath=nullptr;resetRevenantSouls();
     R_VileHurt=nullptr;R_VileImpact=nullptr;resetVileEffects();
     P_WeakpointImpact=nullptr;P_WeakpointBleedVisual=nullptr;P_WeakpointBulletLocate=nullptr;P_WeakpointConfigureExtras(0,0);
@@ -909,6 +991,7 @@ FrameView prepareFrame(int w,int h) {
     if(profile.enabled) {recordProfile();profileAdd(profile.frame.prepareMs,prepareStart);}
     view.uiX=uiX;view.uiY=uiY;view.uiWidth=uiWidth;view.uiHeight=uiHeight;
     view.worldX=worldX;view.worldY=worldY;view.worldW=worldW;view.worldH=worldH;
+    view.chromaticDisplacement=chromaticDisplacement(fraction);
     return view;
 }
 std::vector<unsigned> hudPixels(const unsigned *pixels) {
@@ -1088,7 +1171,10 @@ void updateTitle(int width,int height,const char *renderer) {
 
 // Backend-independent parts of the renderer interface.
 using namespace doom3d;
-void I_Render3DStartFrame(void) {worldPending=false;v_overlayactive=false;}
+void I_Render3DStartFrame(void) {
+    worldPending=false;v_overlayactive=false;
+    if(settings.accelerated&&doom_terror::dynamicMode(settings.chromaticAberration))syncTerror(terrorPlayer());
+}
 #ifdef DOOM_TEST_DRIVER
 extern "C" void I_TestBundledModSettings() {
     int weapons=settings.fluidWeapons,sounds=settings.fluidSounds,monsters=settings.fluidMonsters;

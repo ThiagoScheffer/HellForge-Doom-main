@@ -11,6 +11,7 @@ extern int netgame,demoplayback,demorecording;
 #include <cstring>
 #include <string>
 #include "settings_panel.h"
+#include "terror_immersion.h"
 #include "game_profile.h"
 
 namespace doom3d {
@@ -48,6 +49,7 @@ const char *effectCost(const char *key) {
         {"reflections","HIGH GPU COST: renders the reflected scene again."},
         {"glass_reflections","HIGH GPU COST: another reflected scene when visible."},
         {"msaa","GPU COST rises with sample count and resolution."},
+        {"chromatic_aberration","GPU COST: two additional scene-color samples for affected peripheral pixels."},
         {"scale","GPU COST rises with resolution. 75%/50% are faster."},
         {"flashlight_shadows","VARIABLE COST: rises with things inside the beam."},
         {"sun_shadows","LOAD-TIME COST: sunlight is baked, not rebuilt every frame."},
@@ -134,7 +136,22 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Retro look",{
                 check("ps2_style","PS2-style filter",&s.ps2Style,"Chunkier surface textures, stepped shading and a subtle warm color finish. Keeps geometry, collision, HUD and menus unchanged. Off restores your normal rendering settings.",[](const Settings &d){return d.accelerated!=0;}),
                 check("retro","Retro scanlines",&s.retro,"Dark lines between the rows of the picture, like an old CRT monitor."),
-                check("palette","Doom palette colors",&s.palette,"Quantize the final lighting and fog to the current WAD palette.")}}}},
+                check("palette","Doom palette colors",&s.palette,"Quantize the final lighting and fog to the current WAD palette.")}},
+            {"Terror Immersion",{
+                choice("chromatic_aberration","Chromatic aberration",&s.chromaticAberration,
+                    {"Off","Cinematic","Terror","Hybrid"},
+                    {0,1,2,3},
+                    "Peripheral color separation. Cinematic is constant. Terror reacts to damage and low health. Hybrid combines both.",
+                    [](const Settings &d){return d.accelerated!=0;}),
+                slider("chromatic_aberration_intensity","Aberration intensity",&s.chromaticAberrationIntensity,0,100,5,
+                    "Controls peripheral color separation while keeping the center clear.",
+                    [](const Settings &d){return d.accelerated&&d.chromaticAberration!=doom_terror::Off;}),
+                check("chromatic_damage_response","Damage response",&s.chromaticDamageResponse,
+                    "Temporarily intensifies color separation after losing health.",
+                    [](const Settings &d){return d.accelerated&&doom_terror::dynamicMode(d.chromaticAberration);}),
+                check("chromatic_low_health","Low-health distortion",&s.chromaticLowHealth,
+                    "Gradually increases peripheral distortion as health decreases.",
+                    [](const Settings &d){return d.accelerated&&doom_terror::dynamicMode(d.chromaticAberration);})}}}},
         {"Gameplay",{
             {"Automap / Gameplay",{
                 check("enhanced_automap","Enhanced Automap",&s.enhancedAutomap,

@@ -88,6 +88,9 @@ struct Settings {
     int keyPickupHands=1;
     int helmetFace=0;
     int cornerPeek=1,peekLeft=29,peekRight=6; // SDL scancodes Z / C.
+    int chromaticAberration=0;
+    float chromaticAberrationIntensity=35.f;
+    int chromaticDamageResponse=1,chromaticLowHealth=1;
     int ps2Style=0; // Optional chunky texture / stepped-lighting preset.
     int detail=1; // Derived normal maps and palette gloss.
     int livingSurfaces=0,livingIntensity=2,livingMorph=1,livingPulse=1,livingWetness=1;
@@ -370,6 +373,8 @@ extern float pitch;
 struct FrameView {
     Uniforms camera;
     float uiX,uiY,uiWidth,uiHeight,worldX,worldY,worldW,worldH;
+    float chromaticDisplacement;
+    float speedrunHudRects[2][4]; // Render-target pixel bounds (left, top, right, bottom).
 };
 // frameMean and cycleMean (liquid flats only): the shown frames' average color
 // at the crossfade, and the whole animation's; cycleMean's alpha is how much
