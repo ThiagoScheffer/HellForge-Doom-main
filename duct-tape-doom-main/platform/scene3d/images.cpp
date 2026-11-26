@@ -654,14 +654,16 @@ Image &wallImage(int index) {
     int frameWidth=w,frameHeight=h;
     setWallImmersion(image,patches,owners,frame,frameWidth,frameHeight);
     image.switchIndicator=doom_switch_texture(name);
-    image.skyArtwork=classifySkyArtwork(image,index,name);
-    if(image.skyFingerprint!=0) {
+    image.skyArtwork=classifySkyArtwork(image);
+    if(image.skyArtwork!=SkyArtwork::Unknown) {
         const int lump=W_GetNumForName((char*)"PLAYPAL");
         if(W_LumpLength(lump)>=768) {
             const auto *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
             image.skyPalette=skyFingerprint(palette,768);
             if(gamemode==commercial&&image.skyArtwork==SkyArtwork::BrownClouds)
                 cacheSkyAtmosphere(image,palette);
+            else if(gamemode!=commercial)
+                cachePaintedSky(image,palette,name);
         }
     }
     if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode==commercial) {
@@ -1138,6 +1140,6 @@ Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
 
 void imagesShutdown() {
     monsterSkinReset();corpseDecayImageReset();monsterEyeInjuryReset();images.clear();
-    skyDepthCache={};skyAtmosphereCache={};cloudTexture=nullptr;
+    skyDepthCache={};skyAtmosphereCache.clear();cloudTexture=nullptr;
 }
 } // namespace doom3d

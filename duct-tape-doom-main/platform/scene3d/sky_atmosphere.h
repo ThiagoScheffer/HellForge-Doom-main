@@ -8,7 +8,10 @@ namespace doom3d {
 
 struct Image;
 
-enum class SkyAtmosphereKind : uint8_t { Legacy=0, DuskStorm=1, BurningCityDusk=2, InfernalAbyss=3, Count };
+enum class SkyAtmosphereKind : uint8_t {
+    Legacy, DuskStorm, BurningCityDusk, InfernalAbyss,
+    DoomMountains, DoomDeimos, DoomInferno, DoomOrange, Count
+};
 
 struct SkyAtmosphereProfile {
     SkyAtmosphereKind kind=SkyAtmosphereKind::Legacy;
@@ -16,6 +19,7 @@ struct SkyAtmosphereProfile {
     float coverage=0;
     float nearAltitude=2300,nearScale=7200,farScale=1;
     float nearOpacity=.82f,farOpacity=.64f,windSpeed=55;
+    float paintedSky=0, horizonFade=0, sceneryHaze=0;
 };
 
 // A Doom indexed image stores a palette index and a coverage byte per pixel.

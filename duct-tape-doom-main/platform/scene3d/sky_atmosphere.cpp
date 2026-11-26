@@ -2,8 +2,25 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
+#include <iterator>
 
 namespace doom3d {
+
+namespace {
+struct PaintedAtmosphere {
+    SkyAtmosphereKind kind;
+    float coverageBias, altitude, nearScale, farScale, nearOpacity, farOpacity, wind;
+    float paint, horizonFade, haze;
+};
+
+constexpr PaintedAtmosphere paintedProfiles[]={
+    {SkyAtmosphereKind::DoomMountains,.11f,2180,6800,1.18f,.82f,.76f,43,.56f,.12f,.045f},
+    {SkyAtmosphereKind::DoomDeimos,   .18f,2530,9400, .91f,.83f,.86f,61,.48f,.18f,.038f},
+    {SkyAtmosphereKind::DoomInferno,  .22f,1820,7900,1.26f,.85f,.85f,34,.53f,.24f,.035f},
+    {SkyAtmosphereKind::DoomOrange,   .12f,2320,11500,.82f,.86f,.78f,27,.63f,.22f,0},
+};
+}
 
 SkyAtmosphereProfile analyzeSkyAtmosphere(const uint8_t *indexed,int width,int height,
                                           const uint8_t *playpal,SkyAtmosphereKind kind) {
@@ -15,9 +32,12 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
                                                 SkyAtmosphereKind kind) {
     const bool city=kind==SkyAtmosphereKind::BurningCityDusk;
     const bool infernal=kind==SkyAtmosphereKind::InfernalAbyss;
-    const bool masked=city||infernal;
-    if((kind!=SkyAtmosphereKind::DuskStorm&&!masked)||!indexed||!playpal||width<=0||height<8||
-       (masked&&!skyMask))return {};
+    const auto *painted=std::find_if(std::begin(paintedProfiles),std::end(paintedProfiles),
+                                   [kind](const auto &tuning){return tuning.kind==kind;});
+    if(painted==std::end(paintedProfiles))painted=nullptr;
+    const bool masked=skyMask!=nullptr;
+    if((kind!=SkyAtmosphereKind::DuskStorm&&!city&&!infernal&&!painted)||
+       !indexed||!playpal||width<=0||height<8||((city||infernal)&&!masked))return {};
 
     using RGB=std::array<float,3>;
     struct Tone {RGB rgb;float luminance;int count=0;};
@@ -60,6 +80,7 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
                 for(int c=0;c<3;++c)profile.zenith[c]+=tone.rgb[c];
             } else if(infernal ? y>=height*3/8
                               : city ? (y>=height*7/16&&tone.rgb[0]-tone.rgb[2]>.10f&&tone.luminance>.19f)
+                              : painted&&masked ? y>=height/5
                            : y>=height-bandRows) {
                 ++bottom;
                 for(int c=0;c<3;++c)profile.horizon[c]+=tone.rgb[c];
@@ -99,7 +120,16 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
     profile.cloudDark=percentileColor(.08f,.30f);
     profile.cloudMiddle=percentileColor(.37f,.63f);
     profile.cloudLight=percentileColor(.70f,.91f);
-    if((profile.cloudLight[0]-profile.cloudDark[0])<.07f)return {};
+    if(painted) {
+        const RGB dim=percentileColor(.02f,.16f),bright=percentileColor(.82f,.97f);
+        float range=0;
+        for(int c=0;c<3;++c)range=std::max(range,std::abs(bright[c]-dim[c]));
+        if(range<.025f)return {};
+        for(int c=0;c<3;++c) {
+            profile.cloudDark[c]=.82f*dim[c];
+            profile.cloudLight[c]=bright[c];
+        }
+    } else if((profile.cloudLight[0]-profile.cloudDark[0])<.07f)return {};
     profile.coverage=std::clamp(float(varied)/total,.25f,.85f);
     if(city) {
         // Grade the sampled palette toward charcoal overhead and fire-warmed
@@ -138,6 +168,17 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
         profile.nearOpacity=.84f;
         profile.farOpacity=.80f;
         profile.windSpeed=29.f;
+    } else if(painted) {
+        profile.coverage=std::clamp(profile.coverage+painted->coverageBias,.36f,.83f);
+        profile.nearAltitude=painted->altitude;
+        profile.nearScale=painted->nearScale;
+        profile.farScale=painted->farScale;
+        profile.nearOpacity=painted->nearOpacity;
+        profile.farOpacity=painted->farOpacity;
+        profile.windSpeed=painted->wind;
+        profile.paintedSky=painted->paint;
+        profile.horizonFade=painted->horizonFade;
+        profile.sceneryHaze=painted->haze;
     }
     profile.kind=kind;
     return profile;

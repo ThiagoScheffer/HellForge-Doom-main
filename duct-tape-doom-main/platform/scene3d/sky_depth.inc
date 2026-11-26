@@ -5,15 +5,14 @@ struct SkyDepthCacheEntry {
     GpuTextureRef texture;
     SkyDepthScene scene;
 };
-static std::array<std::array<SkyDepthCacheEntry,2>,(size_t)SkyArtwork::Count> skyDepthCache;
+static std::array<SkyDepthCacheEntry,(size_t)SkyArtwork::Count> skyDepthCache;
 struct SkyAtmosphereCacheEntry {
-    bool attempted=false;
     SkyAtmosphereProfile profile;
+    SkyPaintedScenery scenery;
 };
-// Each kind below maps to exactly one composite fingerprint, dimensions and
-// PLAYPAL. Analyzer changes ship with the executable, so this in-memory
-// cache cannot reuse results from an older analyzer.
-static std::array<SkyAtmosphereCacheEntry,(size_t)SkyAtmosphereKind::Count> skyAtmosphereCache;
+// Only validated 256x128 composites using stock PLAYPAL enter this cache.
+// Distinct composites of the same sky fit the same tuning without sharing masks.
+static std::unordered_map<uint64_t,SkyAtmosphereCacheEntry> skyAtmosphereCache;
 std::array<float,3> skyDepthOrigin{};
 static constexpr uint64_t stockSkyPalette=0x43701a484700347fULL;
 
@@ -23,40 +22,20 @@ static uint64_t skyFingerprint(const byte *pixels,size_t count) {
     return hash;
 }
 
-static SkyArtwork classifySkyArtwork(Image &image,int index,const char *name) {
-    if(SDL_strncasecmp(name,"SKY",3)!=0||name[3]<'1'||name[3]>'4'||name[4])return SkyArtwork::Unknown;
-    image.skyFingerprint=skyFingerprint(image.pixels.data(),image.pixels.size());
-    if(name[3]=='4') {
-        // Ultimate Doom's cloud-only sky must come from the original retail
-        // data, including the composite and every patch. Verify its colors too.
-        if(gamemode!=retail||!R_TextureFromBaseWad(index))return SkyArtwork::Unknown;
-        int lump=W_GetNumForName((char*)"PLAYPAL");
-        if(W_LumpLength(lump)<768)return SkyArtwork::Unknown;
-        const byte *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
-        size_t covered=0,warm=0;
-        for(size_t i=0;i<image.pixels.size();i+=2) {
-            if(image.pixels[i+1]!=255)continue;
-            ++covered;
-            const byte *rgb=palette+3*image.pixels[i];
-            warm+=rgb[0]>80&&rgb[0]>rgb[2]+28&&rgb[0]>rgb[1]+10;
-        }
-        return covered>=image.pixels.size()*7/16&&warm>=covered/8?SkyArtwork::OrangeClouds:SkyArtwork::Unknown;
-    }
+static SkyArtwork classifySkyArtwork(Image &image) {
     if(image.width!=256||image.height!=128)return SkyArtwork::Unknown;
+    image.skyFingerprint=skyFingerprint(image.pixels.data(),image.pixels.size());
     switch(image.skyFingerprint) {
         case 0x4903f3c6668a384eULL: // Registered Doom's SKY1 composite starts eight rows early.
-        case 0xbc9519b06539ef69ULL: if(name[3]=='1')return SkyArtwork::ColdMountains; break;
-        case 0xb451911c760f176eULL: if(name[3]=='2')return SkyArtwork::RedMountains; break;
-        case 0x43e2c7f2a7d8837cULL: if(name[3]=='3')return SkyArtwork::Inferno; break;
-        case 0x85864a7716794480ULL: if(name[3]=='1')return SkyArtwork::BrownClouds; break;
-        case 0x69c14db637c6ce05ULL: if(name[3]=='2')return SkyArtwork::BurningCity; break;
-        case 0xe75fd27cf7bfebc8ULL: if(name[3]=='3')return SkyArtwork::BloodHell; break;
+        case 0xbc9519b06539ef69ULL: return SkyArtwork::ColdMountains;
+        case 0xb451911c760f176eULL: return SkyArtwork::RedMountains;
+        case 0x43e2c7f2a7d8837cULL: return SkyArtwork::Inferno;
+        case 0xef99d3d0fc56c3abULL: return SkyArtwork::OrangeClouds;
+        case 0x85864a7716794480ULL: return SkyArtwork::BrownClouds;
+        case 0x69c14db637c6ce05ULL: return SkyArtwork::BurningCity;
+        case 0xe75fd27cf7bfebc8ULL: return SkyArtwork::BloodHell;
     }
     return SkyArtwork::Unknown;
-}
-
-bool skyDepthCloudOnly(SkyArtwork artwork) {
-    return artwork==SkyArtwork::OrangeClouds||artwork==SkyArtwork::BrownClouds;
 }
 
 // A profile scores colors for a boundary search, never defines a mask.
@@ -146,24 +125,40 @@ static float skyLuma(const byte *rgb) {
 
 static SkyAtmosphereKind atmosphereKind(const Image &sky) {
     if(sky.skyPalette!=stockSkyPalette)return SkyAtmosphereKind::Legacy;
-    if(sky.skyArtwork==SkyArtwork::BrownClouds)return SkyAtmosphereKind::DuskStorm;
-    if(sky.skyArtwork==SkyArtwork::BurningCity)return SkyAtmosphereKind::BurningCityDusk;
-    if(sky.skyArtwork==SkyArtwork::BloodHell)return SkyAtmosphereKind::InfernalAbyss;
-    return SkyAtmosphereKind::Legacy;
+    switch(sky.skyArtwork) {
+        case SkyArtwork::BrownClouds: return SkyAtmosphereKind::DuskStorm;
+        case SkyArtwork::BurningCity: return SkyAtmosphereKind::BurningCityDusk;
+        case SkyArtwork::BloodHell: return SkyAtmosphereKind::InfernalAbyss;
+        case SkyArtwork::ColdMountains: return SkyAtmosphereKind::DoomMountains;
+        case SkyArtwork::RedMountains: return SkyAtmosphereKind::DoomDeimos;
+        case SkyArtwork::Inferno: return SkyAtmosphereKind::DoomInferno;
+        case SkyArtwork::OrangeClouds: return SkyAtmosphereKind::DoomOrange;
+        default: return SkyAtmosphereKind::Legacy;
+    }
 }
 
 const SkyAtmosphereProfile *skyAtmosphereProfile(const Image &sky) {
-    const auto &profile=skyAtmosphereCache[(size_t)atmosphereKind(sky)].profile;
-    return profile.kind==SkyAtmosphereKind::Legacy?nullptr:&profile;
+    if(sky.skyPalette!=stockSkyPalette)return nullptr;
+    const auto cached=skyAtmosphereCache.find(sky.skyFingerprint);
+    if(cached==skyAtmosphereCache.end()||cached->second.profile.kind==SkyAtmosphereKind::Legacy||
+       cached->second.profile.kind!=atmosphereKind(sky))return nullptr;
+    return &cached->second.profile;
+}
+
+const SkyPaintedScenery *skyPaintedScenery(const Image &sky) {
+    const auto cached=skyAtmosphereCache.find(sky.skyFingerprint);
+    return cached!=skyAtmosphereCache.end()&&cached->second.scenery.texture?&cached->second.scenery:nullptr;
 }
 
 static const SkyAtmosphereProfile &cacheSkyAtmosphere(const Image &sky,const byte *palette,
                                                        const byte *mask=nullptr) {
+    static const SkyAtmosphereProfile invalid;
     const auto kind=atmosphereKind(sky);
-    auto &cached=skyAtmosphereCache[(size_t)kind];
-    if(cached.attempted||kind==SkyAtmosphereKind::Legacy)return cached.profile;
+    if(kind==SkyAtmosphereKind::Legacy)return invalid;
+    auto [entry,added]=skyAtmosphereCache.try_emplace(sky.skyFingerprint);
+    auto &cached=entry->second;
+    if(!added)return cached.profile;
     cached.profile=analyzeMaskedSkyAtmosphere(sky.pixels.data(),sky.width,sky.height,palette,mask,kind);
-    cached.attempted=true;
     if(devparm&&kind==SkyAtmosphereKind::BurningCityDusk) {
         const auto &p=cached.profile;
         if(p.kind==SkyAtmosphereKind::Legacy)fprintf(stderr,"Sky A2: RSKY2 atmosphere mask rejected.\n");
@@ -175,6 +170,56 @@ static const SkyAtmosphereProfile &cacheSkyAtmosphere(const Image &sky,const byt
     return cached.profile;
 }
 
+static void cachePaintedSky(const Image &sky,const byte *palette,const char *name) {
+    const auto kind=atmosphereKind(sky);
+    if(kind<SkyAtmosphereKind::DoomMountains||skyAtmosphereCache.count(sky.skyFingerprint))return;
+    const auto start=SDL_GetPerformanceCounter();
+    const int w=sky.width,h=sky.height;
+    if(kind==SkyAtmosphereKind::DoomOrange) {
+        cacheSkyAtmosphere(sky,palette);
+    } else {
+        auto skyline=findSkyline(sky,palette);
+        if(!skyline.empty()) {
+            if(kind==SkyAtmosphereKind::DoomInferno) {
+                // Include the low pillars across the valley where dark cloud
+                // and lit rock use the same red ramp. Only extend the mask
+                // upward in this section of the verified stock painting.
+                constexpr int valley[][2]={{72,48},{84,55},{107,77},{115,58},{121,49},{129,47},{135,50},{146,70}};
+                for(size_t i=1;i<std::size(valley);++i) {
+                    const auto &a=valley[i-1],&b=valley[i];
+                    for(int x=a[0];x<=b[0];++x)
+                        skyline[x]=std::min(skyline[x],a[1]+(b[1]-a[1])*(x-a[0])/(b[0]-a[0]));
+                }
+            }
+            std::vector<byte> mask(size_t(w)*h),layers(mask.size()*2);
+            for(int x=0;x<w;++x) {
+                const int ridge=skyline[x];
+                byte last=0;
+                for(int y=0;y<h;++y) {
+                    const size_t at=size_t(y)*w+x;
+                    if(sky.pixels[2*at+1]==255)last=sky.pixels[2*at];
+                    mask[at]=y<ridge-2?255:0;
+                    layers[2*at]=last;
+                    layers[2*at+1]=byte(std::clamp(128+(y-ridge)*96,0,255));
+                }
+            }
+            const auto &profile=cacheSkyAtmosphere(sky,palette,mask.data());
+            if(profile.kind!=SkyAtmosphereKind::Legacy) {
+                auto &cached=skyAtmosphereCache.at(sky.skyFingerprint);
+                cached.scenery.texture=gpuCreateTexture(GpuFormat::RG8,w,h,layers.data(),w*2);
+                cached.scenery.firstRow=float(*std::min_element(skyline.begin(),skyline.end())-2)/h;
+                if(!cached.scenery.texture)cached.profile={};
+            }
+        } else skyAtmosphereCache.try_emplace(sky.skyFingerprint);
+    }
+    if(devparm) {
+        const auto *profile=skyAtmosphereProfile(sky);
+        const double ms=(SDL_GetPerformanceCounter()-start)*1000.0/SDL_GetPerformanceFrequency();
+        fprintf(stderr,"Sky environment: %s %dx%d %016llx / %016llx, %s, coverage %.3f, %.2f ms.\n",
+                name,w,h,(unsigned long long)sky.skyFingerprint,(unsigned long long)sky.skyPalette,
+                profile?"Doom atmosphere":"legacy fallback",profile?profile->coverage:0.f,ms);
+    }
+}
 #include "sky_depth_city.inc"
 #include "sky_depth_mountains.inc"
 
@@ -277,58 +322,44 @@ static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const
     return layers;
 }
 
-static const SkyDepthCacheEntry &loadSkyDepth(const Image &sky,bool deep) {
+static const SkyDepthCacheEntry &loadSkyDepth(const Image &sky) {
     static const SkyDepthCacheEntry invalid{};
     if(sky.skyPalette!=stockSkyPalette)return invalid;
-    auto &cached=skyDepthCache[(size_t)sky.skyArtwork][deep?1:0];
+    auto &cached=skyDepthCache[(size_t)sky.skyArtwork];
     if(cached.attempted)return cached;
     cached.attempted=true;
     const int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
-    if(deep)if(const auto *profile=skyMountainProfile(sky)) {
+    if(const auto *profile=skyMountainProfile(sky)) {
         cached.scene=buildSkyDepthMountains(sky,palette,*profile);
         if(cached.scene.atlas)return cached;
         if(devparm)fprintf(stderr,"Sky A5: mountain profile rejected; using legacy SKY3.\n");
     }
-    const bool cloudOnly=skyDepthCloudOnly(sky.skyArtwork);
+    const bool cloudOnly=sky.skyArtwork==SkyArtwork::BrownClouds;
     const auto skyline=cloudOnly?std::vector<int>{}:findSkyline(sky,palette);
     if(!cloudOnly&&skyline.empty()) {
-        if(deep&&sky.skyArtwork==SkyArtwork::BurningCity&&devparm)
+        if(sky.skyArtwork==SkyArtwork::BurningCity&&devparm)
             fprintf(stderr,"Sky depth: RSKY2 skyline confidence too low.\n");
         return cached;
     }
 
     const int w=sky.width,h=sky.height;
-    if(deep) {
-        const bool city=sky.skyArtwork==SkyArtwork::BurningCity;
-        const auto buildings=city?segmentSkyBuildings(sky,palette,skyline):std::vector<SkyDepthBuilding>{};
-        auto layers=buildDeepSky(sky,palette,skyline,buildings);
-        if(city) {
-            cached.scene=buildSkyDepthCity(sky,palette,skyline,buildings,layers);
-            if(cached.scene.atlas)return cached;
-            if(layers.size()!=(size_t)w*h*4)layers=buildDeepSky(sky,palette,skyline,buildings);
-        }
-        cached.texture=gpuCreateTexture(GpuFormat::RGBA8,w,h,layers.data(),w*4);
-        return cached;
+    const bool city=sky.skyArtwork==SkyArtwork::BurningCity;
+    const auto buildings=city?segmentSkyBuildings(sky,palette,skyline):std::vector<SkyDepthBuilding>{};
+    auto layers=buildDeepSky(sky,palette,skyline,buildings);
+    if(city) {
+        cached.scene=buildSkyDepthCity(sky,palette,skyline,buildings,layers);
+        if(cached.scene.atlas)return cached;
+        if(layers.size()!=(size_t)w*h*4)layers=buildDeepSky(sky,palette,skyline,buildings);
     }
-    std::vector<byte> layers((size_t)w*h*2);
-    for(int x=0;x<w;++x)for(int y=0;y<h;++y) {
-        const int distance=y-skyline[x];
-        // Behind the cutout, extend a short strip of clean sky. Motion falls
-        // to zero near the cutout, so this fill is only exposed by filtering.
-        const int source=distance<0?y:std::max(0,skyline[x]-1-std::min(distance,h/12));
-        const size_t at=2*((size_t)y*w+x);
-        layers[at]=sky.pixels[2*((size_t)source*w+x)];
-        layers[at+1]=(byte)std::clamp(134+distance*12,0,255);
-    }
-    cached.texture=gpuCreateTexture(GpuFormat::RG8,w,h,layers.data(),w*2);
+    cached.texture=gpuCreateTexture(GpuFormat::RGBA8,w,h,layers.data(),w*4);
     return cached;
 }
 
-const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep) {
-    return loadSkyDepth(sky,deep).texture;
+const GpuTextureRef &skyDepthTexture(const Image &sky) {
+    return loadSkyDepth(sky).texture;
 }
 
 const SkyDepthScene &skyDepthScene(const Image &sky) {
-    return loadSkyDepth(sky,true).scene;
+    return loadSkyDepth(sky).scene;
 }

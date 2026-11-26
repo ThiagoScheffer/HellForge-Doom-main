@@ -277,12 +277,13 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         bool eclipse=settings.hellBloodEclipse&&skyMode==4&&(artwork==SkyArtwork::Inferno||artwork==SkyArtwork::BloodHell);
         SDL_GPUTexture *depthArt=gpu(skyArt.texture);
         float depthMode=0.0f;
-        const bool legacyDepth=settings.artworkSkyDepth||settings.atmosphericCloudDepth;
         const bool doom2Art=artwork==SkyArtwork::BrownClouds||artwork==SkyArtwork::BurningCity||artwork==SkyArtwork::BloodHell;
+        const bool environment=settings.doom2DeepSky&&skyMode>=2;
         const SkyDepthScene *depthScene=nullptr;
+        const SkyPaintedScenery *paintedScenery=nullptr;
         const SkyAtmosphereProfile *atmosphere=nullptr;
         bool deep=false;
-        if(settings.doom2DeepSky&&gamemode==commercial&&doom2Art&&skyMode>=2) {
+        if(environment&&gamemode==commercial&&doom2Art) {
             if(artwork==SkyArtwork::BurningCity||artwork==SkyArtwork::BloodHell) {
                 const auto &scene=skyDepthScene(skyArt);
                 if(scene.atlas) {
@@ -293,22 +294,19 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
                     if(scene.farRadius>0.0f)atmosphere=skyAtmosphereProfile(skyArt);
                 }
             } else atmosphere=skyAtmosphereProfile(skyArt);
-            if(!deep&&!atmosphere)if(const auto &layers=skyDepthTexture(skyArt,true)) {
+            if(!deep&&!atmosphere)if(const auto &layers=skyDepthTexture(skyArt)) {
                 depthArt=gpu(layers);
                 depthMode=artwork==SkyArtwork::BurningCity?3.0f:artwork==SkyArtwork::BloodHell?4.0f:1.0f;
                 deep=true;
             }
-        }
-        if(!deep&&!atmosphere&&legacyDepth&&skyMode>=2&&artwork!=SkyArtwork::Unknown) {
-            if(skyDepthCloudOnly(artwork))depthMode=1.0f;
-            else if(const auto &layers=skyDepthTexture(skyArt)) {
-                depthArt=gpu(layers);
-                depthMode=artwork==SkyArtwork::BurningCity?3.0f:artwork==SkyArtwork::BloodHell?4.0f:2.0f;
+        } else if(environment&&gamemode!=commercial&&!doom2Art) {
+            atmosphere=skyAtmosphereProfile(skyArt);
+            if(atmosphere) {
+                paintedScenery=skyPaintedScenery(skyArt);
+                if(paintedScenery)depthArt=gpu(paintedScenery->texture);
             }
         }
-        // A failed extraction leaves the legacy sky in control, as does
-        // unrecognized artwork. Cloud-only skies need no skyline cutout.
-        int clouds=(settings.atmosphericCloudDepth||deep)&&depthMode>0.0f?(int)artwork:0;
+        int clouds=deep&&depthMode>0.0f?(int)artwork:0;
         SkyUniforms uniforms{};
         auto *legacy=uniforms.legacy;
         legacy[0]=(float)skyMode;
@@ -317,7 +315,6 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         legacy[3]=depthMode;
         legacy[4]=(float)clouds;
         legacy[5]=deep?1.0f:0.0f;
-        legacy[6]=legacyDepth&&depthMode==4.0f?1.0f:0.0f;
         if(depthScene||atmosphere)std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),legacy+8);
         if(depthScene) {
             legacy[11]=depthScene->firstRow;
@@ -328,20 +325,22 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
                 return std::array<float,4>{color[0],color[1],color[2],value};
             };
             uniforms.horizon=pack(atmosphere->horizon,atmosphere->coverage);
-            uniforms.zenith=pack(atmosphere->zenith,(float)atmosphere->kind);
+            uniforms.zenith=pack(atmosphere->zenith,1.0f);
             uniforms.dark=pack(atmosphere->cloudDark,atmosphere->nearOpacity);
             uniforms.middle=pack(atmosphere->cloudMiddle,atmosphere->farOpacity);
             uniforms.light=pack(atmosphere->cloudLight,atmosphere->windSpeed);
-            uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,0};
-            uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
+            uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,atmosphere->paintedSky};
+            uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],atmosphere->horizonFade,atmosphere->sceneryHaze};
             if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,
                                            float(depthScene->style),depthScene->backdropOpacity};
+            if(paintedScenery)uniforms.scenery={0,paintedScenery->firstRow,0,1};
         }
-        if(settings.skyFireSmoke&&settings.doom2DeepSky&&skyMode>=2) {
+        if(settings.skyFireSmoke&&(deep||atmosphere)) {
             if(const auto *effects=skyFireSmokeData(skyArt,uniforms.scenery[0]>0.f)) {
                 uniforms.fireSmoke=*effects;
                 std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),legacy+8);
-                uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
+                uniforms.wind[0]=skyAtmosphereHeading[0];
+                uniforms.wind[1]=skyAtmosphereHeading[1];
             }
         }
         SDL_PushGPUFragmentUniformData(command,3,&uniforms,sizeof(uniforms));

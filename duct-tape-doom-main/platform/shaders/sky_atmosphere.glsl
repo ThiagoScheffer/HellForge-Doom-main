@@ -5,7 +5,7 @@ struct SkyAtmosphereResult {
 };
 
 vec3 skyAtmosphereBase(vec3 ray) {
-    float elevation=smoothstep(-.20,.97,ray.z);
+    float elevation=smoothstep(-.20-atmosphereWind.z,.97,ray.z);
     return mix(atmosphereHorizon.rgb,atmosphereZenith.rgb,elevation);
 }
 
@@ -57,7 +57,7 @@ SkyAtmosphereResult renderSkyAtmosphere(vec3 behind,vec3 ray,float angle,vec3 li
     float time=c.fog.w;
     vec2 drift=atmosphereWind.xy*(atmosphereLight.w*time);
     float elevation=ray.z;
-    float farVisibility=smoothstep(-.55,-.06,elevation)*(1.0-smoothstep(.79,1.0,elevation));
+    float farVisibility=smoothstep(-.55,-.06-atmosphereWind.z,elevation)*(1.0-smoothstep(.79,1.0,elevation));
     float farAlpha=0.0;
     vec3 farColor=vec3(0.0);
     if(farVisibility>.0001&&atmosphereMiddle.w>0.0) {

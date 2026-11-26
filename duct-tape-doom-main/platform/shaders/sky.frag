@@ -25,12 +25,12 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 depthOrigin; // xyz reference, w normalized top of extracted artwork
     vec4 depthShells; // middle/near radii, then middle/near thickness
     vec4 atmosphereHorizon; // RGB, estimated cloud coverage
-    vec4 atmosphereZenith; // RGB, atmosphere kind (zero uses legacy)
+    vec4 atmosphereZenith; // RGB, atmosphere enabled
     vec4 atmosphereDark; // RGB, near opacity
     vec4 atmosphereMiddle; // RGB, far opacity
     vec4 atmosphereLight; // RGB, wind speed in map units per second
-    vec4 atmosphereProjection; // near height, near scale, far scale
-    vec4 atmosphereWind; // fixed per-level wind heading in XY
+    vec4 atmosphereProjection; // near height, near scale, far scale, painted sky blend
+    vec4 atmosphereWind; // wind heading in XY, horizon fade, painted scenery haze
     vec4 sceneryProjection; // far radius, normalized skyline top, style, backdrop opacity
     vec4 fireHeader; // count, nearest radius (without scenery), wind speed, haze blend
     vec4 fireSmokeDark,fireSmokeWarm,fireFlameOuter,fireFlameCore;
@@ -188,10 +188,16 @@ void main() {
     bool depthBand=depthScene&&v>=depthOrigin.w-.09;
     SkyScenerySamples scenery=sampleSkyScenery(depthBand,angle,rise,ray.xy/horizontal,uv,v,ivec2(size),filtered);
     SkyShellSample middle=scenery.middle,near=scenery.near;
+    bool paintedScenery=useAtmosphere&&!composedScenery&&sceneryProjection.w>0.0;
+    vec4 painting=vec4(0.0);
+    if(paintedScenery&&v>=sceneryProjection.y&&v<1.22) {
+        painting=skySceneryBackdrop(uv,ivec2(size));
+        painting.a*=1.0-smoothstep(.99,1.22,v);
+    }
     vec4 color;
     vec2 artworkData=vec2(0.0);
     float foregroundMask=near.coverage+(1.0-near.coverage)*middle.coverage;
-    bool obscured=composedScenery&&(foregroundMask>=1.0||scenery.far.alpha>=1.0);
+    bool obscured=painting.a>=1.0||(composedScenery&&(foregroundMask>=1.0||scenery.far.alpha>=1.0));
 #if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG == 1
     if(composedScenery)obscured=false;
 #endif
@@ -201,6 +207,14 @@ void main() {
     if(useAtmosphere) {
         color=vec4(skyAtmosphereBase(ray),1.0);
         low=atmosphereHorizon.rgb;
+        if(atmosphereProjection.w>0.0&&!obscured) {
+            // The original painting contributes its stationary palette and
+            // shapes where the cylinder has art. The cloud layers extend
+            // from the horizon through the zenith on their own projections.
+            float paint=atmosphereProjection.w*smoothstep(.015,.32,v)*
+                        (1.0-smoothstep(.90,1.12,v))*(1.0-painting.a);
+            if(paint>.001)color.rgb=mix(color.rgb,paintedSky(uv,size,filtered).rgb,paint);
+        }
         cloudArt=color.rgb;
     } else {
         if(depthScene) {
@@ -324,7 +338,7 @@ void main() {
         if(!obscured) {
             // Celestial light enters the atmosphere from behind both layers.
             if(!eclipse&&c.fx2.w>0.0)color.rgb=skyVisibleSun(color.rgb,ray,1.0);
-            vec3 key=mountains&&eclipse?bloodEclipseCenter(eclipseRidge>0.0):
+            vec3 key=(mountains||paintedScenery)&&eclipse?bloodEclipseCenter(eclipseRidge>0.0):
                 c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
             vec3 stormLight=vec3(0.0);
             if(c.weather.w>0.0) {
@@ -416,6 +430,9 @@ void main() {
         return;
 #endif
         color.rgb=composeSkyScenery(color.rgb,scenery,low,v,effects,ivec2(size));
+    } else if(paintedScenery) {
+        color.rgb=skyCompositeOver(color.rgb,SkyLayerSample(
+            sceneryAir(painting.rgb,low,atmosphereWind.w,v),painting.a));
     } else if(depthBand) {
         for(int layer=0;layer<2;++layer) {
             SkyShellSample surface=layer==0?middle:near;

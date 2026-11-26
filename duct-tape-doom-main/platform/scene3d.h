@@ -168,8 +168,6 @@ struct Settings {
     int infernoTreeStrikes=1; // D3: cosmetic, sky-exposed burnt-tree strikes in Inferno; no damage.
     int immersiveSky=0; // Milestone C sky profiles: 0 Off, 1 Auto, 2 Rocky, 3 Ice, 4 Inferno, 5 City.
     int hellBloodEclipse=0;
-    int artworkSkyDepth=0;
-    int atmosphericCloudDepth=0;
     int doom2DeepSky=0;
     int skyFireSmoke=0;
     int decorationAmbience=0; // Cosmetic corpse/decor ambience; off by default.
@@ -398,8 +396,12 @@ void applySettings();
 void settingsChanged();
 void buildCloudTexture();
 Image &wallImage(int index);
-bool skyDepthCloudOnly(SkyArtwork artwork);
-const GpuTextureRef &skyDepthTexture(const Image &sky,bool deep=false);
+const GpuTextureRef &skyDepthTexture(const Image &sky);
+struct SkyPaintedScenery {
+    GpuTextureRef texture;
+    float firstRow=0;
+};
+const SkyPaintedScenery *skyPaintedScenery(const Image &sky);
 // Atlas and projection data shared by every pass that draws a depth scene.
 struct SkyDepthScene {
     GpuTextureRef atlas;

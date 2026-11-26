@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="e822107c1a9f6d130073b22d792cc5ff869d321e8bc2ccd86eba4c2f2e101fde">
+<settings source="platform/settings_panel.cpp" source_sha256="53a655e2d9c958764860594df8bb2aa1cc960a0c35240d92bc75b0aa94138e56">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -193,9 +193,7 @@
   <option key="sun_scatter" title="Sunbeam scattering" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="immersive_sky" title="Immersive sky environment" category="Atmosphere" kind="choice" choices="0=Off (original sky)|1=Auto (DOOM episodes)|2=Rocky mountains|3=Ice mountains|4=Inferno|5=Burning city" />
   <option key="hell_blood_eclipse" title="Hell Blood Eclipse" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="artwork_sky_depth" title="Artwork-Aware Sky Depth" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="atmospheric_cloud_depth" title="Atmospheric Cloud Depth" category="Atmosphere" kind="check" choices="0=Off|1=On" />
-  <option key="doom2_deep_sky" title="DOOM II Deep Sky Environment" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="doom2_deep_sky" title="Sky Environment 2.0" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sky_fire_smoke" title="Sky Fire &amp; Smoke" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_disc" title="Sun in the sky" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="dust_motes" title="Dust motes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
