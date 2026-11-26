@@ -68,7 +68,8 @@ layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
 // over its whole animation; cycleMean.a is the contrast it keeps far away,
 // 0 for everything that is not a liquid (surfaceBinding in scene3d/scene.cpp).
 // frameMean.a packs material (bits 0-3), worn plates (bit 4) and Living
-// Surface profile (bits 5-8) and wall-eye map (bit 9), assigned by surfaceBinding.
+// Surface profile (bits 5-8), wall-eye map (bit 9) and procedural liquid
+// material (bits 10-11), assigned by surfaceBinding.
 // World wall eyes use weaponProbe[0].xyz for the gameplay eye position.
 // Profiled nonliquids store patch bounds in frameMean.rgb and cycleMean.r,
 // and the artwork variant in cycleMean.g.
@@ -84,6 +85,7 @@ layout(location=0) out vec4 outColor;
 #include "world/surface.glsl"
 #include "living_surfaces.h"
 #include "world/living_surfaces.glsl"
+#include "world/liquid_bubbles.glsl"
 #include "world/glass.glsl"
 #include "world/bake.glsl"
 #include "world/sector_light.glsl"
@@ -242,6 +244,20 @@ void main() {
         living=livingSurface((surfaceMeta>>5u)&LS_PROFILE_MASK,mapFlags,uv,texelPixel,lod,footprint,normal,dp1,dp2,duv1,duv2,color.rgb);
         if(wallEyeMap&&weaponProbe[0].w>0.0&&!isGlass(vUV))
             wallEyeLight=wallEyeShading(mapFlags,footprint,dp1,dp2,duv1,duv2,color.rgb);
+
+        uint liquidKind=(surfaceMeta>>LS_LIQUID_SHIFT)&LS_LIQUID_MASK;
+        if(liquidKind!=LS_LIQUID_NONE&&normal.z>0.5&&
+           (vMode&(MODE_LIQUID|MODE_SCREEN|MODE_EXCAVATED_FLAT))==MODE_LIQUID) {
+            float planeFootprint=max(length(dp1.xy),length(dp2.xy));
+            living=liquidBubbleSurface(liquidKind,mapFlags,vWorld.xy,
+                length(vWorld-c.eye.xyz),planeFootprint,c.fog.w,color.rgb);
+            if(any(notEqual(living.slope,vec2(0)))) {
+                vec3 tangent,bitangent;
+                textureFrame(normal,dp1,dp2,duv1,duv2,tangent,bitangent);
+                vec3 gradient=vec3(living.slope,0.0);
+                living.slope=vec2(dot(gradient,tangent),dot(gradient,bitangent));
+            }
+        }
     }
     uint sector=(vMode>>MODE_SECTOR_SHIFT)-1u;
     // Excavation changes the slope, not the source lightmap. Steep crater
@@ -252,7 +268,7 @@ void main() {
     // Weather and wear (world/wear.glsl): streaks and wet ground.
     Wear wear=Wear(0.0,0.0,false,0.0,0.0);
     if(mapped&&!blood&&!glassy&&cycleMean.a==0.0) wear=surfaceWear(vWorld,normal,sector,bakeFlags);
-    // Worn plates are bit 4; higher bits carry Living Surface profiles.
+    // Worn plates are marked in bit 4.
     if(mapped&&!blood&&!glassy&&(surfaceMeta&16u)!=0u) {
         wear.grime=plateGrime(vUV,vWorld,normal,sector,vStatic);plateWear=wear.grime;
     }

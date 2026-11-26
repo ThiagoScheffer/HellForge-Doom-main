@@ -97,6 +97,7 @@ struct Settings {
     int detail=1; // Derived normal maps and palette gloss.
     int livingSurfaces=0,livingIntensity=2,livingMorph=1,livingPulse=1,livingWetness=1;
     int textureWallBlood=1,textureWallAmbience=1,textureSkullEyes=1,textureReactiveEyes=1;
+    int textureAcidBubbles=1,textureLavaBubbles=1;
     int variedHighlights=1; // Gloss highlights tighten on smooth artwork and spread on busy artwork, per palette ramp.
     int unevenTiles=1; // Tiles painted into floors each lie a little crooked, with a lit or shadowed lip where they meet.
     int unevenWalls=1; // The same for the tiles, plates and bricks painted into walls and ceilings.

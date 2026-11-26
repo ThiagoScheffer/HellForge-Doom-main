@@ -34,4 +34,11 @@
 #define LS_WALL_EYE_MAP 512u
 #define LS_PROFILE_MASK  15u
 
+// frameMean.a bits 10-11 identify the procedural liquid bubble material.
+#define LS_LIQUID_SHIFT 10u
+#define LS_LIQUID_MASK   3u
+#define LS_LIQUID_NONE   0u
+#define LS_LIQUID_ACID   1u
+#define LS_LIQUID_LAVA   2u
+
 #endif

@@ -639,6 +639,14 @@ static bool poolWallGlow(int texture) {
            Game_AmbientWall(name)==AMBIENT_SLIMEFALL||strncmp(name,"LAVA",4)==0||
            strncmp(name,"BLAVA",5)==0||strncmp(name,"BFALL",5)==0;
 }
+static unsigned liquidBubbleMaterial(int pic) {
+    if(pic<0||pic>=numflats)return LS_LIQUID_NONE;
+    const char *name=lumpinfo[firstflat+pic].name;
+    if(!strncmp(name,"NUKAGE",6)&&name[6]>='1'&&name[6]<='3'&&name[7]==0)return LS_LIQUID_ACID;
+    if(!strncmp(name,"LAVA",4)&&name[4]>='1'&&name[4]<='4'&&name[5]==0)return LS_LIQUID_LAVA;
+    return LS_LIQUID_NONE;
+}
+
 // Binds a batch texture with its next animation frame and crossfade amount.
 // The engine switches frames before leveltime++, so the phase uses leveltime-1.
 SurfaceBinding surfaceBinding(int key) {
@@ -659,7 +667,8 @@ SurfaceBinding surfaceBinding(int key) {
     }
     SurfaceBinding binding={&image,next,blend};
     // frameMean.a is an exact small integer: base material in bits 0-3,
-    // worn plates in bit 4, Living Surface profile in bits 5-8, wall eyes in bit 9.
+    // worn plates in bit 4, Living Surface profile in bits 5-8, wall eyes in bit 9,
+    // and procedural liquid material in bits 10-11.
     unsigned metadata=(unsigned)std::lround(surfaceMaterial(sourceKey,pic,flat));
     if(settings.wornPlates&&wornPlate(sourceKey,pic,flat)) metadata|=16u;
     float floor=flat?liquidDetailFloor(pic):0;
@@ -681,6 +690,13 @@ SurfaceBinding surfaceBinding(int key) {
             if(const mobj_t *player=viewer.mo)
                 binding.wallEyeViewer={units(player->x),units(player->y),units(viewer.viewz),1};
         }
+    }
+    if(settings.livingSurfaces&&flat&&speed>0&&floor==1.f) {
+        const unsigned kind=liquidBubbleMaterial(pic);
+        const bool enabled=(kind==LS_LIQUID_ACID&&settings.textureAcidBubbles)||
+                           (kind==LS_LIQUID_LAVA&&settings.textureLavaBubbles);
+        if(enabled&&kind==liquidBubbleMaterial(nextPic))
+            metadata|=kind<<LS_LIQUID_SHIFT;
     }
     binding.frameMean[3]=(float)metadata;
     static unsigned meanLevel=~0u;
