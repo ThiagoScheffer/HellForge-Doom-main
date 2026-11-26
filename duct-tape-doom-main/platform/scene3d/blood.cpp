@@ -2,6 +2,7 @@
 #include "internal.h"
 extern "C" {
 #include "p_solid.h"
+#include "p_digwall.h"
 }
 
 namespace doom3d {
@@ -212,7 +213,7 @@ static int variantOf(int kind,const uint32_t *seed=nullptr) {
     return kind==BLOOD_SPECK?bloodSpeckFirst+pick%bloodSpecks:kind==BLOOD_SMEAR?bloodSmear:1+pick%bloodSplats;
 }
 struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling;bool decoration=false; };
-struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; int texture=0; fixed_t offset=0; };
+struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; int texture=0; fixed_t offset=0; bool thickDeposit=false; };
 struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
 static std::vector<BloodFloor> environmentFloors;
 static std::vector<BloodWall> environmentWalls;
@@ -508,7 +509,16 @@ bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float str
     marks.push_back({x,y,born,size,angle,std::max(1.0f,stretch),sector,variant,flip,ceiling,decorationSeed!=nullptr&&!environment});
     return true;
 }
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld,LiquidMaterial material,const uint32_t *environmentSeed) {
+bool goreWallSupport(const WallHit &hit,const WallSpan &span,float along,float z) {
+    float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy);
+    if(len<.01f||along<0.f||along>len||z<span.bottom||z>span.top||
+       span.texture<=0||span.texture>=numtextures||span.texture==skytexture)return false;
+    if(P_GlobalDigEnabled()&&P_GlobalDigDepth(hit.line,hit.side,along,z)>0.f)return false;
+    float tx=dx/len,ty=dy/len,x=span.a.x+tx*along,y=span.a.y+ty*along;
+    return !SV_Active()||(!SV_Edited(x,y,z)&&!SV_Edited(x+ty,y-tx,z)&&!SV_Edited(x-ty,y+tx,z));
+}
+
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld,LiquidMaterial material,const uint32_t *environmentSeed,bool thickDeposit) {
     if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn()))return false;
     if(hit.line<0||hit.line>=numlines||hit.side<0||hit.side>1)return false;
     checkBloodLevel();
@@ -526,6 +536,8 @@ bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float 
     const int variant=variantOf(kind,environmentSeed)+32*(material==LiquidMaterial::Acid?LIQUID_TINT_ACID:bloodSourceTint);
     const bool flip=environmentSeed?(hash32(*environmentSeed)&4u)!=0:randomRange(0,1)<.5f;
     BloodWall wall={hit.line,hit.side,hit.section,along,z-span.anchor,born,size,std::max(1.0f,stretch),variant,flip,0,{},{}};
+    wall.thickDeposit=thickDeposit&&material==LiquidMaterial::Blood&&!environmentSeed;
+    if(wall.thickDeposit)wall.texture=span.texture;
     // Runs from a heavy splat: one or two, down from its lower half.
     if(environmentSeed) {
         wall.texture=span.texture;
@@ -836,7 +848,16 @@ void buildBlood(const Uniforms &camera) {
         }
         float u0=std::max(0.0f,d.along-hu),u1=std::min(len,d.along+hu),z0=std::max(span.bottom,zc-h),z1=std::min(span.top,zc+h);
         if(u1<=u0||z1<=z0)continue;
+        const WallHit wallHit={d.line,d.side,d.section};
+        if(d.thickDeposit&&d.texture!=span.texture)continue;
+        if(d.thickDeposit) {
+            bool supported=goreWallSupport(wallHit,span,d.along,zc);
+            for(float u:{u0,u1})for(float z:{z0,z1})supported=supported&&goreWallSupport(wallHit,span,u,z);
+            if(!supported)continue;
+        }
         float wet,dark;bloodAge(now-d.born,0,3,wet,dark);
+        float wallWet=d.thickDeposit&&horrorGoreEnabled(settings)&&settings.goreWetDeposits&&settings.goreWallBlood&&settings.bloodShine?
+            .35f*std::clamp(wet,0.f,1.f):0.f;
         const line_t &line=lines[d.line];const sector_t *front=sides[line.sidenum[d.side]].sector;
         float spread,wash=rainWash(settings.weather&&rainNow>0.01f&&front->ceilingpic==skyflatnum,now-d.born,dark,spread);
         if(wash<0)continue;
@@ -846,7 +867,7 @@ void buildBlood(const Uniforms &camera) {
         float tx=ex/len,ty=ey/len,lift=decalLift(span.a.x+tx*d.along,span.a.y+ty*d.along,camera)+0.25f,nx=ty*lift,ny=-tx*lift;
         unsigned mode=MODE_BLOOD|sectorMode(front);
         auto vertex=[&](float u,float z,float s,float t) {
-            Vertex v={span.a.x+tx*u+nx,span.a.y+ty*u+ny,z,s,t,light,mode,0,dark,wash};
+            Vertex v={span.a.x+tx*u+nx,span.a.y+ty*u+ny,z,s,t,light,mode,wallWet,dark,wash};
             bakeWallCoordinates(line,d.side,u,v);
             return v;
         };
@@ -866,8 +887,17 @@ void buildBlood(const Uniforms &camera) {
             float shown=std::min((float)drip.height,top-bottom);
             float width=environment?1.2f:float(drip.width);
             if(environment)u+=.9f;
-            quad(batches[bloodKeyBase+bloodDrip+(d.variant/32)*32],vertex(u,top,0,drip.height-shown),vertex(u+width,top,(float)drip.width,drip.height-shown),
-                 vertex(u+width,bottom,(float)drip.width,(float)drip.height),vertex(u,bottom,0,(float)drip.height));
+            float texWidth=float(drip.width);
+            if(d.thickDeposit) {
+                top=std::min(top,span.top);
+                width=std::min(width,len-u);
+                if(top<=bottom||width<=0.f||!goreWallSupport(wallHit,span,u,bottom)||
+                   !goreWallSupport(wallHit,span,u+width,(top+bottom)*.5f))continue;
+                shown=std::min((float)drip.height,top-bottom);
+                texWidth=width;
+            }
+            quad(batches[bloodKeyBase+bloodDrip+(d.variant/32)*32],vertex(u,top,0,drip.height-shown),vertex(u+width,top,texWidth,drip.height-shown),
+                 vertex(u+width,bottom,texWidth,(float)drip.height),vertex(u,bottom,0,(float)drip.height));
         }
     }
     buildSpray(camera);

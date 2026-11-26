@@ -2,6 +2,7 @@
 // The synthetic animation moves a textured body part inside a fixed outline.
 #include "../platform/scene3d/internal.h"
 #include "../platform/scene3d/gore_policy.h"
+#include "../platform/audio/impact_synth.h"
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -17,6 +18,7 @@ static void check(bool ok,const char *message) {
 constexpr int firstTestSpriteLump=100;
 constexpr int testSpriteCount=3;
 static lumpinfo_t testLumps[firstTestSpriteLump+testSpriteCount]={};
+static std::vector<int> madeSounds;
 
 extern "C" {
 state_t states[NUMSTATES]={};
@@ -24,12 +26,14 @@ int firstspritelump=firstTestSpriteLump;
 int numspritelumps=testSpriteCount;
 int numsprites=NUMSPRITES;
 int leveltime=0;
+gamestate_t gamestate=GS_LEVEL;
 int p_critical_trace=0;
 spritedef_t *sprites=nullptr;
 unsigned r_levelserial=1;
 lumpinfo_t *lumpinfo=testLumps;
 int M_CheckParm(char*) {return 0;}
 void (*R_GoreShotEnd)(mobj_t*,uint64_t)=nullptr;
+void I_MadeSound(int kind,float,float,float) {madeSounds.push_back(kind);}
 }
 
 namespace doom3d {
@@ -39,6 +43,10 @@ static std::array<Image,testSpriteCount> spriteImages;
 static unsigned bodyQuadCalls=0;
 static std::vector<GoreOutcome> goreBursts;
 static GoreTier lastGoreTier;
+static std::vector<float> kineticHints;
+static unsigned forgottenHits=0;
+void bodyKineticHint(const mobj_t*,float strength) {kineticHints.push_back(strength);}
+void bodyForgetHit(const mobj_t*) {++forgottenHits;}
 GoreBurstReport goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome,uint64_t,GoreEmission emission) {
     goreBursts.push_back(outcome);lastGoreTier=emission.tier;return {};
 }
@@ -347,6 +355,37 @@ static void configureGore() {
     goreBursts.clear();
 }
 
+static void horrorDischargeFeedback() {
+    Settings previous=settings;
+    auto monster=reset();
+    configureGore();
+    settings.goreLevel=2;
+    settings.goreImpactAudio=1;
+    settings.goreImpactStrength=1.f;
+    monster.type=MT_HEAD;
+    monsterInfo.spawnhealth=400;
+    monster.health=400;
+    madeSounds.clear();
+    kineticHints.clear();
+
+    const float u=spriteImages[0].width*.5f,v=spriteImages[0].height*.49f;
+    for(int shot=0;shot<3;++shot)goreShot(monster,u,v,5,2);
+    check(kineticHints==std::vector<float>(3,.4f),"Horror publishes one routine kinetic hint per discharge");
+    check(madeSounds==std::vector<int>(2,IMPACT_GORE_SLAP),"Horror publishes at most two additional sounds per tic");
+
+    ++leveltime;
+    settings.goreImpactAudio=0;
+    goreShot(monster,u,v,5,2);
+    check(kineticHints.size()==4&&madeSounds.size()==2,"Disabling Horror audio preserves the kinetic hint");
+    const auto before=forgottenHits;
+    forgetGore(&monster,0);
+    check(forgottenHits==before+1,"Removing a target releases its pending kinetic hit");
+
+    R_GoreShotEnd=nullptr;
+    totalkills=0;
+    settings=previous;
+}
+
 static Image iwadSprite(const std::vector<byte> &wad,const char *name) {
     auto read16=[&](size_t at){return unsigned(wad.at(at))|(unsigned(wad.at(at+1))<<8);};
     auto read32=[&](size_t at){return read16(at)|(read16(at+2)<<16);};
@@ -506,6 +545,7 @@ int main(int argc,char **argv) {
     }
     gorePolicy();
     goreDischargeFinalization(wad);
+    horrorDischargeFeedback();
     if(!wad.empty()) {
         goreStockLiveMasks(wad);
         goreStockPinky(wad);

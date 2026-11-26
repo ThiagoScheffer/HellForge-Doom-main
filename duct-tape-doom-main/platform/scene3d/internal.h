@@ -553,7 +553,8 @@ enum { BLOOD_SPLAT,BLOOD_SPECK,BLOOD_SMEAR };
 enum class LiquidSource : uint8_t { Normal, Environment };
 bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed=nullptr,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood,LiquidSource source=LiquidSource::Normal);
 // On the wall hit at (x,y,z), stretched along it; drips: one or two run down from it.
-bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood,const uint32_t *environmentSeed=nullptr);
+bool goreWallSupport(const WallHit &hit,const WallSpan &span,float along,float z);
+bool bloodWallSplat(const WallHit &hit,float x,float y,float z,float size,float stretch,float born,int kind,bool drips,bool replaceOld=true,LiquidMaterial material=LiquidMaterial::Blood,const uint32_t *environmentSeed=nullptr,bool thickDeposit=false);
 
 // spray.cpp
 // What a hitscan hit throws: an exit spray past the body along the shot, a speck or two back.
@@ -590,6 +591,8 @@ void sprayShutdown();
 // flatten: the whole body shortened by that share (a landing's settle, from the death director).
 struct BodyPose { float lean[2],whip[2],squash,lift,flatten;bool flier; };
 void bodyHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,int damage);
+void bodyKineticHint(const mobj_t *target,float strength);
+void bodyForgetHit(const mobj_t *target);
 void bodyDamaged(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage);
 bool vileEffectsEnabled();
 bool vileEffectNear(const mobj_t &actor,const Uniforms &camera);
@@ -677,6 +680,14 @@ bool ragdollSettled(const mobj_t *thing);   // no ragdoll, or one come to rest (
 // Capture opaque sprite contacts before damage and resolve once per shotgun discharge.
 enum class GoreOutcome : uint8_t;
 enum class GoreTier : uint8_t { Medium, Routine, Major, Fatal, Extreme };
+inline bool horrorGoreEnabled(const Settings &s) {
+    return horrorGoreMode(s)&&s.accelerated&&s.blood&&gamestate==GS_LEVEL&&
+           totalkills>=0&&totalkills<200&&!netgame&&!demoplayback&&!demorecording;
+}
+inline float horrorPresentation(GoreTier tier) {
+    constexpr float strength[]={.20f,.40f,.65f,.80f,1.f};
+    return strength[unsigned(tier)];
+}
 struct GoreEmission {
     GoreTier tier=GoreTier::Major;
     int limit=12;
@@ -701,6 +712,7 @@ void tickGiblets(size_t bloodDrops,int proceduralFragments);
 void drawGiblets(const Uniforms &camera);
 int activeGiblets();
 int restingGiblets();
+int stationaryGiblets();
 hellforge::giblets::Vec3 gibletBlastOrigin(hellforge::giblets::Vec3 center,float dx,float dy,float reach);
 byte bloodTintIndex(byte index,int tint);
 #ifdef DOOM_TEST_DRIVER

@@ -55,7 +55,7 @@ bool uncertainSweep(Vec3 a,Vec3 b,float radius) {
 }
 
 bool enabled() {
-    return settings.accelerated&&settings.goreLevel==1&&settings.goreFragments&&
+    return settings.accelerated&&advancedGoreMode(settings)&&settings.goreFragments&&
            settings.blood&&totalkills<200&&!netgame&&!demoplayback&&!demorecording&&gamestate==GS_LEVEL&&
            levelSerial==r_levelserial&&mapSerial==r_levelserial&&!volumeLab();
 }
@@ -232,6 +232,44 @@ bool hostTrace(void*,Vec3 a,Vec3 b,float radius,TraceHit &out) {
     return hit;
 }
 
+bool resolveWallAnchor(const WallAnchor &anchor,float sag,WallSpan &span,Vec3 &contact,Vec3 &normal,bool simulation) {
+    const auto &ref=anchor.surface;
+    if(ref.type!=Surface::Wall||ref.line<0||ref.line>=numlines||ref.side<0||ref.side>1||ref.section<0||ref.section>2||
+       !wallSpan(lines[ref.line],ref.side,ref.section,span,simulation)||span.texture!=anchor.texture)return false;
+    const auto &side=sides[lines[ref.line].sidenum[ref.side]];
+    if(ref.sector<0||ref.sector>=numsectors||side.sector!=&sectors[ref.sector]||
+       side.textureoffset!=anchor.textureOffset||side.rowoffset!=anchor.rowOffset)return false;
+    float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy);
+    float originZ=span.anchor+anchor.offsetZ,z=originZ-sag;
+    const WallHit wall={ref.line,ref.side,ref.section};
+    if(len<.01f||!goreWallSupport(wall,span,anchor.along,z)||
+       (sag>0.f&&!goreWallSupport(wall,span,anchor.along,originZ)))return false;
+    contact={span.a.x+dx/len*anchor.along,span.a.y+dy/len*anchor.along,z};
+    normal={dy/len,-dx/len,0.f};
+    return worldPoint(contact);
+}
+bool hostAttach(void*,const TraceHit &hit,WallAnchor &out) {
+    const auto &ref=hit.surface;
+    WallSpan span;
+    if(!hit.canMark||ref.type!=Surface::Wall||ref.line<0||ref.line>=numlines||ref.side<0||ref.side>1||
+       ref.section<0||ref.section>2||!wallSpan(lines[ref.line],ref.side,ref.section,span,true))return false;
+    float dx=span.b.x-span.a.x,dy=span.b.y-span.a.y,len=std::hypot(dx,dy);
+    if(len<.01f)return false;
+    float along=((hit.contact.x-span.a.x)*dx+(hit.contact.y-span.a.y)*dy)/len;
+    if(along<-.01f||along>len+.01f||(hit.normal.x*dy-hit.normal.y*dx)/len<.8f)return false;
+    along=std::clamp(along,0.f,len);
+    if(!goreWallSupport({ref.line,ref.side,ref.section},span,along,hit.contact.z))return false;
+    const auto &side=sides[lines[ref.line].sidenum[ref.side]];
+    if(!side.sector)return false;
+    out={ref,along,hit.contact.z-span.anchor,span.texture,side.textureoffset,side.rowoffset};
+    out.surface.sector=int(side.sector-sectors);
+    return true;
+}
+bool hostResolveWall(void*,const WallAnchor &anchor,float sag,Vec3 &contact,Vec3 &normal) {
+    WallSpan span;
+    return resolveWallAnchor(anchor,sag,span,contact,normal,true);
+}
+
 MarkBudget *eventBudget(uint64_t id) {
     const auto it=std::find_if(markBudgets.begin(),markBudgets.end(),[id](const MarkBudget &b){return b.id==id;});
     return it==markBudgets.end()?nullptr:&*it;
@@ -269,8 +307,11 @@ void gibletImpact(void*,const Impact &impact) {
            span.texture<=0||span.texture>=numtextures||span.texture==skytexture||p.z<span.bottom||p.z>span.top) {
             ++metrics.rejected;return;
         }
-        if(!bloodWallSplat({ref.line,ref.side,ref.section,0},p.x,p.y,p.z,impact.markSize,
-                           impact.cling?1.5f:1.f,now,BLOOD_SPLAT,impact.cling,false)) {++metrics.rejected;return;}
+        const bool thick=impact.attached&&horrorGoreEnabled(settings);
+        float markSize=thick?std::min(32.f,impact.markSize*1.15f):impact.markSize;
+        if(!bloodWallSplat({ref.line,ref.side,ref.section,0},p.x,p.y,p.z,markSize,
+                           thick?1.65f:impact.cling?1.5f:1.f,now,BLOOD_SPLAT,impact.cling,false,
+                           LiquidMaterial::Blood,nullptr,thick)) {++metrics.rejected;return;}
         --it->walls;++it->wallMarks;++metrics.wall;++combatFeedbackStats.wallSplats;
         metrics.maxEventWall=std::max(metrics.maxEventWall,int(it->wallMarks));
     } else if((ref.type==Surface::Floor||ref.type==Surface::Ceiling)&&ref.sector>=0&&ref.sector<numsectors) {
@@ -357,13 +398,44 @@ const giblet_art::Frame &frameFor(const Visual &v) {
 }
 void drawVisual(void *context,const Visual &v) {
     const auto &camera=*static_cast<const Uniforms*>(context);
+    if(v.attachment==Attachment::Wall) {
+        WallSpan span;
+        Vec3 contact{},normal{};
+        if(!resolveWallAnchor(v.anchor,v.sag,span,contact,normal,false))return;
+        const auto &ref=v.anchor.surface;
+        if((camera.eye[0]-contact.x)*normal.x+(camera.eye[1]-contact.y)*normal.y<=0.f)return;
+        const auto &frame=frameFor(v);
+        float scale=v.size*frame.scale*1.25f/float(std::max(frame.w,frame.h));
+        float squash=horrorGoreEnabled(settings)&&settings.goreSoftDeformation?v.squash:0.f;
+        float w=frame.w*scale*(1.f+.55f*squash),h=frame.h*scale*(1.f-.45f*squash);
+        float len=std::hypot(span.b.x-span.a.x,span.b.y-span.a.y);
+        float left=v.anchor.along-frame.pivotX*w,top=contact.z+frame.pivotY*h;
+        float u0=std::max(0.f,left),u1=std::min(len,left+w);
+        float z0=std::max(span.bottom,top-h),z1=std::min(span.top,top);
+        if(u0>=u1||z0>=z1)return;
+        const WallHit wall={ref.line,ref.side,ref.section};
+        for(float u:{u0,u1})for(float z:{z0,z1})if(!goreWallSupport(wall,span,u,z))return;
+        const auto *front=sides[lines[ref.line].sidenum[ref.side]].sector;
+        float light=lighting(front);
+        int band=tintBand(v.tint)*giblet_art::height;
+        const float lift=decalLift(contact.x,contact.y,camera)+.5f;
+        auto vertex=[&](float u,float z) {
+            return Vertex{span.a.x-normal.y*u+normal.x*lift,span.a.y+normal.x*u+normal.y*lift,z,
+                          frame.x+frame.w*(u-left)/w,band+frame.y+frame.h*(top-z)/h,light,MODE_SPRITE};
+        };
+        quad(batches[atlasKey],vertex(u0,z1),vertex(u1,z1),vertex(u1,z0),vertex(u0,z0));
+        ++metrics.quads;
+        if(debug)if(auto *budget=eventBudget(v.eventId))++budget->draws;
+        return;
+    }
     const auto *sector=v.resting&&v.surface.sector>=0&&v.surface.sector<numsectors?
         &sectors[v.surface.sector]:sectorAt(v.center);
     if(!sector)return;
     if(v.resting&&(sector->floorpic==skyflatnum||liquid(v.surface.sector)))return;
     const auto &frame=frameFor(v);
     const float size=v.size*frame.scale*(v.resting?2.1f:1.25f)/float(std::max(frame.w,frame.h));
-    const float w=frame.w*size,h=frame.h*size,c=std::cos(v.rotation),s=std::sin(v.rotation);
+    const float squash=horrorGoreEnabled(settings)&&settings.goreSoftDeformation?v.squash:0.f;
+    const float w=frame.w*size*(1.f+.55f*squash),h=frame.h*size*(1.f-.45f*squash),c=std::cos(v.rotation),s=std::sin(v.rotation);
     const Vec3 floor={v.contact.x,v.contact.y,floorZ(sector)};
     if(v.resting&&uncertainSweep(floor,floor,std::min(v.size*.3f,3.f)))return;
     const float rightLength=std::hypot(camera.right[0],camera.right[1]);
@@ -405,6 +477,7 @@ static void prepareGibletLevel(bool uploadTexture) {
 void prepareGiblets() {prepareGibletLevel(true);}
 int activeGiblets() {return int(giblets.activeCount());}
 int restingGiblets() {return int(giblets.restingCount());}
+int stationaryGiblets() {return int(giblets.stationaryCount());}
 Vec3 gibletBlastOrigin(Vec3 center,float dx,float dy,float reach) {
     const auto *sector=sectorAt(center);
     if(!sector||ceilZ(sector)-floorZ(sector)<4)return center;
@@ -441,7 +514,10 @@ void tickGiblets(size_t bloodDrops,int proceduralFragments) {
     if(!enabled()||!images.count(atlasKey)) {if(activeGiblets())clearGiblets();return;}
     if(paused||menuactive||lastTic==leveltime)return;
     lastTic=leveltime;
-    const Host host={nullptr,hostTrace,gibletImpact,debug?gibletContact:nullptr};
+    const bool horror=horrorGoreEnabled(settings);
+    const Host host={nullptr,hostTrace,gibletImpact,debug?gibletContact:nullptr,
+                     horror&&settings.goreStickyFragments?hostAttach:nullptr,hostResolveWall,
+                     horror&&settings.goreSoftDeformation};
     giblets.advance(1.f/TICRATE,host);
     if(!debug)return;
     for(auto &b:markBudgets)if(b.id&&!giblets.hasActiveEvent(b.id)){reportImpactSummary(b);b={};}

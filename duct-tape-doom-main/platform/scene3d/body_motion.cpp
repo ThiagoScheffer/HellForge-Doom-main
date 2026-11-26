@@ -18,7 +18,7 @@ struct Body { int health;float momx,momy;bool alive,seen; };
 // This tic's hits on one body: hitscan points (exact) and the attack that
 // did the damage (its inflictor: the shooter for hitscan, else the missile
 // or blast), which groups bodies struck by one blast.
-struct Hit { int tic;float z,dx,dy,side;int count;const mobj_t *attack;float missileZ,missileSide;bool missile; };
+struct Hit { int tic;float z,dx,dy,side;int count;const mobj_t *attack;float missileZ,missileSide;bool missile; float kinetic=0.f; };
 static std::unordered_map<const mobj_t*,Body> watched;
 static std::unordered_map<const mobj_t*,std::vector<Impulse>> impulses;
 static std::unordered_map<const mobj_t*,Hit> hits;
@@ -83,7 +83,14 @@ void bodyDamaged(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage) {
             hit.missileSide=((units(inflictor->x)-units(target->x))*-my+(units(inflictor->y)-units(target->y))*mx)/l/std::max(1.0f,units(target->radius));
     }
 }
-static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hitKnown,float hitDx,float hitDy,bool death) {
+void bodyForgetHit(const mobj_t *target) {hits.erase(target);}
+void bodyKineticHint(const mobj_t *target,float strength) {
+    if(bodyLevelSerial!=r_levelserial||!horrorGoreEnabled(settings)||!settings.goreKineticImpact)return;
+    auto hit=hits.find(target);
+    if(hit!=hits.end()&&hit->second.tic==leveltime)
+        hit->second.kinetic=std::max(hit->second.kinetic,std::clamp(strength,0.f,1.f));
+}
+static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hitKnown,float hitDx,float hitDy,bool death,float kinetic) {
     float dx,dy,speed;pushOf(thing,before,hitDx,hitDy,dx,dy,speed);
     uint32_t seed=hash32((uint32_t)(uintptr_t)&thing*2654435761u^(uint32_t)leveltime*40503u);
     auto vary=[&](int k,float spread){return 1+spread*(hashUnit(k,0,seed)*2-1);};
@@ -117,6 +124,16 @@ static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hi
         impulse.lean=lean*back*strength;impulse.whip=lean*0.5f*std::max(high,-0.5f)*strength;
         impulse.squash=high<0?0.1f*-high*strength:0;
     }
+    if(kinetic>0.f&&horrorGoreEnabled(settings)&&settings.goreKineticImpact) {
+        float response=std::clamp(kinetic*std::clamp(settings.goreImpactStrength,.5f,1.5f),0.f,1.f);
+        impulse.lean*=1.f+.4f*response;
+        impulse.whip*=1.f+.5f*response;
+        if(!impulse.flier)impulse.squash=std::max(impulse.squash,.08f*response*strength);
+        if(!death) {
+            impulse.peak=std::max(.5f,impulse.peak*(1.f-.22f*response));
+            impulse.duration=int(std::lround(impulse.duration*(1.f-.14f*response)));
+        }
+    }
     auto &list=impulses[&thing];
     if(death)list.clear();
     if(list.size()>=4)list.erase(list.begin());
@@ -126,7 +143,7 @@ void watchBodies() {
     bool spray=settings.blood&&settings.bloodSpray;
     if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!settings.wounds&&!spray&&
         !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&
-        !(settings.goreLevel&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
+        !(advancedGoreMode(settings)&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
     if(bodyLevelSerial!=r_levelserial) {bodyMotionShutdown();bodyLevelSerial=r_levelserial;}
     for(auto &entry:watched)entry.second.seen=false;
     static std::vector<mobj_t*> bodies;bodies.clear();
@@ -138,13 +155,14 @@ void watchBodies() {
         if(found==watched.end()) {watched[thing]={thing->health,units(thing->momx),units(thing->momy),alive,true};continue;}
         Body &body=found->second;body.seen=true;
         bool died=body.alive&&!alive,hurt=alive&&thing->health<body.health;
-        if(alive&&!body.alive) {impulses.erase(thing);forgetDeath(thing);forgetWounds(thing);} // Raised again.
+        if(alive&&!body.alive) {hits.erase(thing);impulses.erase(thing);forgetDeath(thing);forgetWounds(thing);} // Raised again.
         if(died||(hurt&&(settings.hitFlinch||spray))) {
             float z=0,hdx=0,hdy=0,side=0;bool known=false;const mobj_t *attack=nullptr;
             auto hit=hits.find(thing);
             bool missile=false;
+            float kinetic=0.f;
             if(hit!=hits.end()&&leveltime-hit->second.tic<=1) {
-                const Hit &h=hit->second;attack=h.attack;
+                Hit &h=hit->second;attack=h.attack;kinetic=h.kinetic;h.kinetic=0.f;
                 if(h.count>0) {z=h.z/h.count;hdx=h.dx;hdy=h.dy;side=h.side/h.count;known=true;}
                 else if(h.missile) {z=h.missileZ;side=h.missileSide;known=true;missile=true;}
             }
@@ -155,7 +173,7 @@ void watchBodies() {
                 if(died)sprayKill(*thing,dx,dy,speed,known?z:-1,gibbed(*thing),std::max(0,-thing->health));
                 else sprayHurt(*thing,dx,dy,z,body.health-thing->health);
             }
-            if(died?settings.deathMotion:settings.hitFlinch)addImpulse(*thing,body,z,known,hdx,hdy,died);
+            if(died?settings.deathMotion:settings.hitFlinch)addImpulse(*thing,body,z,known,hdx,hdy,died,kinetic);
             if(died&&settings.deathDirector) {
                 float dx,dy,speed;pushOf(*thing,body,hdx,hdy,dx,dy,speed);
                 // Hit height: 1 well above the hip, -1 at the legs (as addImpulse).
@@ -171,7 +189,7 @@ void watchBodies() {
     }
     for(auto it=watched.begin();it!=watched.end();) {
         if(it->second.seen) {++it;continue;}
-        forgetDeath(it->first);forgetWounds(it->first);it=watched.erase(it);
+        hits.erase(it->first);forgetDeath(it->first);forgetWounds(it->first);it=watched.erase(it);
     }
     for(auto it=impulses.begin();it!=impulses.end();) {
         auto &list=it->second;

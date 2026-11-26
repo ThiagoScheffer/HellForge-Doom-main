@@ -49,7 +49,125 @@ static void draw(void *context,const Visual &v) {
     }
 }
 
+struct WallFixture {
+    bool markable=true,validAnchor=true,validSurface=true,collide=true,slanted=false;
+    int traces=0,impacts=0,resolutions=0;
+    Impact last{};
+};
+
+static bool wallTrace(void *context,Vec3 a,Vec3,float radius,TraceHit &hit) {
+    auto &f=*static_cast<WallFixture*>(context);
+    ++f.traces;
+    if(!f.collide)return false;
+    Vec3 normal=f.slanted?Vec3{-.8f,0,.6f}:Vec3{-1,0,0};
+    hit={a,{a.x+radius,a.y,a.z},normal,0,{Surface::Wall,1,0,0},f.markable};
+    return true;
+}
+static bool wallAttach(void *context,const TraceHit &hit,WallAnchor &anchor) {
+    const auto &f=*static_cast<WallFixture*>(context);
+    anchor={hit.surface,16.f,hit.contact.z,7};
+    if(!f.validAnchor)anchor.surface.line=-1;
+    return true;
+}
+static bool wallResolve(void *context,const WallAnchor &anchor,float sag,Vec3 &contact,Vec3 &normal) {
+    auto &f=*static_cast<WallFixture*>(context);
+    ++f.resolutions;
+    if(!f.validSurface)return false;
+    contact={32.f,anchor.along,anchor.offsetZ-sag};
+    normal={-1,0,0};
+    return true;
+}
+static void wallImpact(void *context,const Impact &hit) {
+    auto &f=*static_cast<WallFixture*>(context);
+    ++f.impacts;f.last=hit;
+}
+
+static void wallAttachmentTests() {
+    constexpr float step=1.f/70.f;
+    System sim,other;
+    WallFixture fixture,twin;
+    const Host host={&fixture,wallTrace,wallImpact,nullptr,wallAttach,wallResolve};
+    const Host twinHost={&twin,wallTrace,wallImpact,nullptr,wallAttach,wallResolve};
+    const auto visual=[](const System &system) {
+        Visual result{};
+        system.forEachVisual(+[](void *out,const Visual &v){*static_cast<Visual*>(out)=v;},&result);
+        return result;
+    };
+    Burst burst;
+    burst.origin={0,0,30};burst.eligible=true;burst.eventId=101;burst.pieces=1;
+    burst.kind=Kind::Viscera;burst.brief=true;
+
+    check(!burst.sticky&&sim.emit(burst)==1,"Sticky fragments are opt-in");
+    sim.advance(step,host);
+    check(sim.activeCount()==1&&!sim.attachedCount()&&fixture.impacts==1&&fixture.last.cling&&!fixture.last.attached,
+          "Ordinary wall impacts bounce and retain the legacy cling suggestion");
+
+    burst.sticky=true;burst.softDeformation=true;
+    sim.clear();fixture={};sim.emit(burst);sim.advance(step,host);
+    auto first=visual(sim);
+    check(first.attachment==Attachment::Wall&&!first.resting&&first.squash>0&&fixture.last.attached,
+          "A soft wall contact becomes a compressed wall attachment");
+    check(fixture.impacts==1&&sim.stats().emittedImpacts==1,"Attachment emits only the original impact");
+    sim.advance(0,host);
+    check(visual(sim).attachedAge==first.attachedAge&&fixture.resolutions==0,"Pause freezes attachment age");
+    other.emit(burst);other.advance(step,twinHost);
+    for(int i=0;i<28;++i){sim.advance(step,host);other.advance(step,twinHost);}
+    auto a=visual(sim),b=visual(other);
+    check(a.attachment==b.attachment&&a.contact.z==b.contact.z&&a.sag==b.sag&&a.squash==b.squash&&a.sag>0,
+          "Identical seeds and hosts produce identical attachment deformation");
+    check(fixture.traces==1&&fixture.impacts==1,"Attached pieces resolve anchors without ballistic sweeps");
+    for(int i=0;i<70&&sim.attachedCount();++i)sim.advance(step,host);
+    check(sim.activeCount()==1&&fixture.traces==1&&fixture.impacts==1,
+          "An expired attachment detaches without another impact");
+    fixture.collide=false;sim.advance(step,host);
+    check(fixture.traces==2&&visual(sim).attachment==Attachment::None,"Detached pieces resume flight");
+    for(int i=0;i<6;++i)sim.advance(step,host);
+    fixture.collide=true;fixture.slanted=true;sim.advance(step,host);
+    check(!sim.attachedCount()&&fixture.impacts==2,"A detached piece may collide again but cannot reattach");
+
+    sim.clear();fixture={};sim.emit(burst);sim.advance(step,host);
+    fixture.validSurface=false;sim.advance(step,host);
+    check(!sim.activeCount()&&!sim.attachedCount(),"Invalidated wall anchors discard the fragment");
+    sim.clear();
+    check(!sim.hasActiveEvent(burst.eventId)&&!sim.stats().traces,"Clearing releases attachments and event history");
+
+    for(int invalid=0;invalid<4;++invalid) {
+        sim.clear();fixture={};
+        burst.kind=invalid==0?Kind::Bone:Kind::Viscera;
+        fixture.markable=invalid!=1;fixture.validAnchor=invalid!=2;
+        Host selected=host;
+        if(invalid==3)selected.resolveWall=nullptr;
+        sim.emit(burst);sim.advance(step,selected);
+        check(sim.activeCount()==1&&!sim.attachedCount(),"Hard material, invalid walls and absent host callbacks cannot attach");
+        if(invalid<2)check(!fixture.impacts,"Bone and unmarkable walls submit no impact");
+    }
+
+    sim.clear();fixture={};burst.kind=Kind::Viscera;burst.maxActive=1;
+    sim.emit(burst);sim.advance(step,host);
+    check(sim.attachedCount()==1,"Fixture must attach before slot reuse");
+    burst.sticky=false;burst.softDeformation=false;++burst.eventId;
+    check(sim.emit(burst)==1&&sim.activeCount()==1&&!sim.stationaryCount(),"A new burst may evict an attached piece");
+    auto fresh=visual(sim);
+    check(fresh.attachment==Attachment::None&&fresh.attachedAge==0&&fresh.squash==0&&fresh.sag==0&&fresh.anchor.texture==-1,
+          "Reused slots reset every attachment and deformation field");
+
+    sim.clear();fixture={};burst.sticky=true;burst.softDeformation=true;burst.maxActive=64;burst.pieces=12;
+    Fixture floorFixture;
+    const Host floorHost={&floorFixture,trace,impact};
+    for(int i=0;i<4;++i){++burst.eventId;sim.emit(burst);}
+    for(int i=0;i<70;++i)sim.advance(step,floorHost);
+    check(sim.restingCount()==System::MaxResting,"Fill the shared stationary pool with floor pieces");
+    const auto oldEvictions=sim.stats().evictedResting;
+    for(int i=0;i<4;++i){++burst.eventId;sim.emit(burst);}
+    sim.advance(step,host);
+    check(sim.attachedCount()==System::MaxAttached&&sim.stationaryCount()==System::MaxResting&&
+          sim.activeCount()<=System::MaxPieces&&sim.stats().evictedResting>=oldEvictions+System::MaxAttached,
+          "Wall attachments share the existing stationary and active budgets");
+    check(fixture.impacts<=System::MaxImpactEventsPerAdvance,"Wall contacts preserve the per-advance impact budget");
+}
+
 int main() {
+    wallAttachmentTests();
     Burst burst;
     burst.origin={0,0,30};burst.eligible=true;burst.eventId=73;
     burst.kind=Kind::Viscera;burst.tint=Tint::Blue;burst.pieces=8;

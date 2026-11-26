@@ -4,11 +4,13 @@
 #include "internal.h"
 #include "gore_policy.h"
 #include "gore_stock.h"
+#include "../audio/impact_synth.h"
 #include "../wound_attachment.h"
 #include "../death_joints.h"
 #include "../monster_regions.h"
 #include <limits>
 extern "C" {
+#include "../audio/sound_options.h"
 #include "../../linuxdoom-1.10/p_local.h"
 }
 
@@ -98,7 +100,7 @@ constexpr float maxRadius=3.0f;
 
 void woundView(const mobj_t *thing,const mobj_t *viewer,const Image &image,bool flipped,float x,float y,float feet,
                float top,float bottom,float rx,float ry,const BodyPose *pose,int rotation) {
-    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&!(settings.goreLevel&&settings.blood&&totalkills<200))||!thing||!thing->info||thing->health<=0)return;
+    if((!settings.wounds&&!settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&!(advancedGoreMode(settings)&&settings.blood&&totalkills<200))||!thing||!thing->info||thing->health<=0)return;
     if(!(thing->info->flags&MF_COUNTKILL)&&thing->type!=MT_SKULL)return;
     surfaces[thing]={viewer,&image,x,y,feet,top,bottom,rx,ry,
         (float)(thing->angle*(2*doomPi/4294967296.0)),pose?*pose:BodyPose{},leveltime,flipped,pose!=nullptr,thing->sprite,thing->frame,rotation};
@@ -303,7 +305,7 @@ static bool goreVerifySequence(const mobj_t &actor) {
 
 
 static bool goreActive() {
-    return settings.accelerated&&settings.goreLevel==1&&settings.blood&&totalkills<200&&
+    return settings.accelerated&&advancedGoreMode(settings)&&settings.blood&&totalkills<200&&
            levelSerial==r_levelserial&&!netgame&&!demoplayback&&!demorecording;
 }
 static bool goreDebug() {
@@ -428,6 +430,22 @@ static const char *goreOutcomeName(GoreOutcome outcome) {
     }
 }
 
+static void horrorShotFeedback(const mobj_t &target,GoreTier tier,float x,float y,float z,bool fatal) {
+    if(!horrorGoreEnabled(settings))return;
+    const float strength=horrorPresentation(tier);
+    bodyKineticHint(&target,strength);
+    // Fatal events retain their existing death burst or later landing sounds.
+    if(fatal||!settings.goreImpactAudio||strength*std::clamp(settings.goreImpactStrength,.5f,1.5f)<.4f)return;
+    static unsigned soundLevel=~0u;
+    static int soundTic=-1,sounds=0;
+    if(soundLevel!=r_levelserial||soundTic!=leveltime) {
+        soundLevel=r_levelserial;soundTic=leveltime;sounds=0;
+    }
+    if(sounds>=2)return;
+    ++sounds;
+    I_MadeSound(IMPACT_GORE_SLAP,x,y,z);
+}
+
 static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,bool legacyOnly) {
     auto &d=shot.decision;
     const char *reason="feature_off",*fallback="none",*art="uncut";
@@ -504,10 +522,13 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
     if(outcome!=GoreOutcome::None&&!maskApplied&&!burstEnabled) {
         outcome=GoreOutcome::None;reason="feature_off";
     }
-    const bool feedback=!legacyOnly&&goreActive()&&goreSpriteActor(target)&&settings.goreFragments&&
+    const bool confirmedContact=!legacyOnly&&goreActive()&&goreSpriteActor(target)&&
         d.distance<=goreImpactRange&&d.effectiveDamage>0&&d.spriteContacts>0;
+    const bool feedback=confirmedContact&&settings.goreFragments;
     const GoreTier tier=d.distance>goreRange?GoreTier::Medium:
         d.fatal()?GoreTier::Fatal:outcome!=GoreOutcome::None?GoreTier::Major:GoreTier::Routine;
+    if(confirmedContact&&target.type==d.type&&d.fatal()==(target.health<=0))
+        horrorShotFeedback(target,d.extreme&&d.fatal()?GoreTier::Extreme:tier,point.x,point.y,point.z,d.fatal());
     const auto burst=outcome!=GoreOutcome::None||feedback?
         goreBurst(target,point.x,point.y,point.z,shot.dx,shot.dy,outcome,discharge,{tier}):GoreBurstReport{};
     if(feedback&&outcome==GoreOutcome::None)reason="impact_feedback";
@@ -551,6 +572,7 @@ void goreFinishShot(mobj_t *shooter,uint64_t discharge) {
 }
 
 void forgetGore(const mobj_t *actor,int death) {
+    if(!death)bodyForgetHit(actor);
     if(!death&&goreDischarge) {
         if(actor==goreShooter){goreShots={};goreDischarge=0;goreShooter=nullptr;}
         else if(auto *shot=goreShotFor(actor))*shot={};

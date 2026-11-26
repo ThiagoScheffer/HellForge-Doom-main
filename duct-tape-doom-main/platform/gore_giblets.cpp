@@ -44,6 +44,17 @@ Material material(Kind k) {
     }
     return {0.2f,0.6f,28.0f,3.0f,1.4f,3.0f};
 }
+struct Adhesion {float hold,compression,sag;};
+Adhesion adhesion(Kind kind) {
+    switch(kind) {
+    case Kind::Viscera:return {2.6f,.60f,2.f};
+    case Kind::BrainLike:return {1.8f,.48f,1.5f};
+    case Kind::HeavyTissue:return {1.5f,.42f,1.2f};
+    case Kind::Flesh:return {.8f,.32f,.8f};
+    case Kind::Bone:return {};
+    }
+    return {};
+}
 float markScale(Kind kind) {
     switch (kind) {
         case Kind::Viscera: return 3.6f;
@@ -68,7 +79,7 @@ int System::emit(const Burst &request) {
     // weapon, monster, severity, palette, F4 and gameplay eligibility.
     if (!request.eligible || request.mapKillCount >= 200 || request.mapKillCount < 0 ||
         !finite(request.origin) || !finite(request.direction) ||
-        !std::isfinite(request.intensity) || request.pieces == 0 ||
+        !std::isfinite(request.intensity) || !std::isfinite(request.presentation) || request.pieces == 0 ||
         request.kind>Kind::BrainLike || request.tint>Tint::PaleBone ||
         seenEvent(request.eventId)) return 0;
 
@@ -80,17 +91,22 @@ int System::emit(const Burst &request) {
     std::uint32_t rng = request.cosmeticSeed ? request.cosmeticSeed : 0x9e3779b9u;
     int added = 0;
     size_t active=activeCount();
+    const size_t limit=std::min<size_t>(MaxPieces,request.maxActive);
+    const float response=std::clamp(request.presentation,0.f,1.f);
     const int count = std::min<int>(MaxPiecesPerBurst, request.pieces);
     for (int i = 0; i < count; ++i) {
         Piece *free=nullptr;
-        if(active<std::min<size_t>(MaxPieces,request.maxActive)) {
+        if(active<limit) {
             for(auto &candidate:pieces_)if(!candidate.used){free=&candidate;break;}
             ++active;
-        } else if(request.maxActive) {
-            free=oldestResting();
+        } else if(limit) {
+            free=oldestStationary();
             if(free)++stats_.evictedResting;
         }
         if (!free) { ++stats_.droppedByBudget; continue; }
+        *free=Piece{};
+        free->sticky=request.sticky;
+        free->softDeformation=request.softDeformation;
         const auto kind=request.kind==Kind::BrainLike&&i%3==2?Kind::Flesh:request.kind;
         const Material m=material(kind);
         const float speed = between(rng, 95.0f, 215.0f)*intensity;
@@ -101,10 +117,10 @@ int System::emit(const Burst &request) {
         free->p = request.origin + direction * between(rng,0.0f,1.2f);
         free->eventId = request.eventId;
         free->v = direction*speed + Vec3{0,0,between(rng,5.0f,70.0f)};
-        free->size = between(rng,m.sizeLow,m.sizeHigh)*std::sqrt(intensity);
+        free->size = between(rng,m.sizeLow,m.sizeHigh)*std::sqrt(intensity)*(1.f+.20f*response);
         free->radius = std::clamp(free->size*0.3f,0.5f,3.0f);
         free->rotation = between(rng,-kPi,kPi);
-        free->angularSpeed = between(rng,-11.0f,11.0f);
+        free->angularSpeed = between(rng,-11.0f,11.0f)*(1.f-.40f*response);
         free->age = 0;
         free->lifespan = request.brief?1.2f:m.lifetime + between(rng,-0.3f,0.5f);
         free->brief=request.brief;
@@ -129,6 +145,23 @@ void System::step(float dt, const Host &host, int &impactBudget) {
         if (!p.used) continue;
         p.age += dt;
         if (p.age >= p.lifespan) { p.used = false; continue; }
+        if (p.attachment==Attachment::Wall) {
+            const float phase=std::clamp((p.age-p.attachedAt)/(p.attachedUntil-p.attachedAt),0.f,1.f);
+            p.sag=p.softDeformation&&host.softDeformation?adhesion(p.kind).sag*phase*phase:0.f;
+            Vec3 contact{},normal{};
+            if(!host.resolveWall||!host.resolveWall(host.context,p.anchor,p.sag,contact,normal)) {p.used=false;continue;}
+            const float normalLength=length(normal);
+            if(!finite(contact)||!std::isfinite(normalLength)||normalLength<.01f) {p.used=false;continue;}
+            if(!host.softDeformation)p.squash=0.f;
+            p.contact=contact;p.normal=normal*(1.f/normalLength);
+            p.p=contact+p.normal*(p.radius+.1f);
+            if(p.age>=p.attachedUntil) {
+                p.attachment=Attachment::None;p.anchor={};p.contact={};p.normal={};p.surface={};
+                p.squash=0;p.sag=0;p.v={0,0,-8.f};
+            }
+            continue;
+        }
+        p.squash=std::max(0.f,p.squash-dt*2.5f);
         if (p.resting) continue;
         // Semi-implicit Euler: integrate gravity before tracing the displacement.
         p.v.z -= kGravity*dt;
@@ -151,9 +184,29 @@ void System::step(float dt, const Host &host, int &impactBudget) {
         const float inward = dot(p.v,normal);
         p.p = hit.center + normal*0.1f;
         const Material m = material(p.kind);
+        const auto profile=adhesion(p.kind);
+        const bool markable=hit.canMark&&inward<0&&incoming>=48.f&&p.contacts<2;
+        WallAnchor anchor{};
+        if(p.sticky&&!p.attachedOnce&&surface==Surface::Wall&&markable&&profile.hold>0.f&&
+           attachedCount()<MaxAttached&&host.attach&&host.resolveWall&&host.attach(host.context,hit,anchor)&&
+           anchor.surface.type==Surface::Wall&&anchor.surface.line==hit.surface.line&&
+           anchor.surface.side==hit.surface.side&&anchor.surface.section==hit.surface.section&&
+           std::isfinite(anchor.along)&&anchor.along>=0&&std::isfinite(anchor.offsetZ)&&anchor.texture>=0) {
+            if(stationaryCount()>=MaxResting) {oldestStationary()->used=false;++stats_.evictedResting;}
+            const float variation=.92f+.16f*(p.variant/7.f);
+            const float hold=profile.hold*variation;
+            p.attachment=Attachment::Wall;p.anchor=anchor;p.attachedOnce=true;
+            p.attachedAt=p.age;p.attachedUntil=p.age+(p.brief?std::min(hold,.8f):hold);
+            p.lifespan=std::max(p.lifespan,p.attachedUntil+.8f);
+            p.contact=hit.contact;p.normal=normal;p.surface=hit.surface;
+            p.p=p.contact+normal*(p.radius+.1f);
+            p.v={};p.angularSpeed=0;p.squash=p.softDeformation&&host.softDeformation?profile.compression:0.f;
+        } else if(p.softDeformation&&host.softDeformation&&inward<0) {
+            p.squash=profile.compression*std::clamp(-inward/180.f,0.f,1.f);
+        }
         // Only apply impact callbacks to geometrically valid, explicitly markable
         // surfaces. Host applies F4 wall-blood and shared decal budgets again.
-        if (hit.canMark && p.kind!=Kind::Bone && inward < 0 && incoming >= 48.0f && p.contacts < 2) {
+        if (markable && p.kind!=Kind::Bone) {
             if (impactBudget > 0 && host.impact) {
                 Impact e;
                 e.eventId = p.eventId;
@@ -166,12 +219,17 @@ void System::step(float dt, const Host &host, int &impactBudget) {
                 e.strength = std::clamp(incoming/300.0f,0.0f,1.0f);
                 e.markSize = std::clamp(p.size*markScale(p.kind),2.0f,32.0f);
                 e.variant = p.variant;
-                e.cling = (surface == Surface::Wall && p.kind == Kind::Viscera);
+                e.attached=p.attachment==Attachment::Wall;
+                e.cling=e.attached||(surface==Surface::Wall&&p.kind==Kind::Viscera);
                 host.impact(host.context,e);
                 --impactBudget; ++stats_.emittedImpacts;
             } else ++stats_.suppressedImpacts;
         }
         ++p.contacts;
+        if(p.attachment==Attachment::Wall) {
+            if(host.contact)host.contact(host.context,p.eventId,surface,false);
+            continue;
+        }
         // Wall contacts can leave a smear, then the piece falls with the
         // material's normal bounce and drag.
         if (p.contacts >= 4 && surface != Surface::Floor) {
@@ -185,8 +243,8 @@ void System::step(float dt, const Host &host, int &impactBudget) {
             p.v = nvel + tvel;
         } else p.v = p.v*m.tangentialDrag;
         if (surface == Surface::Floor && (p.contacts >= 4 || length(p.v) <= m.minRestSpeed)) {
-            if(restingCount()>=MaxResting) {
-                oldestResting()->used=false;
+            if(stationaryCount()>=MaxResting) {
+                oldestStationary()->used=false;
                 ++stats_.evictedResting;
             }
             p.resting = true; p.v = {};
@@ -219,7 +277,8 @@ void System::forEachVisual(VisualFn draw, void *context) const {
     for (const Piece &p : pieces_) if (p.used) {
         draw(context, {p.p,p.kind,p.tint,p.size,p.rotation,
                        std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting,
-                       p.contact,p.normal,p.surface,p.eventId});
+                       p.contact,p.normal,p.surface,p.eventId,p.attachment,
+                       p.attachment==Attachment::Wall?p.age-p.attachedAt:0.f,p.squash,p.sag,p.anchor});
     }
 }
 
@@ -246,10 +305,19 @@ std::size_t System::restingCount() const {
     return std::count_if(pieces_.begin(),pieces_.end(),[](const Piece &p){return p.used&&p.resting;});
 }
 
-System::Piece *System::oldestResting() {
+std::size_t System::attachedCount() const {
+    return std::count_if(pieces_.begin(),pieces_.end(),[](const Piece &p){return p.used&&p.attachment==Attachment::Wall;});
+}
+
+std::size_t System::stationaryCount() const {
+    return std::count_if(pieces_.begin(),pieces_.end(),[](const Piece &p){return p.used&&(p.resting||p.attachment==Attachment::Wall);});
+}
+
+System::Piece *System::oldestStationary() {
     Piece *oldest=nullptr;
+    const auto stationaryAge=[](const Piece &p){return p.age-(p.resting?p.restedAt:p.attachedAt);};
     for(auto &p:pieces_)
-        if(p.used&&p.resting&&(!oldest||p.age-p.restedAt>oldest->age-oldest->restedAt))oldest=&p;
+        if(p.used&&(p.resting||p.attachment==Attachment::Wall)&&(!oldest||stationaryAge(p)>stationaryAge(*oldest)))oldest=&p;
     return oldest;
 }
 

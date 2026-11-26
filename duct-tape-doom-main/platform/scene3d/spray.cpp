@@ -282,7 +282,7 @@ static const GoreStyle &goreStyle(int type) {
 GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge,GoreEmission emission) {
     using namespace hellforge::giblets;
     GoreBurstReport report;
-    if(!settings.accelerated||settings.goreLevel!=1||totalkills>=200||!bloodOn()||
+    if(!settings.accelerated||!advancedGoreMode(settings)||totalkills>=200||!bloodOn()||
        (!settings.goreWallBlood&&!settings.goreFragments))return report;
     checkSprayLevel();
     BloodSourceScope tint(&target);
@@ -314,7 +314,7 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
     report.requested=medium?1:routine?std::max(2,style.living-1):m1head?6:fatal?style.fatal:style.living;
     if(emission.radial&&fatal)
         report.requested=std::min(12,report.requested+(emission.tier==GoreTier::Extreme?4:2));
-    int count=std::min({report.requested,emission.limit,std::max(0,int(System::MaxPieces)-active-activeGiblets()+restingGiblets())});
+    int count=std::min({report.requested,emission.limit,std::max(0,int(System::MaxPieces)-active-activeGiblets()+stationaryGiblets())});
     if(!count){report.path="piece_budget";return report;}
     {
         hellforge::giblets::Burst burst;
@@ -322,6 +322,11 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
         burst.kind=kind;burst.tint=materialTint;
         burst.intensity=medium?.38f:routine?.76f:m1head?.92f:target.type==MT_HEAD?(fatal?1.75f:1.48f):fatal?1.14f:1.f;
         burst.pieces=uint8_t(count);burst.mapKillCount=totalkills;burst.eligible=true;
+        if(horrorGoreEnabled(settings)) {
+            burst.sticky=settings.goreStickyFragments;
+            burst.softDeformation=settings.goreSoftDeformation;
+            burst.presentation=horrorPresentation(emission.tier)*std::clamp(settings.goreImpactStrength,.5f,1.5f);
+        }
         burst.radial=emission.radial;
         burst.brief=medium;
         burst.floorMarks=uint8_t(flatBudget);
@@ -389,7 +394,7 @@ void resetBlastCapture() {
     blastDepth=0;directImpacts={};
 }
 bool blastEnabled() {
-    return settings.accelerated&&settings.blood&&settings.goreFragments&&settings.goreLevel==1&&
+    return settings.accelerated&&settings.blood&&settings.goreFragments&&advancedGoreMode(settings)&&
            levelSerial==r_levelserial&&totalkills<200&&!netgame&&!demoplayback&&!demorecording;
 }
 BlastVictim snapshot(const mobj_t &victim,int before,bool direct) {
@@ -711,7 +716,7 @@ void watchSpray() {
     checkSprayLevel();
     if(!acidLiquidOn())clearAcidVisuals();
     tickAcidCoatings();
-    const bool goreOnly=settings.accelerated&&settings.goreLevel&&settings.blood&&totalkills<200;
+    const bool goreOnly=settings.accelerated&&advancedGoreMode(settings)&&settings.blood&&totalkills<200;
     if(levelSerial!=r_levelserial) {drops.clear();slides.clear();clearGiblets();return;}
     if(!sprayOn()&&!goreOnly&&!acidLiquidOn()) {drops.clear();slides.clear();clearGiblets();return;}
     checkSprayLevel();
@@ -763,7 +768,7 @@ void buildSpray(const Uniforms &camera) {
     drawGiblets(camera);
     float now=gameSeconds();
     const bool showDecor=horrorDecorEnabled()&&settings.blood&&settings.bloodSpray;
-    const bool showGore=settings.accelerated&&settings.goreLevel==1&&settings.blood&&totalkills<200&&
+    const bool showGore=settings.accelerated&&advancedGoreMode(settings)&&settings.blood&&totalkills<200&&
                         !netgame&&!demoplayback&&!demorecording;
     drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){
         if(d.material==LiquidMaterial::Acid)return now>=d.end||!acidLiquidOn();

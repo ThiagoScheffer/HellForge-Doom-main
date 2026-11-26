@@ -127,7 +127,9 @@ struct Settings {
     int deathMotion=0; // Optional deaths jolt with the killing blow's push and height.
     int wounds=1; // Hitscan hits shoot holes through monsters' sprites, rimmed with blood; drawing only.
     // M1: only stock Zombieman/Shotgun Guy, close lethal shotgun hits, <200 map monsters.
-    int goreLevel=1; // 0 Classic, 1 Enhanced. Visual-only; never modifies combat damage.
+    int goreLevel=1; // 0 Classic, 1 Enhanced, 2 Horror.
+    int goreKineticImpact=1,goreStickyFragments=1,goreSoftDeformation=1,goreWetDeposits=1,goreImpactAudio=1;
+    float goreImpactStrength=1.f;
     int goreHeads=1; // Burst on concentrated confirmed head pellets; no detached head art.
     int goreFragments=1; // Small directional procedural flesh pieces, capped globally.
     int goreWallBlood=1; // Larger collision-driven splashes and drips.
@@ -284,6 +286,9 @@ struct Settings {
     int unoccludedSurfaceLights=0; // Glowing textures' dynamic light skips wall tests; its gloss can show through walls.
     int fewerSurfaceLights=0; // Only the 8 nearest glowing-texture lights stay dynamic, not 24.
 };
+inline bool advancedGoreMode(const Settings &s) {return s.goreLevel==1||s.goreLevel==2;}
+inline bool horrorGoreMode(const Settings &s) {return s.goreLevel==2;}
+
 // glassFrame: on textures with monitor screens, where each glass pixel sits
 // on its screen (see screen_glass.h); null otherwise. relief: on walls and
 // flats, the bump slope and grain the shader shades them with (withRelief).

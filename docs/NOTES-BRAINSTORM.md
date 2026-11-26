@@ -397,9 +397,12 @@ focus on implementation and correct guided details here so vscode codex will wri
 
 
 
+adjust acid and lava bubbles size much bigger - current cannot be seem - too small
+
+
 
 sames as commit 9083cb569c926dc271cca3f7fd7d250f6e05c970: Deimos fog now covers outdoor decorations and monsters at the same depth as the surrounding walls.
-Other foggy atmosphere like Burning city - need same fix.
+Other foggy atmosphere like Burning city or Hell - need same fix.
 
 
 

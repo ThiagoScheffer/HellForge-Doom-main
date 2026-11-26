@@ -15,6 +15,7 @@ struct Vec3 { float x = 0, y = 0, z = 0; };
 
 enum class Kind : std::uint8_t { Flesh, HeavyTissue, Viscera, Bone, BrainLike };
 enum class Tint : std::uint8_t { Red, Blue, Green, PaleBone };
+enum class Attachment : std::uint8_t { None, Wall };
 enum class Surface : std::uint8_t { Wall, Floor, Ceiling, Liquid, Sky, Void };
 struct SurfaceRef {
     Surface type = Surface::Void;
@@ -33,6 +34,13 @@ struct TraceHit {
     bool canMark = false; // valid textured wall / solid non-liquid floor / ceiling
 };
 
+struct WallAnchor {
+    SurfaceRef surface{};
+    float along=0,offsetZ=0;
+    int texture=-1;
+    std::int64_t textureOffset=0,rowOffset=0;
+};
+
 struct Impact {
     std::uint64_t eventId = 0;
     Vec3 center{}, contact{}, normal{};
@@ -42,7 +50,8 @@ struct Impact {
     float strength = 0; // visual-only [0, 1]
     float markSize = 0; // suggested Doom units, not a guaranteed decal
     std::uint8_t variant = 0;
-    bool cling = false; // suggests a thick smear on a wall; does not create geometry
+    bool cling = false;
+    bool attached = false;
 };
 
 using TraceFn = bool (*)(void *context, Vec3 start, Vec3 finish,
@@ -55,6 +64,9 @@ struct Host {
     TraceFn trace = nullptr;
     ImpactFn impact = nullptr;
     ContactFn contact = nullptr;
+    bool (*attach)(void *,const TraceHit &,WallAnchor &) = nullptr;
+    bool (*resolveWall)(void *,const WallAnchor &,float sag,Vec3 &contact,Vec3 &normal) = nullptr;
+    bool softDeformation=true;
 };
 
 struct Burst {
@@ -73,6 +85,8 @@ struct Burst {
     std::uint8_t floorMarks = 2;
     std::uint8_t extraFloorMarks = 0;
     std::uint8_t maxActive = 64; // reserves slots occupied by the procedural fallback
+    bool sticky=false,softDeformation=false;
+    float presentation=0.f;
 };
 
 struct Visual {
@@ -87,6 +101,9 @@ struct Visual {
     Vec3 contact{}, normal{};
     SurfaceRef surface{};
     std::uint64_t eventId=0;
+    Attachment attachment=Attachment::None;
+    float attachedAge=0,squash=0,sag=0;
+    WallAnchor anchor{};
 };
 
 using VisualFn = void (*)(void *context, const Visual &visual);
@@ -106,6 +123,7 @@ class System final {
 public:
     static constexpr std::size_t MaxPieces = 64;
     static constexpr std::size_t MaxResting = 24;
+    static constexpr std::size_t MaxAttached = 8;
     static constexpr int MaxPiecesPerBurst = 12;
     static constexpr int MaxImpactEventsPerAdvance = 12;
 
@@ -125,6 +143,8 @@ public:
     void clear(); // level change, shutdown, demo/replay transition
     std::size_t activeCount() const;
     std::size_t restingCount() const;
+    std::size_t attachedCount() const;
+    std::size_t stationaryCount() const;
     bool hasActiveEvent(std::uint64_t id) const;
     const Stats &stats() const { return stats_; }
 
@@ -143,6 +163,10 @@ private:
         bool brief = false;
         std::uint8_t variant = 0, contacts = 0;
         bool used = false, resting = false;
+        Attachment attachment=Attachment::None;
+        WallAnchor anchor{};
+        bool sticky=false,softDeformation=false,attachedOnce=false;
+        float attachedAt=0,attachedUntil=0,squash=0,sag=0;
     };
     std::array<Piece, MaxPieces> pieces_{};
     std::array<std::uint64_t, 32> recentEvents_{};
@@ -151,7 +175,7 @@ private:
     Stats stats_{};
 
     bool seenEvent(std::uint64_t id) const;
-    Piece *oldestResting();
+    Piece *oldestStationary();
     void step(float dt, const Host &host, int &impactBudget);
 };
 

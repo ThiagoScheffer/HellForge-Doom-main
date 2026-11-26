@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="53a655e2d9c958764860594df8bb2aa1cc960a0c35240d92bc75b0aa94138e56">
+<settings source="platform/settings_panel.cpp" source_sha256="73d760e57b455f4e89c5b1599a856ead919369ec05cd0005c2c38b4db6b90006">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -93,11 +93,17 @@
   <option key="blood_spray" title="Blood spray and trails" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="blood_shine" title="Wet blood shine" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="monster_skin_damage" title="Monster skin damage" category="Combat" kind="check" choices="0=Off|1=On" />
-  <option key="gore_level" title="Advanced Gore" category="Destruction" kind="choice" choices="0=Classic|1=Enhanced" />
+  <option key="gore_level" title="Advanced Gore" category="Destruction" kind="choice" choices="0=Classic|1=Enhanced|2=Horror" />
   <option key="gore_heads" title="Head destruction" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="gore_fragments" title="Flying flesh fragments" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="gore_wall_blood" title="Enhanced wall blood" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="gore_body_damage" title="Body destruction &amp; viscera" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_kinetic_impact" title="Heavy impact reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_sticky_fragments" title="Sticky wall fragments" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_soft_deformation" title="Soft fragment deformation" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_wet_deposits" title="Wet gore deposits" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_impact_audio" title="Heavy impact sounds" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_impact_strength" title="Impact strength" category="Destruction" kind="slider" min=".5" max="1.5" step=".1" />
   <option key="wounds" title="Wound holes" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="varied_deaths" title="Varied deaths" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="death_falls" title="Procedural falls" category="Destruction" kind="choice" choices="0=Off|1=By the hit|2=Legs swept|3=Chest blast|4=Head shot" />
@@ -129,6 +135,8 @@
   <option key="texture_wall_ambience" title="Wall Corpse Ambience" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="texture_skull_eyes" title="Glowing Skull Eyes" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="texture_reactive_eyes" title="Reactive Demon Eyes" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_acid_bubbles" title="Acid bubbles" category="Textures" kind="check" choices="0=Off|1=On" />
+  <option key="texture_lava_bubbles" title="Lava bubbles" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="emissive" title="Emissive textures" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="glossy_screens" title="Glossy monitor screens" category="Textures" kind="check" choices="0=Off|1=On" />
   <option key="live_readouts" title="Live readouts" category="Textures" kind="check" choices="0=Off|1=On" />
