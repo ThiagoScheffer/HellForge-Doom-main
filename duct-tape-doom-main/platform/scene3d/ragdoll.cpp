@@ -18,6 +18,9 @@
    Sometimes a chest blast plays the shot death on strings instead (guided
    falls, below). Drawing only. From the lab: tests/death_ragdoll.py. */
 #include "ragdoll.h"
+#include "../corpse_decomposition.h"
+#include <limits>
+#include <new>
 #include "../../linuxdoom-1.10/p_digwall.h"
 #include "../../linuxdoom-1.10/p_solid.h"
 
@@ -180,7 +183,8 @@ struct Ragdoll {
     V3 tipWay{0,1,0},toEye{0,-1,0};        // the hit's way over the floor and the eye's, in body space
     float centre[2]={},centreWas[2]={},centreShown[2]={};   // the body's middle over the floor: this tic, the last, the pose shown
     float rise=0;                          // its middle's climb the last tic (the top of a throw is a pose)
-    const sector_t *restSector=nullptr;float restFloor=0;   // the floor it came to rest on (a lift carries the corpse)
+    const sector_t *restSector=nullptr;float restFloor=0;
+    int supportSector=-1,lastAdvanceTic=-1;   // the floor it came to rest on (a lift carries the corpse)
     std::vector<Wall> nearWalls;           // the walls round it, in body space
     int slamAt=-1;float slamAge=-1;V3 slamWay{};   // a wall slam (Ragdoll::pin): its tic, age, the wall's way out
     float hitWall=0;V3 hitWay{};int hitPoint=-1;    // the hardest a torso point went into a wall this tic, and which
@@ -217,6 +221,14 @@ struct Ragdoll {
     // Once it lies still the body is baked into a plain corpse sprite: the last picture, the camera
     // angle and tilt it was seen from, shown the same from every angle (rotation 0), its 3D data freed.
     mutable bool baked=false;mutable int bakedAngle=0,bakedTilt=0;
+    mutable std::vector<byte> decayOriginal;
+    mutable std::size_t decayBytes=0;
+    mutable int decayStage=0,decayFamily=0;
+    mutable int decayAttemptStage=-1,decayAttemptFamily=-1,decayRetryAt=0;
+    mutable bool decayUnsupported=false;
+#ifdef DOOM_TEST_DRIVER
+    mutable unsigned decayUploads=0;
+#endif
 
     float rest(int a,int b) const {return length(body->rest[a]-body->rest[b]);}
     void push(int n,V3 v) {prev[n]=prev[n]-v*(1.0f/dollSubsteps);}   // add a velocity (units per tic)
@@ -232,11 +244,14 @@ struct Ragdoll {
         i=std::clamp(i,0,floors.size-1);j=std::clamp(j,0,floors.size-1);
         return units(floors.cells[(size_t)j*floors.size+i]->floorheight)-gz;
     }
-    // A body point over the grid (its world-aligned units); the doll falls unmirrored, like the walls.
-    void overGrid(V3 q,float &wx,float &wy) const {
-        float side=mirror?-1.0f:1.0f;
-        wx=gx+ax[0]*side*q.x+ay[0]*q.y;wy=gy+ax[1]*side*q.x+ay[1]*q.y;
+    void horizontalPoint(V3 q,float originX,float originY,float &x,float &y) const {
+        const float side=mirror?-1.f:1.f;
+        x=originX+ax[0]*side*q.x+ay[0]*q.y;
+        y=originY+ax[1]*side*q.x+ay[1]*q.y;
     }
+    void worldPoint(V3 q,float &x,float &y) const {horizontalPoint(q,ox,oy,x,y);}
+    // A body point over the grid (its world-aligned units).
+    void overGrid(V3 q,float &x,float &y) const {horizontalPoint(q,gx,gy,x,y);}
     float floorAt(V3 q) const {
         float wx,wy;overGrid(q,wx,wy);
         return cellFloor((int)std::floor(wx/floorCell),(int)std::floor(wy/floorCell));
@@ -729,8 +744,37 @@ static bool admitCard(const Ragdoll &doll,bool urgent) {
 }
 
 static void dropCard(const Ragdoll &doll);
+static bool eligibleDoll(const mobj_t &thing,const Ragdoll &doll) {
+    return thing.health<=0&&thing.state&&!P_HazardAcidCorpse(&thing)&&
+        !hasGoreCorpseAppearance(thing)&&
+        std::find(doll.steps.begin(),doll.steps.end(),int(thing.state-states))!=doll.steps.end();
+}
+
 bool hasRagdoll(const mobj_t *thing) {
-    return ragdollDeathsEnabled(settings)&&thing->health<=0&&dolls.count(thing)&&!hasGoreCorpseAppearance(*thing);
+    if(!thing||thing->health>0||!ragdollDeathsEnabled(settings)||levelSerial!=r_levelserial)return false;
+    const auto found=dolls.find(thing);
+    return found!=dolls.end()&&eligibleDoll(*thing,found->second);
+}
+
+CorpseRestState ragdollRestLocation(const mobj_t *thing,CorpseRestLocation &out) {
+    out={};
+    if(!thing||thing->health>0||!sectors||numsectors<=0||levelSerial!=r_levelserial)
+        return CorpseRestState::Invalid;
+    if(!ragdollDeathsEnabled(settings))return CorpseRestState::NoRagdoll;
+    const auto found=dolls.find(thing);
+    if(found==dolls.end())
+        return ragdollDeathPending(thing)?CorpseRestState::Moving:CorpseRestState::NoRagdoll;
+    const Ragdoll &doll=found->second;
+    if(!eligibleDoll(*thing,doll))return CorpseRestState::NoRagdoll;
+    if(!doll.resting)return CorpseRestState::Moving;
+    if(doll.supportSector<0||doll.supportSector>=numsectors)return CorpseRestState::Invalid;
+    CorpseRestLocation rest;
+    doll.worldPoint(doll.p[P_SPINE],rest.x,rest.y);
+    if(!std::isfinite(rest.x)||!std::isfinite(rest.y))return CorpseRestState::Invalid;
+    rest.sector=doll.supportSector;
+    rest.floor=units(sectors[rest.sector].floorheight);
+    out=rest;
+    return CorpseRestState::Resting;
 }
 bool ragdollSettled(const mobj_t *thing) {auto found=dolls.find(thing);return found==dolls.end()||found->second.resting;}
 void forgetRagdoll(const mobj_t *thing) {
@@ -1025,23 +1069,8 @@ bool startRagdoll(const mobj_t &thing,float dx,float dy,float speed,float side,f
 }
 
 static float fade(float t,float hold,float over) {return t>hold?std::clamp(1-(t-hold)/over,0.0f,1.0f):1.0f;}
-bool ragdollView(const mobj_t &thing,DeathView &view) {
-    auto found=dolls.find(&thing);
-    if(found==dolls.end())return false;
-    Ragdoll &doll=found->second;
-    // Crushed to gibs, raised, or otherwise moved on: the game's own frames again.
-    if(thing.health>0||!thing.state||hasGoreCorpseAppearance(thing)||
-       std::find(doll.steps.begin(),doll.steps.end(),(int)(thing.state-states))==doll.steps.end()) {
-        forgetRagdoll(&thing);
-        return false;
-    }
-    // The fall runs in game tics, in the world from where it died. A pose is drawn every earlyPose
-    // tics through the hit (at the death frames' pace the recoil fell between the first two poses),
-    // then as often as the monster's own death frames change (the zombieman's every 5 tics, the
-    // imp's every 8), and always at the top of a throw, the tic it first touches down and the tic
-    // its torso does: sampled evenly that slowly, the impact often fell between two poses and the
-    // body jumped from mid-air to lying.
-    int target=leveltime-doll.start;
+static void advanceRagdoll(const mobj_t &thing,Ragdoll &doll,int target) {
+    // The game-tic counter also makes the two body watches in one tic idempotent.
     while(doll.tics<target&&!doll.resting) {
         float t=(float)doll.tics,muscle[MUSCLES],k=0;
         DollPose shape;
@@ -1136,7 +1165,26 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
         if(stop) {
             if(M_CheckParm((char*)"-ragdolllog"))fprintf(stderr,"ragdollrest %u tic %d down %d slide %.2f %s\n",(unsigned)((uintptr_t)&thing%100000),doll.tics,down,slid,stop);
             doll.resting=true;
-            if((doll.restSector=doll.sectorUnder(doll.p[P_SPINE])))doll.restFloor=units(doll.restSector->floorheight);
+            if((doll.restSector=doll.sectorUnder(doll.p[P_SPINE]))) {
+                const sector_t *support=doll.restSector;
+                float x,y;
+                const V3 spine=doll.p[P_SPINE];
+                doll.worldPoint(spine,x,y);
+                const double fx=double(x)*FRACUNIT,fy=double(y)*FRACUNIT;
+                constexpr double lo=std::numeric_limits<fixed_t>::min(),hi=std::numeric_limits<fixed_t>::max();
+                if(fx>=lo&&fx<=hi&&fy>=lo&&fy<=hi) {
+                    const auto *exact=R_PointInSubsector(fixed_t(fx),fixed_t(fy))->sector;
+                    // The collision grid samples cell centres. At a boundary, prefer
+                    // the exact sector if it has the same top or can support the spine.
+                    if(exact&&(exact->floorheight==support->floorheight||
+                       std::abs(doll.gz+spine.z-units(exact->floorheight)-radius[P_SPINE])<=floorCell))
+                        support=exact;
+                }
+                // The card and its floor effects must ride the same moving sector.
+                doll.restSector=support;
+                doll.restFloor=units(support->floorheight);
+                doll.supportSector=int(support-sectors);
+            }
             std::copy(doll.centre,doll.centre+2,doll.centreWas);
             doll.nearWalls.clear();doll.nearWalls.shrink_to_fit();doll.floors.cells.clear();doll.floors.cells.shrink_to_fit();
         }
@@ -1171,6 +1219,26 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
             if(doll.tics==1||landing||torso||slam||doll.resting)doll.importantPosePending=true;
         }
     }
+}
+
+void tickRagdoll(const mobj_t &thing) {
+    if(!ragdollDeathsEnabled(settings)||paused||levelSerial!=r_levelserial)return;
+    const auto found=dolls.find(&thing);
+    if(found==dolls.end())return;
+    Ragdoll &doll=found->second;
+    if(!eligibleDoll(thing,doll)) {
+        forgetRagdoll(&thing);
+        return;
+    }
+    if(doll.resting||doll.lastAdvanceTic==leveltime)return;
+    doll.lastAdvanceTic=leveltime;
+    // Normally one step. Limit catch-up after a renderer or setting pause.
+    advanceRagdoll(thing,doll,std::min(leveltime-doll.start,doll.tics+4));
+}
+
+bool ragdollView(const mobj_t &thing,DeathView &view) {
+    if(!hasRagdoll(&thing))return false;
+    const Ragdoll &doll=dolls.find(&thing)->second;
     view.sprite=states[doll.state].sprite;view.frame=states[doll.state].frame;view.mirror=doll.mirror;
     view.facing=thing.angle;view.bend=0;view.settle=0;view.fall=FallPose{};view.fall.active=true;
     view.ragdoll=&doll;
@@ -1185,7 +1253,98 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
 // the pose, the 45-degree step, the pitch or the wounds change.
 constexpr int cardKeyBase=-0x50000000;     // image keys clear of walls, lumps and blood
 static int cardSerial=0;
+static void releaseCardDecay(const Ragdoll &doll) {
+    if(doll.decayBytes)releaseCorpseDecayBytes(doll.decayBytes);
+    std::vector<byte>().swap(doll.decayOriginal);
+    doll.decayBytes=0;
+    doll.decayStage=doll.decayFamily=0;
+    doll.decayAttemptStage=-1;
+    doll.decayUnsupported=false;
+}
+
+static bool updateCardPixels(Image &image,const std::vector<byte> &pixels,const std::vector<byte> &normals) {
+    const std::size_t count=std::size_t(image.width)*image.height;
+    std::vector<byte> packed(count*4);
+    for(std::size_t i=0;i<count;++i) {
+        packed[4*i]=pixels[2*i];packed[4*i+1]=pixels[2*i+1];
+        packed[4*i+2]=normals[2*i];packed[4*i+3]=normals[2*i+1];
+    }
+    return gpuUpdateTexture(image.texture,GpuFormat::RGBA8,{{0,0,image.width,image.height}},
+                            packed.data(),image.width*4);
+}
+
+static void applyCardDecay(const Ragdoll &doll,Image &image,int stage,int family) {
+    if(!doll.resting||!doll.baked)stage=0;
+    if(stage==doll.decayStage&&(!stage||family==doll.decayFamily))return;
+    if(doll.decayUnsupported)return;
+    const bool sameAttempt=stage==doll.decayAttemptStage&&family==doll.decayAttemptFamily;
+    if(sameAttempt&&leveltime<doll.decayRetryAt)return;
+    doll.decayAttemptStage=stage;
+    doll.decayAttemptFamily=family;
+    doll.decayRetryAt=leveltime+TICRATE;
+    auto diagnostic=[&](const char *result) {
+        if(M_CheckParm((char*)"-decaydebug"))
+            fprintf(stderr,"HELLFORGE DECAY: RAGDOLL key=%d requested=%d applied=%d %s\n",
+                    doll.cardKey,stage,doll.decayStage,result);
+    };
+    if(image.width<1||image.height<1||image.width>256||image.height>256||
+       image.pixels.size()!=std::size_t(image.width)*image.height*2) {
+        doll.decayUnsupported=true;
+        diagnostic("unsupported artwork");
+        return;
+    }
+
+    const bool capture=stage&&doll.decayOriginal.empty();
+    const std::size_t bytes=capture?image.pixels.size():0;
+    // A zero-byte reservation denotes a transition with an existing snapshot.
+    CorpseDecayReservation reservation(bytes);
+    if(capture&&!reservation) {
+        if(!sameAttempt)diagnostic("budget exceeded");
+        return;
+    }
+    try {
+        std::vector<byte> snapshot,changed;
+        if(capture)snapshot=image.pixels;
+        // Account for actual vector capacity if the allocator rounded up.
+        const std::size_t extra=capture?snapshot.capacity()-bytes:0;
+        CorpseDecayReservation excess(extra);
+        if(extra&&!excess) {
+            if(!sameAttempt)diagnostic("budget exceeded");
+            return;
+        }
+        const auto &fresh=capture?snapshot:doll.decayOriginal;
+        if(stage) {
+            const auto *palette=static_cast<const byte*>(W_CacheLumpName((char*)"PLAYPAL",PU_CACHE));
+            if(!doom_decay::paint(changed,fresh,image.width,image.height,palette,stage,family,
+                                  doom_decay::mix32(std::uint32_t(doll.cardKey)))) {
+                diagnostic("painting failed");
+                return;
+            }
+        } else changed=fresh;
+        const auto normals=spriteNormals(image.width,image.height,fresh.data());
+        if(!updateCardPixels(image,changed,normals)) {
+            if(!sameAttempt)diagnostic("upload failed");
+            return;
+        }
+        image.pixels=std::move(changed);
+        if(capture) {
+            doll.decayOriginal=std::move(snapshot);
+            doll.decayBytes=reservation.take()+excess.take();
+        }
+        if(!stage)releaseCardDecay(doll);
+        doll.decayStage=stage;
+        doll.decayFamily=family;
+#ifdef DOOM_TEST_DRIVER
+        ++doll.decayUploads;
+#endif
+        diagnostic("queued");
+    } catch(const std::bad_alloc &) {
+        if(!sameAttempt)diagnostic("allocation failed");
+    }
+}
+
 static void dropCard(const Ragdoll &doll) {
+    releaseCardDecay(doll);
     if(!doll.cardKey)return;
     images.erase(doll.cardKey);
     for(auto *group:{&batches,&mirrorBatches,&shadowBatches,&decalBatches})group->erase(doll.cardKey);
@@ -1241,7 +1400,7 @@ bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z)
     x+=doll.ax[0]*mx+doll.ay[0]*my;y+=doll.ax[1]*mx+doll.ay[1]*my;
     return doll.landed;
 }
-bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,const std::vector<byte> *holes,RagdollCard &card) {
+bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,const std::vector<byte> *holes,RagdollCard &card,int decayStage,int decayFamily) {
     const Relief &body=*doll.body;
     if(body.cardSize<=0)return false;
     int size=body.cardSize;
@@ -1255,6 +1414,9 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
     auto found=images.find(doll.cardKey);
     const bool cached=doll.cardKey&&found!=images.end()&&found->second.texture;
     auto place=[&] {
+        auto active=images.find(doll.cardKey);
+        if(active!=images.end()&&active->second.texture)
+            applyCardDecay(doll,active->second,decayStage,decayFamily);
         float px,py,base;
         dollPlace(doll,doll.cardCentre,fraction,px,py,base);
         card.key=doll.cardKey;card.size=size;card.half=size/2.0f;
@@ -1383,16 +1545,15 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
         if(bottom<0)return cached&&place();
         std::vector<byte> normals=spriteNormals(size,size,pixels.data());
         if(!cached) {
-            Image picture=upload(size,size,pixels.data(),0,0,nullptr,normals.data());
+            Image picture=upload(size,size,pixels.data(),0,0,nullptr,normals.data(),nullptr,false,false);
             if(!picture.texture)return false;
             if(!doll.cardKey)doll.cardKey=cardKeyBase+(++cardSerial&0x0fffffff);
             images.insert_or_assign(doll.cardKey,std::move(picture));
         } else {
-            std::vector<byte> packed((size_t)size*size*4);
-            for(size_t i=0;i<(size_t)size*size;++i) {packed[4*i]=pixels[2*i];packed[4*i+1]=pixels[2*i+1];packed[4*i+2]=normals[2*i];packed[4*i+3]=normals[2*i+1];}
-            gpuUpdateTexture(found->second.texture,GpuFormat::RGBA8,{{0,0,size,size}},packed.data(),size*4);
+            if(!updateCardPixels(found->second,pixels,normals))return place();
             found->second.pixels=std::move(pixels);
         }
+        releaseCardDecay(doll);
         doll.cardBottom=bottom;
         doll.cardLeft=left;doll.cardRight=right;doll.cardFirst=first;
         doll.cardMiddle[0]=o.x;doll.cardMiddle[1]=o.y;
@@ -1412,4 +1573,68 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
     }
     return place();
 }
+
+#ifdef DOOM_TEST_DRIVER
+void testRagdollRestFixture() {
+    auto require=[](bool ok,const char *label) {
+        if(!ok)I_Error((char*)"Ragdoll rest fixture: %s",label);
+    };
+    require(numsectors>=2,"arena must have two supporting sectors");
+    mobj_t corpse={};
+    corpse.state=&states[S_POSS_DIE5];
+    CorpseRestLocation out;
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::NoRagdoll,"no ragdoll");
+    auto &doll=dolls[&corpse];
+    doll.steps={S_POSS_DIE5};
+    doll.ox=100;doll.oy=200;
+    doll.ax[0]=0;doll.ax[1]=1;doll.ay[0]=-1;doll.ay[1]=0;
+    doll.p[P_SPINE]={12,8,4};
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::Moving,"airborne");
+    doll.landed=true;
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::Moving,"landed and moving");
+    doll.resting=true;
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::Invalid,"invalid support");
+    doll.supportSector=1;
+    const fixed_t height=sectors[1].floorheight;
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::Resting&&
+            out.x==92&&out.y==212&&out.sector==1&&out.floor==units(height),"displaced rotated body");
+    doll.baked=doll.mirror=true;
+    sectors[1].floorheight=height+16*FRACUNIT;
+    for(int i=0;i<3;++i)
+        require(ragdollRestLocation(&corpse,out)==CorpseRestState::Resting&&out.x==92&&out.y==188&&
+                out.floor==units(height)+16&&doll.tics==0,"baked mirror on moving floor");
+    sectors[1].floorheight=height;
+    doll.p[P_SPINE].x=std::numeric_limits<float>::infinity();
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::Invalid,"nonfinite point");
+    corpse.state=&states[S_POSS_STND];
+    require(ragdollRestLocation(&corpse,out)==CorpseRestState::NoRagdoll,"stale death chain");
+    forgetRagdoll(&corpse);
+
+    Ragdoll baked;
+    baked.resting=baked.baked=true;
+    Image withoutTexture;
+    withoutTexture.width=withoutTexture.height=1;
+    withoutTexture.pixels={100,255};
+    const auto before=corpseDecayBytesUsed();
+    applyCardDecay(baked,withoutTexture,1,0);
+    require(baked.decayStage==0&&baked.decayOriginal.empty()&&corpseDecayBytesUsed()==before,
+            "failed GPU update rolls back snapshot");
+}
+
+int testRagdollDecay(const mobj_t *thing,unsigned &uploads) {
+    const auto found=dolls.find(thing);
+    if(found==dolls.end())return -1;
+    uploads=found->second.decayUploads;
+    return found->second.decayStage;
+}
+bool testRagdollLanded(const mobj_t *thing) {
+    const auto found=dolls.find(thing);
+    return found!=dolls.end()&&found->second.landed;
+}
+int testRagdollTics(const mobj_t *thing) {
+    const auto found=dolls.find(thing);
+    return found==dolls.end()?-1:found->second.tics;
+}
+#endif
+
 }

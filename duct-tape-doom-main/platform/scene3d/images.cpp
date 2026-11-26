@@ -1,6 +1,7 @@
 /* Textures from the WAD: upload with palette mips (sprites with their normals), bump
    relief, emissive masks and monitor glass; average and brightest colors. */
 #include "internal.h"
+#include <cassert>
 #include "sky_atmosphere.h"
 #include "../shaders/living_surfaces.h"
 #include "../monster_regions.h"
@@ -83,7 +84,7 @@ static std::vector<byte> paletteMips(int w,int h,const byte *base,int channels,i
 // Channels: palette index, coverage, then the emissive mask (or sprite
 // normal x) and, on walls and flats, monitor glass height (or sprite normal y).
 // mipmaps: walls and flats also get palette mip levels.
-Image upload(int w,int h,const byte *pixels,int left,int top,const byte *mask,const byte *normals,const byte *glass,bool mipmaps) {
+Image upload(int w,int h,const byte *pixels,int left,int top,const byte *mask,const byte *normals,const byte *glass,bool mipmaps,bool required) {
     Image image; image.pixels.assign(pixels,pixels+(size_t)w*h*2); image.width=w; image.height=h; image.left=left; image.top=top;
     for(size_t i=0;i<(size_t)w*h;++i)if(pixels[2*i+1]!=255) {image.opaque=false;break;}
     std::vector<byte> packed;
@@ -125,7 +126,7 @@ Image upload(int w,int h,const byte *pixels,int left,int top,const byte *mask,co
         levelData=chain.data();
     }
     image.texture=gpuCreateTexture(wide?GpuFormat::RGBA8:GpuFormat::RG8,w,h,levelData,w*channels,levels);
-    if(!image.texture) I_Error((char*)"Could not allocate a GPU texture");
+    if(!image.texture&&required) I_Error((char*)"Could not allocate a GPU texture");
     return image;
 }
 // Screen glass heights, or empty when the texture has no screens; frame
@@ -1136,10 +1137,24 @@ Image &monsterEyeInjuryImage(int type, int lump, const Image &original, Image &s
 }
 
 namespace {
-std::size_t decayTextureBytes=0;
+std::size_t decayTextureBytes=0,conventionalDecayBytes=0;
 std::unordered_set<int> rejectedDecayTextures;
 }
-void corpseDecayImageReset() {decayTextureBytes=0;rejectedDecayTextures.clear();}
+bool reserveCorpseDecayBytes(std::size_t bytes) {
+    if(bytes>doom_decay::textureBudget-decayTextureBytes)return false;
+    decayTextureBytes+=bytes;
+    return true;
+}
+void releaseCorpseDecayBytes(std::size_t bytes) {
+    assert(bytes<=decayTextureBytes);
+    if(bytes<=decayTextureBytes)decayTextureBytes-=bytes;
+}
+std::size_t corpseDecayBytesUsed() {return decayTextureBytes;}
+void corpseDecayImageReset() {
+    releaseCorpseDecayBytes(conventionalDecayBytes);
+    conventionalDecayBytes=0;
+    rejectedDecayTextures.clear();
+}
 
 // Each stage is a shared image, never an allocation per corpse. Work on the
 // WAD's currently loaded pixels and PLAYPAL, leaving transparency unchanged.
@@ -1160,7 +1175,8 @@ Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
         return source;
     }
     const std::size_t bytes=std::size_t(source.width)*source.height*6u;
-    if(bytes>doom_decay::textureBudget-decayTextureBytes) {
+    CorpseDecayReservation reservation(bytes);
+    if(!reservation) {
         if(rejectedDecayTextures.insert(variantKey).second && M_CheckParm((char*)"-decaydebug"))
             std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE-SKIP lump=%d stage=%d need=%zu remaining=%zu (budget exceeded)\n",
                          lump,stage,bytes,doom_decay::textureBudget-decayTextureBytes);
@@ -1174,11 +1190,16 @@ Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key) {
     }
     auto normals=spriteNormals(source.width,source.height,source.pixels.data());
     Image variant=upload(source.width,source.height,pixels.data(),source.left,source.top,
-                         nullptr,normals.data());
+                         nullptr,normals.data(),nullptr,false,false);
+    if(!variant.texture) {
+        if(rejectedDecayTextures.insert(variantKey).second&&M_CheckParm((char*)"-decaydebug"))
+            std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE-SKIP lump=%d stage=%d (upload failed)\n",lump,stage);
+        return source;
+    }
     variant.glow=source.glow;variant.glowWeight=source.glowWeight;variant.glowHeight=source.glowHeight;
     auto added=images.emplace(variantKey,std::move(variant));
     if(!added.second)return source;
-    decayTextureBytes+=bytes;
+    conventionalDecayBytes+=reservation.take();
     if(M_CheckParm((char*)"-decaydebug"))
         std::fprintf(stderr,"HELLFORGE DECAY: TEXTURE built lump=%d stage=%d family=%d dimensions=%dx%d bytes=%zu used=%zu key=%d\n",
                      lump,stage,family,source.width,source.height,bytes,decayTextureBytes,variantKey);

@@ -30,7 +30,8 @@ enum class GpuFormat { R8, RG8, RGBA8, RGBA16Uint };
 GpuTextureRef gpuCreateTexture(GpuFormat format,int width,int height,const void *pixels,int bytesPerRow,int levels=1);
 // Replaces rects (x, y, width, height) of a texture with the same rects of
 // pixels, an image of the texture's size; the rest keeps its contents.
-void gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::vector<std::array<int,4>> &rects,const void *pixels,int bytesPerRow);
+// Returns true once the upload has been queued.
+bool gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::vector<std::array<int,4>> &rects,const void *pixels,int bytesPerRow);
 // Reads an emissive mask image as value*alpha in [0,1]; false if unreadable or the wrong size.
 bool platformReadMask(const char *path,int width,int height,std::vector<float> &values);
 // The most MSAA samples the GPU offers for the world targets (1: none).

@@ -214,7 +214,7 @@ static int variantOf(int kind,const uint32_t *seed=nullptr) {
 }
 struct BloodFloor { float x,y,born,size,angle,stretch;int sector,variant;bool flip,ceiling;bool decoration=false; };
 struct BloodWall { int line,side,section;float along,dz,born,size,stretch;int variant;bool flip;int drips;float dripU[2],dripLength[2]; int texture=0; fixed_t offset=0; bool thickDeposit=false; };
-struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr; };
+struct BloodPool { float x,y,born,size,angle;int sector,tint;const mobj_t *owner=nullptr;CorpseLifetime lifetime=0; };
 static std::vector<BloodFloor> environmentFloors;
 static std::vector<BloodWall> environmentWalls;
 static std::vector<BloodFloor> bloodFloors;static std::vector<BloodWall> bloodWalls;static std::vector<BloodPool> bloodPools;
@@ -227,7 +227,8 @@ void clearAcidMarks() {
 }
 static std::vector<BloodWall> severeWallMarks;
 static std::vector<BloodPool> severePools;
-static std::unordered_map<const mobj_t*,bool> pooledCorpses;
+struct PooledCorpse { CorpseLifetime lifetime=0;bool seen=false,dry=false; };
+static std::unordered_map<const mobj_t*,PooledCorpse> pooledCorpses;
 static unsigned bloodLevelSerial;
 constexpr int bloodTransferTics=2*TICRATE,maxPrintsPerTrail=20;
 constexpr float footprintStride=20.f,footprintLength=17.f,bootOffset=4.5f;
@@ -494,6 +495,25 @@ static void checkBloodLevel() {
     clearWallAmbienceBlood();
     bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
 }
+void dryCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime) {
+    if(!lifetime||corpseLifetime(thing)!=lifetime)return;
+    checkBloodLevel();
+    auto &marker=pooledCorpses[thing];
+    if(marker.lifetime==lifetime&&marker.dry)return;
+    marker={lifetime,true,true};
+    bloodPools.erase(std::remove_if(bloodPools.begin(),bloodPools.end(),[&](const BloodPool &pool) {
+        return pool.owner==thing&&pool.lifetime==lifetime;
+    }),bloodPools.end());
+}
+
+void forgetCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime) {
+    const auto marker=pooledCorpses.find(thing);
+    if(marker!=pooledCorpses.end()&&marker->second.lifetime==lifetime)pooledCorpses.erase(marker);
+    for(auto &pool:bloodPools)if(pool.owner==thing&&pool.lifetime==lifetime) {
+        pool.owner=nullptr;
+        pool.lifetime=0;
+    }
+}
 bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld,LiquidMaterial material,LiquidSource source) {
     if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn())||sector<0||sector>=numsectors)return false;
     checkBloodLevel();
@@ -731,6 +751,70 @@ void tickBloodFootsteps() {
                                bloodFootHeavy+variant+32*footsteps.tint,footsteps.left});
     footsteps.left=!footsteps.left;++footsteps.prints;
 }
+static void updateCorpsePools(float now) {
+    // Permanent pools are owned by one death and use the visual body if rigged.
+    for(auto &entry:pooledCorpses)entry.second.seen=false;
+    for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
+        if(!(thing->flags&MF_CORPSE)||thing->health>0)continue;
+        const auto lifetime=corpseLifetime(thing);
+        const auto marker=pooledCorpses.find(thing);
+        const bool marked=marker!=pooledCorpses.end()&&marker->second.lifetime==lifetime;
+        if(marked)marker->second.seen=true;
+        if(P_HazardAcidCorpse(thing)) {
+            if(lifetime)dryCorpseBlood(thing,lifetime);
+            continue;
+        }
+        if((thing->flags&MF_NOBLOOD)||(marked&&marker->second.dry))continue;
+        if(corpseDecayStage(thing)>=2) {
+            dryCorpseBlood(thing,lifetime);
+            continue;
+        }
+        if(marked)continue;
+
+        CorpseRestLocation rest;
+        switch(ragdollRestLocation(thing,rest)) {
+        case CorpseRestState::Moving:
+        case CorpseRestState::Invalid:continue;
+        case CorpseRestState::NoRagdoll:
+            if(thing->z>thing->floorz||thing->momx||thing->momy)continue;
+            rest={units(thing->x),units(thing->y),units(thing->floorz),i};
+            break;
+        case CorpseRestState::Resting:break;
+        }
+        if(sectors[rest.sector].floorpic==skyflatnum)continue;
+        const auto newLifetime=ensureCorpseLifetime(thing);
+        if(!newLifetime)continue;
+        pooledCorpses[thing]={newLifetime,true};
+        if(bloodPools.size()>=64)bloodPools.erase(bloodPools.begin());
+        bloodPools.push_back({rest.x,rest.y,now,std::clamp(units(thing->radius)*2.4f,28.f,64.f),
+                              randomRange(0,2*doomPi),rest.sector,monsterBloodTint(thing),thing,newLifetime});
+    }
+    for(auto it=pooledCorpses.begin();it!=pooledCorpses.end();) {
+        if(it->second.seen) {++it;continue;}
+        const auto *owner=it->first;
+        const auto lifetime=it->second.lifetime;
+        ++it;
+        forgetCorpseBlood(owner,lifetime);
+    }
+}
+
+#ifdef DOOM_TEST_DRIVER
+void testUpdateCorpsePools() {
+    checkBloodLevel();
+    if(settings.blood)updateCorpsePools((leveltime+renderFraction)/TICRATE);
+}
+int testCorpsePools(const mobj_t *owner,CorpseRestLocation *position) {
+    int count=0;
+    const auto lifetime=corpseLifetime(owner);
+    for(const auto &pool:bloodPools) {
+        if(pool.owner!=owner||pool.lifetime!=lifetime)continue;
+        ++count;
+        if(position)*position={pool.x,pool.y,units(sectors[pool.sector].floorheight),pool.sector};
+    }
+    return count;
+}
+#endif
+
 void buildBlood(const Uniforms &camera) {
     buildSevereBlood(camera);
     float now=gameSeconds();
@@ -744,43 +828,7 @@ void buildBlood(const Uniforms &camera) {
     if(!showBlood&&!showAcid)return;
     checkBloodLevel();
     if(showBlood) {
-    // Pools: corpses that came to rest, once each, sized to the body.
-    for(auto &entry:pooledCorpses)entry.second=false;
-    // Only remove the pool actually created for the same live corpse.
-    // Other blood impacts/splats and neighboring corpse pools stay intact.
-    // Keys in BloodPool are identities only: never dereference cached pointers.
-    struct PoolRemoval { float x,y; bool acid; };
-    std::unordered_map<const mobj_t*,PoolRemoval> driedOwners;
-    for(int i=0;i<numsectors;++i)for(mobj_t *thing=sectors[i].thinglist;thing;thing=thing->snext) {
-        if(!(thing->flags&MF_CORPSE)||(thing->flags&MF_NOBLOOD))continue;
-        if(P_HazardAcidCorpse(thing)) {
-            if(pooledCorpses.count(thing))
-                driedOwners.emplace(thing,PoolRemoval{0,0,true});
-            continue;
-        }
-        if(corpseDecayStage(thing)>=2) {
-            // Preserve an existing no-recreate marker without allocating an
-            // entry for corpses that never had a blood pool in the first place.
-            auto pooled=pooledCorpses.find(thing);
-            if(pooled!=pooledCorpses.end())pooled->second=true;
-            driedOwners.emplace(thing,PoolRemoval{units(thing->x),units(thing->y),false});
-            continue;
-        }
-        auto seen=pooledCorpses.find(thing);
-        if(seen!=pooledCorpses.end()) {seen->second=true;continue;}
-        if(thing->z>thing->floorz||thing->momx||thing->momy||sectors[i].floorpic==skyflatnum)continue;
-        pooledCorpses[thing]=true;
-        if(bloodPools.size()>=64)bloodPools.erase(bloodPools.begin());
-        bloodPools.push_back({units(thing->x),units(thing->y),now,std::clamp(units(thing->radius)*2.4f,28.0f,64.0f),randomRange(0,2*doomPi),i,monsterBloodTint(thing),thing});
-    }
-    for(auto it=pooledCorpses.begin();it!=pooledCorpses.end();) it=it->second?std::next(it):pooledCorpses.erase(it);
-    // Free CPU pool records and skip their per-frame geometry. Compare owner
-    // identity AND original pool location to avoid mismatching nearby corpses.
-    bloodPools.erase(std::remove_if(bloodPools.begin(),bloodPools.end(),[&](const BloodPool &pool) {
-        auto it=driedOwners.find(pool.owner);
-        return it!=driedOwners.end() && (it->second.acid ||
-               (std::abs(it->second.x-pool.x)<0.01f && std::abs(it->second.y-pool.y)<0.01f));
-    }),bloodPools.end());
+    updateCorpsePools(now);
     for(const auto &pool:bloodPools) {
         float age=now-pool.born;
         // The pool spreads over four seconds in eight steps.

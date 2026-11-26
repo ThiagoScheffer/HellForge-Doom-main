@@ -151,7 +151,7 @@ int translucentWallImage(int index);
 void imagesShutdown();
 void prepareVoxelModels();
 bool drawVoxel(std::map<int,std::vector<Vertex>> &,const mobj_t &,int,int,angle_t,float,float,float,float,const std::array<float,3>&,unsigned,unsigned,const Uniforms&);
-Image upload(int w,int h,const byte *pixels,int left=0,int top=0,const byte *mask=nullptr,const byte *normals=nullptr,const byte *glass=nullptr,bool mipmaps=false);
+Image upload(int w,int h,const byte *pixels,int left=0,int top=0,const byte *mask=nullptr,const byte *normals=nullptr,const byte *glass=nullptr,bool mipmaps=false,bool required=true);
 const std::array<float,3> &averageColor(Image &image);
 std::array<float,3> paletteColor(const std::array<float,3> &color);
 const std::array<float,3> &brightestColor(Image &image);
@@ -431,6 +431,25 @@ void flashlightSilhouette(const mobj_t &thing,const Image &image,int lump,bool f
 // decoration_ambience.cpp
 // Independent, map-wide corpse-decomposition timeline. Do not remove when
 // updating weather or decoration ambience; geometry.cpp depends on these.
+using CorpseLifetime = std::uint64_t;
+CorpseLifetime corpseLifetime(const mobj_t *thing);
+CorpseLifetime ensureCorpseLifetime(const mobj_t *thing);
+void corpseLifecycleEvent(const mobj_t *thing,int death);
+void resetCorpseLifetimes();
+void forgetCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime);
+void dryCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime);
+void forgetCorpseAmbience(const mobj_t *thing);
+#ifdef DOOM_TEST_DRIVER
+struct CorpseRestLocation;
+void testRagdollRestFixture();
+int testRagdollDecay(const mobj_t *thing,unsigned &uploads);
+bool testRagdollLanded(const mobj_t *thing);
+int testRagdollTics(const mobj_t *thing);
+bool testSetCorpseAge(const mobj_t *thing,int ageTics);
+bool testCorpseEmitter(const mobj_t *thing,CorpseRestLocation &position);
+void testUpdateCorpsePools();
+int testCorpsePools(const mobj_t *owner,CorpseRestLocation *position=nullptr);
+#endif
 void corpseDecayReset();
 void corpseDecayTick();
 int corpseDecayStage(const mobj_t *thing); // 0 fresh; 1-3 dry, independent of camera proximity.
@@ -534,6 +553,20 @@ void monsterSkinReset(); // Before image atlas/map resources are destroyed.
 // Procedurally cached death-sprite variants; original art remains authoritative.
 Image &corpseDecayImage(int lump,Image &source,int stage,int family,int &key);
 void corpseDecayImageReset();
+bool reserveCorpseDecayBytes(std::size_t bytes);
+void releaseCorpseDecayBytes(std::size_t bytes);
+std::size_t corpseDecayBytesUsed();
+
+class CorpseDecayReservation {
+    std::size_t bytes;
+public:
+    explicit CorpseDecayReservation(std::size_t size):bytes(reserveCorpseDecayBytes(size)?size:0) {}
+    CorpseDecayReservation(const CorpseDecayReservation &)=delete;
+    CorpseDecayReservation &operator=(const CorpseDecayReservation &)=delete;
+    ~CorpseDecayReservation() {if(bytes)releaseCorpseDecayBytes(bytes);}
+    explicit operator bool() const {return bytes!=0;}
+    std::size_t take() {const auto result=bytes;bytes=0;return result;}
+};
 extern int bloodSourceTint;
 enum class LiquidMaterial : uint8_t { Blood, Acid };
 enum LiquidTint : int { LIQUID_TINT_NORMAL=0, LIQUID_TINT_BLUE=1, LIQUID_TINT_GREEN=2, LIQUID_TINT_ACID=3 };
@@ -656,7 +689,21 @@ bool rigJoints(int lump,RigJoints &out);
 // (ragdoll_body.cpp) on a small 3D skeleton the hit knocks over. hitZ, hitU as startFall; blast: an
 // explosion killed it (thrown flying).
 bool startRagdoll(const mobj_t &thing,float dx,float dy,float speed,float side,float high,float hitZ,float hitU,bool blast);
+enum class CorpseRestState : uint8_t { NoRagdoll, Moving, Resting, Invalid };
+struct CorpseRestLocation { float x=0,y=0,floor=0;int sector=-1; };
+CorpseRestState ragdollRestLocation(const mobj_t *thing,CorpseRestLocation &location);
+bool ragdollDeathPending(const mobj_t *thing);
+void tickRagdoll(const mobj_t &thing);
 bool ragdollView(const mobj_t &thing,DeathView &view);
+inline int corpseDecayFamily(int type) {
+    switch(type) {
+    case MT_TROOP:return 1;
+    case MT_SERGEANT:return 2;
+    case MT_FATSO:case MT_BRUISER:case MT_KNIGHT:return 3;
+    case MT_HEAD:return 4;
+    default:return 0;
+    }
+}
 void forgetRagdoll(const mobj_t *thing);
 void ragdollsShutdown();
 void prepareRagdolls();   // at level load: bodies for every killable monster's pain drawing
@@ -670,7 +717,7 @@ void ragdollTestTic();    // ragdoll_test.cpp: -ragdolltest's scripted kills, ea
 // The doll flies in the world from where it died, not with the thing: fraction is the frame's
 // share of the tic, sink how far the thing sinks into a liquid.
 struct RagdollCard { int key;float x,y,top,half;int size;int u0,v0,u1,v1; }; // opaque texel bounds, upper limits exclusive
-bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,const std::vector<byte> *holes,RagdollCard &card);
+bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,const std::vector<byte> *holes,RagdollCard &card,int decayStage,int decayFamily);
 // Where the body is drawn (its card's middle) and the floor it died on: its light and liquid are found
 // there. True once it is down (a body in the air doesn't sink into the liquid under it).
 bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z);

@@ -14,7 +14,7 @@ namespace doom3d {
 // corpse frame, so the final body stays the game's. Gibbing hops the body,
 // fliers sway as they fall. Variation comes from hashes, never P_Random.
 struct Impulse { int start;float dx,dy,lean,whip,squash,peak,hop;int duration;bool death,flier; };
-struct Body { int health;float momx,momy;bool alive,seen; };
+struct Body { int health;float momx,momy;bool alive,seen;bool pendingDeath=false; };
 // This tic's hits on one body: hitscan points (exact) and the attack that
 // did the damage (its inflictor: the shooter for hitscan, else the missile
 // or blast), which groups bodies struck by one blast.
@@ -23,11 +23,54 @@ static std::unordered_map<const mobj_t*,Body> watched;
 static std::unordered_map<const mobj_t*,std::vector<Impulse>> impulses;
 static std::unordered_map<const mobj_t*,Hit> hits;
 static unsigned bodyLevelSerial;
+static std::unordered_map<const mobj_t*,CorpseLifetime> corpseLifetimes;
+static CorpseLifetime nextCorpseLifetime=0;
+
+CorpseLifetime corpseLifetime(const mobj_t *thing) {
+    const auto found=corpseLifetimes.find(thing);
+    return found==corpseLifetimes.end()?0:found->second;
+}
+CorpseLifetime ensureCorpseLifetime(const mobj_t *thing) {
+    if(!thing||thing->health>0||!(thing->flags&MF_CORPSE)||levelSerial!=r_levelserial)return 0;
+    if(const auto lifetime=corpseLifetime(thing))return lifetime;
+    if(++nextCorpseLifetime==0)++nextCorpseLifetime;
+    return corpseLifetimes.emplace(thing,nextCorpseLifetime).first->second;
+}
+static void invalidateCorpseLifetime(const mobj_t *thing) {
+    if(const auto lifetime=corpseLifetime(thing)) {
+        if(P_HazardAcidCorpse(thing))dryCorpseBlood(thing,lifetime);
+        forgetCorpseBlood(thing,lifetime);
+        corpseLifetimes.erase(thing);
+    }
+    forgetCorpseAmbience(thing);
+}
+void resetCorpseLifetimes() {
+    corpseLifetimes.clear();
+    nextCorpseLifetime=0;
+}
+void corpseLifecycleEvent(const mobj_t *thing,int death) {
+    forgetGore(thing,death);
+    invalidateCorpseLifetime(thing);
+    forgetDeath(thing);
+    // A resurrection and second kill can both occur between body watches.
+    // Keep the recorded hit for the new death and let the watch register it.
+    const auto found=watched.find(thing);
+    if(death&&found!=watched.end()) {
+        found->second.alive=true;
+        found->second.pendingDeath=true;
+    }
+}
+
 // Vanilla friction on the ground, so the push of this tic is what the
 // momentum gained beyond the last tic's slide.
 constexpr float slide=(float)0xe800/FRACUNIT;
 
 static bool monster(const mobj_t &thing) {return thing.info&&(thing.info->flags&MF_COUNTKILL);}
+bool ragdollDeathPending(const mobj_t *thing) {
+    const auto found=watched.find(thing);
+    return found!=watched.end()&&found->second.pendingDeath;
+}
+
 // Tics from a death state to its resting frame (or removal).
 static int deathTics(int state) {
     int total=0;
@@ -160,7 +203,7 @@ void watchBodies() {
         if(found==watched.end()) {watched[thing]={thing->health,units(thing->momx),units(thing->momy),alive,true};continue;}
         Body &body=found->second;body.seen=true;
         bool died=body.alive&&!alive,hurt=alive&&thing->health<body.health;
-        if(alive&&!body.alive) {hits.erase(thing);impulses.erase(thing);forgetDeath(thing);forgetWounds(thing);} // Raised again.
+        if(alive&&!body.alive) {invalidateCorpseLifetime(thing);hits.erase(thing);impulses.erase(thing);forgetDeath(thing);forgetWounds(thing);} // Raised again.
         if(died||(hurt&&(settings.hitFlinch||spray))) {
             float z=0,hdx=0,hdy=0,side=0;bool known=false;const mobj_t *attack=nullptr;
             auto hit=hits.find(thing);
@@ -194,10 +237,17 @@ void watchBodies() {
                 if(!useDoll)startDeath(*thing,dx,dy,speed,side,high,gib,attack,shot?z:-1,hitU);
             }
         }
+        body.pendingDeath=false;
+        if(!alive&&ragdolls)tickRagdoll(*thing);
+        if(!alive&&P_HazardAcidCorpse(thing))dryCorpseBlood(thing,corpseLifetime(thing));
         body.health=thing->health;body.momx=units(thing->momx);body.momy=units(thing->momy);body.alive=alive;
     }
     for(auto it=watched.begin();it!=watched.end();) {
         if(it->second.seen) {++it;continue;}
+        const auto lifetime=corpseLifetime(it->first);
+        if(lifetime)forgetCorpseBlood(it->first,lifetime);
+        forgetCorpseAmbience(it->first);
+        corpseLifetimes.erase(it->first);
         hits.erase(it->first);forgetDeath(it->first);forgetWounds(it->first);it=watched.erase(it);
     }
     for(auto it=impulses.begin();it!=impulses.end();) {

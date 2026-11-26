@@ -89,6 +89,7 @@ struct Emitter {
     int firstTic=0,type=-1;
     float x=0,y=0,z=0;
     uint32_t seed=0;
+    CorpseLifetime lifetime=0;
 };
 static std::unordered_map<const mobj_t*,Emitter> known;
 static std::vector<const mobj_t*> selected;
@@ -181,8 +182,26 @@ bool detailAge(const Emitter &e,int preset,float fraction,float &age,int &event)
     age=(shifted%tics+fraction)/TICRATE;
     return age<(spider?5.4f:3.4f);
 }
-bool settled(const mobj_t &thing, BodyKind kind) {
+struct AmbienceLocation {
+    float x,y,z,floor;
+    const sector_t *sector;
+    bool ragdoll=false;
+};
+bool ambienceLocation(const mobj_t &thing,BodyKind kind,AmbienceLocation &out) {
+    out={units(thing.x),units(thing.y),units(thing.z),units(thing.floorz),
+         thing.subsector?thing.subsector->sector:nullptr};
     if(kind!=BodyKind::Corpse)return true;
+    CorpseRestLocation rest;
+    switch(ragdollRestLocation(&thing,rest)) {
+    case CorpseRestState::Moving:case CorpseRestState::Invalid:return false;
+    case CorpseRestState::Resting:
+        out={rest.x,rest.y,rest.floor,rest.floor,&sectors[rest.sector],true};
+        return true;
+    case CorpseRestState::NoRagdoll:return true;
+    }
+    return false;
+}
+bool settled(const mobj_t &thing) {
     if(thing.z>thing.floorz+4*FRACUNIT)return false;
     return std::abs(thing.momx)<=FRACUNIT&&std::abs(thing.momy)<=FRACUNIT&&
            std::abs(thing.momz)<=FRACUNIT;
@@ -202,23 +221,20 @@ void scan(const Uniforms &camera) {
             // The live sector iteration owns the actor; never dereference a
             // pointer cached in known/selected to determine its decay stage.
             if(kind==BodyKind::Corpse && corpseDecayStage(thing)>=2)continue;
-            const float x=units(thing->x),y=units(thing->y);
-            float dx=x-camera.eye[0],dy=y-camera.eye[1];
+            AmbienceLocation pos;
+            if(!ambienceLocation(*thing,kind,pos))continue;
+            const float dx=pos.x-camera.eye[0],dy=pos.y-camera.eye[1];
             if(dx*dx+dy*dy>track2)continue;
             auto it=known.find(thing);
-            if(it==known.end()) {
-                if(known.size()>=doom_decor::trackedLimit)continue;
-                Emitter e;
-                e.kind=kind;e.type=thing->type;
-                e.firstTic=kind==BodyKind::Corpse?leveltime:0;
-                e.seed=thingSeed(*thing);e.x=x;e.y=y;e.z=units(thing->z);
-                it=known.emplace(thing,e).first;
-            } else if(it->second.type!=thing->type||it->second.kind!=kind) {
-                // The allocator might reuse an address. Never inherit old timing.
-                it->second={kind,kind==BodyKind::Corpse?leveltime:0,thing->type,
-                            x,y,units(thing->z),thingSeed(*thing)};
+            if(it==known.end()&&known.size()>=doom_decor::trackedLimit)continue;
+            const auto lifetime=kind==BodyKind::Corpse?ensureCorpseLifetime(thing):0;
+            if(kind==BodyKind::Corpse&&!lifetime)continue;
+            if(it==known.end()||it->second.type!=thing->type||it->second.kind!=kind||
+               it->second.lifetime!=lifetime) {
+                it=known.insert_or_assign(thing,Emitter{kind,kind==BodyKind::Corpse?leveltime:0,
+                    thing->type,pos.x,pos.y,pos.z,thingSeed(*thing),lifetime}).first;
             }
-            it->second.x=x;it->second.y=y;it->second.z=units(thing->z);
+            it->second.x=pos.x;it->second.y=pos.y;it->second.z=pos.z;
             present.insert(thing);
         }
     for(auto it=known.begin();it!=known.end();) {
@@ -376,7 +392,7 @@ void decorationBloodTick(const mobj_t &thing,float eyeX,float eyeY,float rx,floa
 // timestamps do not reset when the player moves more than 768 units away.
 // Contains no owned mobj pointers: keys are compared, never dereferenced.
 namespace {
-struct DecayRecord { int firstSeen=0,type=-1; };
+struct DecayRecord { int firstSeen=0,type=-1;CorpseLifetime lifetime=0; };
 std::unordered_map<const mobj_t*,DecayRecord> decayBodies;
 unsigned decayLevel=~0u;
 int lastDecayScan=-1;
@@ -405,7 +421,21 @@ bool normalDecayCorpse(const mobj_t &thing) {
     default:return false;
     }
 }
+bool readyForCorpseDecay(const mobj_t &thing) {
+    // The native charred query also detects lava deaths and only reads status.
+    if(!normalDecayCorpse(thing)||P_CombatCharred(const_cast<mobj_t *>(&thing))||
+       hasGoreCorpseAppearance(thing))return false;
+    CorpseRestLocation rest;
+    const auto state=ragdollRestLocation(&thing,rest);
+    return state==CorpseRestState::NoRagdoll||state==CorpseRestState::Resting;
+}
 } // namespace
+
+void forgetCorpseAmbience(const mobj_t *thing) {
+    decayBodies.erase(thing);
+    known.erase(thing);
+    selected.erase(std::remove(selected.begin(),selected.end(),thing),selected.end());
+}
 
 void corpseDecayReset() {
     decayBodies.clear();decayLevel=~0u;lastDecayScan=-1;lastDecayDiagnostic=-1;
@@ -429,7 +459,7 @@ void corpseDecayTick() {
     current.reserve(decayBodies.size()+16);
     unsigned eligible=0,selectedCount=0;
     for(int s=0;s<numsectors;++s)for(const mobj_t *thing=sectors[s].thinglist;thing;thing=thing->snext) {
-        if(!normalDecayCorpse(*thing))continue;
+        if(!readyForCorpseDecay(*thing))continue;
         ++eligible;
         // Normal: same deterministic 40% selection as flies. -decaytest
         // temporarily selects all eligible bodies to make tests reproducible.
@@ -437,12 +467,14 @@ void corpseDecayTick() {
         if(found==decayBodies.end()&&!decayTestAll()&&!doom_decor::flies(thingSeed(*thing)))continue;
         ++selectedCount;
         current.insert(thing);
-        if(found==decayBodies.end()) {
-            if(decayBodies.size()>=doom_decay::trackedLimit)continue;
-            decayBodies.emplace(thing,DecayRecord{leveltime,thing->type});
-        } else if(found->second.type!=thing->type) {
-            found->second={leveltime,thing->type};
-        }
+        if(found==decayBodies.end()&&decayBodies.size()>=doom_decay::trackedLimit)continue;
+        const auto lifetime=ensureCorpseLifetime(thing);
+        if(!lifetime)continue;
+        if(found==decayBodies.end()||found->second.type!=thing->type||found->second.lifetime!=lifetime)
+            found=decayBodies.insert_or_assign(thing,DecayRecord{leveltime,thing->type,lifetime}).first;
+        // Commit dry ownership even when no blood pass is drawn.
+        if(doom_decay::stage(leveltime-found->second.firstSeen,settings.corpseDecayDelay,TICRATE)>=2)
+            dryCorpseBlood(thing,lifetime);
     }
     for(auto it=decayBodies.begin();it!=decayBodies.end();) {
         if(!current.count(it->first))it=decayBodies.erase(it);
@@ -467,24 +499,29 @@ void corpseDecayTick() {
 
 int corpseDecayStage(const mobj_t *thing) {
     if(!thing||!settings.corpseDecomposition||!settings.accelerated||
-       totalkills>=int(doom_decay::monsterLimit)||!normalDecayCorpse(*thing)||
+       totalkills>=int(doom_decay::monsterLimit)||!readyForCorpseDecay(*thing)||
        decayLevel!=r_levelserial)return 0;
     auto it=decayBodies.find(thing);
-    if(it==decayBodies.end()||it->second.type!=thing->type)return 0;
-    // Compute the same thresholds locally so this translation unit does not
-    // depend on a doom_decay::stage declaration in the installed helper header.
-    // Keep the four presets and +45/+120-second stages aligned with the rules.
-    const int ageTics=leveltime-it->second.firstSeen;
-    if(ageTics<0)return 0;
-    const int configured=settings.corpseDecayDelay;
-    const int minutes=(configured==2||configured==5||configured==8||configured==10)?configured:5;
-    const std::int64_t age=ageTics;
-    const std::int64_t start=std::int64_t(minutes)*60*TICRATE;
-    if(age<start)return 0;
-    if(age<start+std::int64_t(45)*TICRATE)return 1;
-    if(age<start+std::int64_t(120)*TICRATE)return 2;
-    return 3;
+    if(it==decayBodies.end()||it->second.type!=thing->type||it->second.lifetime!=corpseLifetime(thing))return 0;
+    return doom_decay::stage(leveltime-it->second.firstSeen,settings.corpseDecayDelay,TICRATE);
 }
+
+#ifdef DOOM_TEST_DRIVER
+bool testCorpseEmitter(const mobj_t *thing,CorpseRestLocation &position) {
+    const auto found=known.find(thing);
+    if(found==known.end()||found->second.lifetime!=corpseLifetime(thing))return false;
+    AmbienceLocation pos;
+    if(!ambienceLocation(*thing,found->second.kind,pos)||!pos.sector)return false;
+    position={found->second.x,found->second.y,pos.floor,int(pos.sector-sectors)};
+    return true;
+}
+bool testSetCorpseAge(const mobj_t *thing,int ageTics) {
+    auto found=decayBodies.find(thing);
+    if(found==decayBodies.end())return false;
+    found->second.firstSeen=leveltime-ageTics;
+    return true;
+}
+#endif
 
 namespace {
 constexpr float wallActivate=256.f,wallDeactivate=384.f;
@@ -882,19 +919,21 @@ void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera) {
        std::find(selected.begin(),selected.end(),thing)==selected.end())return;
     auto found=known.find(thing);if(found==known.end())return;
     const Emitter &e=found->second;
-    if(bodyKind(*thing)!=e.kind||!settled(*thing,e.kind))return;
+    AmbienceLocation pos;
+    if(bodyKind(*thing)!=e.kind||!ambienceLocation(*thing,e.kind,pos))return;
+    if(e.kind==BodyKind::Corpse&&
+       (e.lifetime!=corpseLifetime(thing)||(!pos.ragdoll&&!settled(*thing))))return;
     // Stage 2 is already dry enough to stop sustaining flies, worms and the
     // exotic corpse critters. No gameplay entities or GPU resources are spawned.
     if(e.kind==BodyKind::Corpse && (P_HazardAcidCorpse(thing)||corpseDecayStage(thing)>=2))return;
     bool fly=fliesReady(e,settings.decorationDelay);
     bool worm=settings.decorationInsects>=2&&crittersReady(e,settings.decorationDelay);
     if(!fly&&!worm)return;
-    float x=units(thing->x),y=units(thing->y),z=units(thing->z);
-    float floor=units(thing->floorz);
+    const float x=pos.x,y=pos.y,z=pos.z,floor=pos.floor;
     float height=std::clamp(units(thing->height),8.f,96.f);
     float radius=std::clamp(units(thing->radius),8.f,40.f);
     float t=(leveltime+renderFraction)/float(TICRATE);
-    float light=thing->subsector&&thing->subsector->sector?lighting(thing->subsector->sector):0.5f;
+    float light=pos.sector?lighting(pos.sector):0.5f;
     light=std::clamp(light,0.12f,1.f);
     const std::array<float,3> flyColor={.10f+.07f*light,.09f+.06f*light,.075f+.055f*light};
     // A nearly black head and a warm flesh-colored body, both shaded by

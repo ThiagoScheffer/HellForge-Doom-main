@@ -961,20 +961,14 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                                 !P_CombatCharred(thing) && !thing->player)
                 ? monsterSkinImage(thing->type,lump,baseImage,thing->health,thing->info->spawnhealth,spriteKey)
                 : treeImage;
-            // The age tracker alone decides whether the actor is a terminal
-            // ordinary corpse. A death presenter may retain a fall pose or a
-            // different frame well after the actor reaches its last death state;
-            // do not suppress decomposition merely for those cosmetic details.
-            // Still exclude ragdoll cards, charred actors and foreign sprite
-            // families, and keep original art for wounds and silhouette tests.
-            const int readyDecayStage = !self && !thing->player && !P_CombatCharred(thing)
+            // Terminal-state eligibility and age come from the corpse tracker.
+            // Conventional WAD variants are shared. A baked ragdoll updates
+            // its own card while keeping the shape used by lighting and shadows.
+            const int readyDecayStage = !self && !thing->player && !charred && !acidCorpse
                 ? corpseDecayStage(thing) : 0;
             const int decayStage = readyDecayStage && !death.ragdoll && death.sprite==thing->sprite
                 ? readyDecayStage : 0;
-            const int decayFamily=(thing->type==MT_TROOP)?1:
-                (thing->type==MT_SERGEANT)?2:
-                (thing->type==MT_FATSO||thing->type==MT_BRUISER||thing->type==MT_KNIGHT)?3:
-                (thing->type==MT_HEAD)?4:0;
+            const int decayFamily=corpseDecayFamily(thing->type);
             const DecorationArt *art=!self&&!directed&&!sf.rotate?decorationArt(*thing,lump):nullptr;
             Image &eyeImage = eyeInjured
                 ? monsterEyeInjuryImage(thing->type, lump, sourceImage, skinImage, spriteKey)
@@ -988,12 +982,12 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                                 uncoatedImage.eyeDamageMask.empty() ? nullptr : &sourceImage);
             // A traceable renderer hand-off is essential: isolated rule tests
             // cannot prove that the real game selects the new GPU texture.
-            if(readyDecayStage && M_CheckParm((char*)"-decaydebug")) {
+            if(readyDecayStage && !death.ragdoll && M_CheckParm((char*)"-decaydebug")) {
                 static int lastRenderDiagnostic=-1;
                 if(lastRenderDiagnostic<0||leveltime-lastRenderDiagnostic>=10*TICRATE) {
                     lastRenderDiagnostic=leveltime;
                     std::fprintf(stderr,"HELLFORGE DECAY: RENDER actor=%d stage=%d applied=%d actorSprite=%d drawnSprite=%d actorFrame=%d drawnFrame=%d fall=%d ragdoll=%d textureKey=%d\n",
-                                 int(thing->type),readyDecayStage,int(decayStage!=0),
+                                 int(thing->type),readyDecayStage,int(decayStage!=0 && &uncoatedImage!=&skinImage),
                                  int(thing->sprite),int(death.sprite),int(thing->frame&FF_FRAMEMASK),
                                  int(death.frame&FF_FRAMEMASK),int(death.fall.active),int(death.ragdoll!=nullptr),spriteKey);
                 }
@@ -1079,7 +1073,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             if (ragdoll)
             {
                 // A ragdoll: its virtual camera's picture on an upright card (ragdoll.cpp), already mirrored.
-                if (ragdollCard(*death.ragdoll, fraction, sink, camera.eye, nullptr, card))
+                if (ragdollCard(*death.ragdoll, fraction, sink, camera.eye, nullptr, card, readyDecayStage, decayFamily))
                 {
                     auto &batch = out[card.key];
                     size_t from = batch.size();

@@ -424,7 +424,7 @@ void applySettings() {
     R_BloodHit=settings.accelerated?bloodHit:nullptr;
     R_GoreHit=settings.accelerated?goreAfterHit:nullptr;
     R_GoreShotEnd=settings.accelerated?goreFinishShot:nullptr;
-    R_GoreForget=forgetGore;
+    R_GoreForget=corpseLifecycleEvent;
     P_GoreBlast=settings.accelerated?goreBlast:nullptr;
     R_VileHurt=vileEffectsEnabled()?vileHurt:nullptr;
     R_RevenantDeath=settings.accelerated&&settings.revenantSoulRelease?revenantDeath:nullptr;
@@ -535,9 +535,11 @@ void sceneShutdown() {
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();
     P_GoreBlast=nullptr;
+    bodyMotionShutdown();
     imagesShutdown();mapShutdown();causticsShutdown();clearSurfaceLights();lightsShutdown();glassLightShutdown();exposureShutdown();
     bakeAtlasShutdown();sunShutdown();lightBakeShutdown();clearStaticGrid();indirectShutdown();
-    rubbleEmissionVertices.clear();bodyMotionShutdown();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
+    rubbleEmissionVertices.clear();impactsShutdown();bloodShutdown();splashesShutdown();glassShutdown();shotLightsShutdown();
+    resetCorpseLifetimes();
     weatherShutdown();wearShutdown();decorationAmbienceReset();resetWallAmbience();corpseDecayReset();
 }
 // A new level, or the first after shutdown: each part forgets the last
@@ -552,6 +554,8 @@ static void startLevel() {
     // Active textures are uploaded lazily by the new map's preparation.
     glassLightShutdown(); // Drops Image pointers before their owners are reclaimed.
     bodyMotionShutdown(); // Includes wound/classification caches keyed by Image*.
+    bloodShutdown();
+    resetCorpseLifetimes();
     decorationAmbienceReset(); // Drop local flies/worms and their emitter state.
     resetWallAmbience();
     corpseDecayReset(); // Reset ages on level transition or save reload.

@@ -563,10 +563,10 @@ The relevant user-run verification is distinguished below from source-only tests
   **48 flies**, **24 ground creatures**, **192 ground-creature render blocks**,
   and **512 DOOM units** for rendering, with nearby scans about once per second.
   There are no new gameplay actors, shaders or save-format changes.
-- Revived or removed corpses stop displaying scavengers. A corpse's delay
-  begins when it is first detected near the player rather than necessarily
-  at its original death event; visually displaced ragdoll corpses may have
-  effects near the underlying actor position.
+- Revived or removed corpses stop displaying scavengers. The delay begins
+  when the corpse is first detected near the player. Ragdolls become eligible
+  after they settle. Flies and ground scavengers use the final body position
+  and the supporting sector's floor height and lighting.
 - **User runtime tests:** corpse flies passed, the initial invisible-worm
   issue was corrected, and the black-headed worm visual update passed.
   Source-level mock tests cover the species-specific creatures. The later M2
@@ -582,9 +582,9 @@ The relevant user-run verification is distinguished below from source-only tests
   eligible corpses**, not necessarily every body on a small test map.
 - **Eight supported stock monster types:** Zombieman, Shotgun Guy, Imp, Pinky,
   Mancubus, Cacodemon, Hell Knight and Baron of Hell. **Spectre and Heavy Weapon
-  Dude/Chaingunner are intentionally excluded**. Only ordinary, settled terminal
-  corpse states qualify; gibbed remains, decorations, other monsters, ragdoll
-  cards and unsupported death artwork retain their original presentation.
+  Dude/Chaingunner are intentionally excluded**. Normal terminal corpse states
+  qualify, including supported ragdolls after they settle. Gibbed, acid and
+  charred corpses retain their own presentation.
 - **Map-wide aging:** the age tracker scans about once per second regardless of
   camera distance. With the **2-minute** delay, **Stage 1** starts at **2:00**
   (initial drying), **Stage 2** at **2:45** (partial decomposition), and
@@ -599,15 +599,19 @@ The relevant user-run verification is distinguished below from source-only tests
   warm dried-flesh colors. The original sprite dimensions and transparency are
   preserved; unsupported/replacement artwork and voxel presentations can fall
   back to unchanged visuals.
-- **Shared texture cache:** decomposition variants are generated lazily and
-  shared by sprite frame and stage rather than allocated per corpse, with a
-  separate **estimated 8 MiB CPU/GPU payload budget**. Exhaustion falls back to
-  unmodified artwork; this is a cap policy, **not a measured VRAM or FPS saving**.
+- **Shared decay budget:** conventional sprite variants and immutable copies of
+  fresh ragdoll artwork share an **estimated 8 MiB budget**. The renderer recolors
+  the existing ragdoll card in place, preserving its resting pose and silhouette.
+  Turning decomposition off restores the original colors. Unsupported artwork
+  or exhausted budget can leave a corpse visually unchanged.
+- **Permanent ragdoll blood pools:** the pool starts growing once the ragdoll
+  has finished moving. It uses the final torso position and its supporting
+  floor, including when the body falls onto a different sector.
 - **M2 — Stage 2 cleanup:** after a **selected decomposing corpse** enters
   Stage 2, **flies, normal and large red worms, and all special scavengers**
   cease rendering around it. Its **owned blood-pool record is removed** from
-  the active list and no longer emits pool geometry; a per-corpse marker blocks
-  recreation. Other bodies' pools, impact splats, wall blood and hanging
+  the active list. A marker for that death prevents the pool from reappearing.
+  Other bodies' pools, impact splats, wall blood and hanging
   decorations are unaffected. Shared blood textures remain cached, so this
   reduces active decals/particles rather than guaranteeing large GPU-memory
   savings. Corpses not selected for decomposition retain normal ambience.
@@ -780,8 +784,8 @@ Shared acid, rain and living-liquid effects are cosmetic. Kinetic Horror and
 Physical Bodies are also presentation systems; they do not replace gameplay damage
 or actor movement. Advanced Gore uses its existing below-200-monster gate. Sprite
 profiles and ragdoll artwork may fall back on unsupported frames or voxel models.
-The displayed ragdoll position can differ from its underlying gameplay actor;
-corpse decomposition retains its documented ordinary-sprite restrictions.
+Permanent pools and scavengers follow the resting visual ragdoll. Supported
+terminal ragdoll corpses can decompose while retaining their original pose.
 No new performance figures or full cross-WAD certification are asserted.
 
 See the [large-WAD compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md)

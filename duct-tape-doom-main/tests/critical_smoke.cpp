@@ -26,7 +26,7 @@ using namespace doom3d;
 static std::string output;
 static bool flashlightAwarenessMode=false,impAvoidanceMode=false;
 extern "C" boolean P_ImpFireballBlocked(mobj_t*);
-static bool visual=false;
+static bool visual=false,corpseIntegrationMode=false;
 static bool visualEnhanced=false;
 static bool visualSevere=false;
 static bool visualSawCut=false;
@@ -553,6 +553,7 @@ static void run() {
 #include "feedback_integration.inc"
 #include "survival_integration.inc"
 #include "survival_visual.inc"
+#include "corpse_integration.inc"
 static void visualFrame() {
     static std::vector<mobj_t*> victims;
     static int step=0,lastTic=-1,wait=0;
@@ -777,6 +778,7 @@ static void impAvoidanceIntegration() {
 }
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
+    if(corpseIntegrationMode){corpseIntegrationFrame();return;}
     if(impAvoidanceMode){impAvoidanceIntegration();I_Quit();return;}
     if(flashlightAwarenessMode){flashlightAwarenessIntegration();I_Quit();return;}
     if(goreMode){goreIntegration();I_Quit();return;}
@@ -833,7 +835,8 @@ int main(int argc,char **argv) {
     elemental2Mode=argc==5&&!std::strcmp(argv[4],"--elemental2");
     visualElemental2=argc==5&&!std::strcmp(argv[4],"--visual-elemental2");
     e1m8Mode=argc==5&&(std::string(argv[4])=="--e1m8-floor"||std::string(argv[4])=="--e1m8-exit"||std::string(argv[4])=="--e1m8-exit-snap");e1m8Exit=e1m8Mode&&std::string(argv[4]).find("--e1m8-exit")==0;e1m8Snap=e1m8Mode&&std::string(argv[4])=="--e1m8-exit-snap";
-    visual=e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualSawCut||visualAcid||visualIncendiary||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
+    corpseIntegrationMode=argc==5&&!std::strcmp(argv[4],"--corpse-integration");
+    visual=corpseIntegrationMode||e1m8Mode||visualElemental2||visualElemental||visualEyes||visualSurvival||visualFeedback||visualEnhanced||visualSevere||visualSawCut||visualAcid||visualIncendiary||visualVile||visualSoul||(argc==5&&!std::strcmp(argv[4],"--visual"));
     elementalMode=argc==5&&!std::strcmp(argv[4],"--elemental");
     eyeMode=argc==5&&!std::strcmp(argv[4],"--eye-injuries");
     if(argc==5&&std::string(argv[4]).find("--settings-")==0)settingsCase=argv[4];
@@ -873,6 +876,10 @@ int main(int argc,char **argv) {
     if(e1m8Mode){args={"e1m8-regression","-profilespikes","-iwad",argv[1],"-file","launcher/DiggingMaterials.wad","-config",config,"-graphics",graphics,"-nomusic","-nosound","-width","960","-height","540","-warp","1","8","-solidmaps","-uzmovement","-fluidmonsters","-fluidweapons","launcher/mods/FluidWeapons.pk3","-modsounds","launcher/mods/FluidWeapons.pk3","launcher/mods/FluidWeapons-SFX.pk3","-fluid-sounds","-weaponinterpolation"};}
     if(!settingsCase.empty())args.emplace_back("-classic");
     if(goreMode)args.emplace_back("-goredebug");
+    if(corpseIntegrationMode) {
+        args.emplace_back("-decaytest");
+        args.emplace_back("-decaydebug");
+    }
     std::vector<char*> pointers;for(auto &s:args)pointers.push_back(s.data());
     if(solidMode){args.emplace_back("-solidmaps");pointers.clear();for(auto &s:args)pointers.push_back(s.data());}
     myargc=(int)pointers.size();myargv=pointers.data();singletics=true;D_DoomMain();return 0;

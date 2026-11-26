@@ -20,20 +20,30 @@ SDL_GPUTexture *createTexture(SDL_GPUTextureFormat format,int w,int h,SDL_GPUTex
 }
 // Uploads go through their own command buffer so they can be recorded at any
 // point, even while the frame is inside a render pass.
-static void upload(SDL_GPUTexture *texture,int w,int h,int depth,const void *pixels,Uint32 bytes,Uint32 pixelsPerRow) {
+static bool upload(SDL_GPUTexture *texture,int w,int h,int depth,const void *pixels,Uint32 bytes,Uint32 pixelsPerRow) {
     SDL_GPUTransferBufferCreateInfo info={SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,bytes,0};
     SDL_GPUTransferBuffer *transfer=SDL_CreateGPUTransferBuffer(device,&info);
-    if(!transfer)I_Error((char*)"Could not allocate a GPU upload: %s",SDL_GetError());
-    memcpy(SDL_MapGPUTransferBuffer(device,transfer,false),pixels,bytes);
+    if(!transfer)return false;
+    void *mapped=SDL_MapGPUTransferBuffer(device,transfer,false);
+    if(!mapped) {
+        SDL_ReleaseGPUTransferBuffer(device,transfer);
+        return false;
+    }
+    memcpy(mapped,pixels,bytes);
     SDL_UnmapGPUTransferBuffer(device,transfer);
     if(!uploadCommand)uploadCommand=SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(uploadCommand);
+    SDL_GPUCopyPass *copy=uploadCommand?SDL_BeginGPUCopyPass(uploadCommand):nullptr;
+    if(!copy) {
+        SDL_ReleaseGPUTransferBuffer(device,transfer);
+        return false;
+    }
     SDL_GPUTextureTransferInfo source={transfer,0,pixelsPerRow,(Uint32)h};
     SDL_GPUTextureRegion target={};
     target.texture=texture;target.w=(Uint32)w;target.h=(Uint32)h;target.d=(Uint32)depth;
     SDL_UploadToGPUTexture(copy,&source,&target,true);
     SDL_EndGPUCopyPass(copy);
     SDL_ReleaseGPUTransferBuffer(device,transfer);
+    return true;
 }
 void flushUploads() {
     if(uploadCommand&&!SDL_SubmitGPUCommandBuffer(uploadCommand))
@@ -57,7 +67,8 @@ void updatePaletteLUT(const unsigned *palette) {
     if(!paletteLUT)paletteLUT=createTexture(SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,32,32,SDL_GPU_TEXTUREUSAGE_SAMPLER,
         SDL_GPU_SAMPLECOUNT_1,SDL_GPU_TEXTURETYPE_3D,32);
     if(!paletteLUT)I_Error((char*)"Could not allocate palette lookup");
-    upload(paletteLUT,32,32,32,colors.data(),(Uint32)(colors.size()*4),32);
+    if(!upload(paletteLUT,32,32,32,colors.data(),(Uint32)(colors.size()*4),32))
+        I_Error((char*)"Could not upload the palette lookup: %s",SDL_GetError());
 }
 static SDL_GPUSampler *sampler(SDL_GPUFilter filter,SDL_GPUSamplerAddressMode address) {
     SDL_GPUSamplerCreateInfo info={};
@@ -76,7 +87,10 @@ GpuTextureRef gpuCreateTexture(GpuFormat format,int w,int h,const void *pixels,i
     if(levels<=1) {
         SDL_GPUTexture *texture=createTexture(textureFormat,w,h,SDL_GPU_TEXTUREUSAGE_SAMPLER);
         if(!texture)return nullptr;
-        upload(texture,w,h,1,pixels,(Uint32)(bytesPerRow*h),(Uint32)(bytesPerRow/pixelBytes));
+        if(!upload(texture,w,h,1,pixels,(Uint32)(bytesPerRow*h),(Uint32)(bytesPerRow/pixelBytes))) {
+            SDL_ReleaseGPUTexture(device,texture);
+            return nullptr;
+        }
         return GpuTextureRef(new GpuTexture{texture});
     }
     SDL_GPUTextureCreateInfo info={};
@@ -106,16 +120,20 @@ GpuTextureRef gpuCreateTexture(GpuFormat format,int w,int h,const void *pixels,i
     SDL_ReleaseGPUTransferBuffer(device,transfer);
     return GpuTextureRef(new GpuTexture{texture});
 }
-void gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::vector<std::array<int,4>> &rects,const void *pixels,int bytesPerRow) {
-    if(!texture||rects.empty())return;
+bool gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::vector<std::array<int,4>> &rects,const void *pixels,int bytesPerRow) {
+    if(!texture||!device||rects.empty())return false;
     int pixelBytes=format==GpuFormat::R8?1:format==GpuFormat::RG8?2:format==GpuFormat::RGBA8?4:8;
     Uint32 bytes=0;
     for(const auto &r:rects)bytes+=(Uint32)(r[2]*r[3]*pixelBytes);
-    if(!bytes)return;
+    if(!bytes)return false;
     SDL_GPUTransferBufferCreateInfo info={SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,bytes,0};
     SDL_GPUTransferBuffer *transfer=SDL_CreateGPUTransferBuffer(device,&info);
-    if(!transfer) {fprintf(stderr,"GPU upload failed: %s\n",SDL_GetError());return;}
+    if(!transfer) {fprintf(stderr,"GPU upload failed: %s\n",SDL_GetError());return false;}
     byte *mapped=(byte*)SDL_MapGPUTransferBuffer(device,transfer,false);
+    if(!mapped) {
+        SDL_ReleaseGPUTransferBuffer(device,transfer);
+        return false;
+    }
     Uint32 offset=0;
     for(const auto &r:rects)for(int row=0;row<r[3];++row) {
         memcpy(mapped+offset,(const byte*)pixels+(size_t)(r[1]+row)*bytesPerRow+(size_t)r[0]*pixelBytes,(size_t)r[2]*pixelBytes);
@@ -123,7 +141,11 @@ void gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::v
     }
     SDL_UnmapGPUTransferBuffer(device,transfer);
     if(!uploadCommand)uploadCommand=SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(uploadCommand);
+    SDL_GPUCopyPass *copy=uploadCommand?SDL_BeginGPUCopyPass(uploadCommand):nullptr;
+    if(!copy) {
+        SDL_ReleaseGPUTransferBuffer(device,transfer);
+        return false;
+    }
     offset=0;
     for(const auto &r:rects) {
         if(r[2]<=0||r[3]<=0)continue;
@@ -136,6 +158,7 @@ void gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::v
     }
     SDL_EndGPUCopyPass(copy);
     SDL_ReleaseGPUTransferBuffer(device,transfer);
+    return true;
 }
 int gpuMaxSamples() {return maxSamples;}
 bool platformReadMask(const char *path,int w,int h,std::vector<float> &values) {
@@ -206,8 +229,10 @@ int I_Render3DInit(SDL_Window *window) {
     if(!settingsTexture||!hudTexture||!paletteTexture||!dummySeam||!dummyContact||!dummyBake||!dummyRelief||!solidTexel) {I_Render3DShutdown();return 0;}
     std::array<byte,8> zero={};const byte covered[4]={0,255,0,255}; // Index 0, full coverage, no emission.
     const byte level[4]={128,128,0,255}; // No slope, no grain.
-    upload(dummySeam,1,1,1,zero.data(),8,1);upload(dummyContact,1,1,1,zero.data(),4,1);upload(dummyBake,1,1,1,zero.data(),4,1);upload(dummyRelief,1,1,1,level,4,1);
-    upload(solidTexel,1,1,1,covered,4,1);
+    if(!upload(dummySeam,1,1,1,zero.data(),8,1)||!upload(dummyContact,1,1,1,zero.data(),4,1)||
+       !upload(dummyBake,1,1,1,zero.data(),4,1)||!upload(dummyRelief,1,1,1,level,4,1)||
+       !upload(solidTexel,1,1,1,covered,4,1))
+        I_Error((char*)"Could not upload the default GPU textures: %s",SDL_GetError());
     buildCloudTexture();
     flushUploads();
     sceneInit(window);
