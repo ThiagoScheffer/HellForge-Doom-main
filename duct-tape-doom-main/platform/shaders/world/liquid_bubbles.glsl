@@ -5,13 +5,16 @@ LivingShading liquidBubbleSurface(uint kind,uint flags,vec2 worldXY,float distan
     LivingShading result=LivingShading(vec2(0),0.0,0.0,0.0,1.0);
     if(kind!=LS_LIQUID_ACID&&kind!=LS_LIQUID_LAVA)return result;
 
+    // Scale the cell and its shapes together in world space.
+    const float sizeScale=4.0;
+    float bubbleFootprint=footprint/sizeScale;
     float detail=(1.0-smoothstep(240.0,640.0,distanceToEye))*
-                 (1.0-smoothstep(1.0,3.0,footprint));
+                 (1.0-smoothstep(1.0,3.0,bubbleFootprint));
     if(detail<=0.0)return result;
 
     bool lava=kind==LS_LIQUID_LAVA;
     float cellSize=lava?32.0:24.0;
-    vec2 grid=worldXY/cellSize;
+    vec2 grid=worldXY/(cellSize*sizeScale);
     ivec2 cell=ivec2(floor(grid));
     uint seed=tileHash(cell,lava?0x98b7a251u:0x32c67a9du);
     float cadence=float(seed&255u)/255.0;
@@ -24,14 +27,14 @@ LivingShading liquidBubbleSurface(uint kind,uint flags,vec2 worldXY,float distan
     if(float(h>>24u)/255.0>(lava?0.68:0.82))return result;
     float radiusRoll=float((h>>16u)&255u)/255.0;
     float maxRadius=lava?mix(2.0,5.0,radiusRoll):mix(1.25,3.0,radiusRoll);
-    float resolution=1.0-smoothstep(maxRadius*0.35,maxRadius*0.95,footprint);
+    float resolution=1.0-smoothstep(maxRadius*0.35,maxRadius*0.95,bubbleFootprint);
     if(resolution<=0.0)return result;
 
     vec2 center=mix(vec2(0.35),vec2(0.65),vec2(float(h&255u),float((h>>8u)&255u))/255.0);
     vec2 delta=(fract(grid)-center)*cellSize;
-    float aa=clamp(footprint*0.5,0.12,0.65);
+    float aa=clamp(bubbleFootprint*0.5,0.12,0.65);
     // A ripple reaches 1.60 radii plus its 0.12-radius skirt and AA.
-    // At maximum size this is 9.25 units, inside lava's 11.2-unit margin.
+    // The maximum extent stays inside the cell in this scaled coordinate space.
     float extent=maxRadius*1.72+aa;
     if(dot(delta,delta)>=extent*extent)return result;
 
