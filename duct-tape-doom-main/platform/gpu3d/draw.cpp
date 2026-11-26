@@ -283,12 +283,12 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
         const SkyAtmosphereProfile *atmosphere=nullptr;
         bool deep=false;
         if(settings.doom2DeepSky&&gamemode==commercial&&doom2Art&&skyMode>=2) {
-            if(artwork==SkyArtwork::BurningCity) {
+            if(artwork==SkyArtwork::BurningCity||artwork==SkyArtwork::BloodHell) {
                 const auto &scene=skyDepthScene(skyArt);
                 if(scene.atlas) {
                     depthScene=&scene;
                     depthArt=gpu(scene.atlas);
-                    depthMode=3.0f;
+                    depthMode=artwork==SkyArtwork::BloodHell?4.0f:3.0f;
                     deep=true;
                     if(scene.farRadius>0.0f)atmosphere=skyAtmosphereProfile(skyArt);
                 }
@@ -334,7 +334,8 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
             uniforms.light=pack(atmosphere->cloudLight,atmosphere->windSpeed);
             uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,0};
             uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
-            if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,0,0};
+            if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,
+                                           float(depthScene->style),depthScene->backdropOpacity};
         }
         if(settings.skyFireSmoke&&settings.doom2DeepSky&&skyMode>=2) {
             if(const auto *effects=skyFireSmokeData(skyArt,uniforms.scenery[0]>0.f)) {

@@ -32,6 +32,20 @@ vec3 skyBackdrop(vec2 uv,ivec2 size,bool filtered) {
     return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
 }
 
+vec4 skySceneryBackdrop(vec2 uv,ivec2 size) {
+    vec2 layer=texelFetch(skyDepthArt,skyDepthTexel(ivec2(floor(uv)),size),0).rg;
+    return vec4(skyDepthPalette(layer.x),layer.y);
+}
+
+vec3 skyRockSeep(vec2 uv,ivec2 size,float coverage) {
+    if(coverage<=0.0)return vec3(0.0);
+    // Flow down the fixed texel tracks in the shell metadata. The integer
+    // longitude repeats keep the animation continuous at the panorama seam.
+    float phase=uv.x*(skyTurns*32.0/float(size.x))+uv.y*.62-c.fog.w*1.55;
+    float pulse=.45+.55*smoothstep(-.25,.92,sin(phase));
+    return mix(vec3(.24,.015,.018),vec3(.31,.069,.025),pulse)*coverage*pulse;
+}
+
 vec3 skyDepthEye(vec3 eye,vec3 origin,float nearestRadius) {
     vec3 delta=eye-origin;
     delta.xy/=1.0+length(delta.xy)/(nearestRadius*.0875);

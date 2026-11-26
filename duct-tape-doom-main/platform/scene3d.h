@@ -406,6 +406,9 @@ struct SkyDepthScene {
     std::array<float,4> shells{}; // middle/near radii, then their radial thicknesses
     float firstRow=0;             // normalized source row of the highest solid texel
     float farRadius=0,farFirstRow=0; // optional distant scenery in the same atlas
+    enum class Style : uint8_t { City, Mountains };
+    Style style=Style::City;
+    float backdropOpacity=0;
 };
 const SkyDepthScene &skyDepthScene(const Image &sky);
 extern std::array<float,3> skyDepthOrigin;

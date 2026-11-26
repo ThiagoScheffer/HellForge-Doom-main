@@ -8,7 +8,7 @@ namespace doom3d {
 
 struct Image;
 
-enum class SkyAtmosphereKind : uint8_t { Legacy=0, DuskStorm=1, BurningCityDusk=2, Count };
+enum class SkyAtmosphereKind : uint8_t { Legacy=0, DuskStorm=1, BurningCityDusk=2, InfernalAbyss=3, Count };
 
 struct SkyAtmosphereProfile {
     SkyAtmosphereKind kind=SkyAtmosphereKind::Legacy;

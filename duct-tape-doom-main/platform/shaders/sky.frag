@@ -31,7 +31,7 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 atmosphereLight; // RGB, wind speed in map units per second
     vec4 atmosphereProjection; // near height, near scale, far scale
     vec4 atmosphereWind; // fixed per-level wind heading in XY
-    vec4 sceneryProjection; // far radius, normalized far skyline top
+    vec4 sceneryProjection; // far radius, normalized skyline top, style, backdrop opacity
     vec4 fireHeader; // count, nearest radius (without scenery), wind speed, haze blend
     vec4 fireSmokeDark,fireSmokeWarm,fireFlameOuter,fireFlameCore;
     SkyFireSource fireSources[4];
@@ -133,22 +133,27 @@ vec3 sceneryAir(vec3 facade,vec3 horizon,float haze,float row) {
 }
 
 vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,float row,
-                       SkyEffects effects) {
+                       SkyEffects effects,ivec2 size) {
+    bool mountains=sceneryProjection.z==1.0;
     background=skyEffectOver(background,effects.layers[0]);
     if(scenery.far.alpha>0.0) {
-        scenery.far.color=sceneryAir(scenery.far.color,horizon,.58,row);
+        scenery.far.color=sceneryAir(scenery.far.color,horizon,mountains?.69:.58,row);
         background=skyCompositeOver(background,scenery.far);
     }
     background=skyEffectOver(background,effects.layers[1]);
     if(scenery.middle.coverage>0.0) {
-        vec3 paint=scenery.middle.color+vec3(.085,.042,.014)*scenery.middle.window;
-        vec3 facade=sceneryAir(paint,horizon,.26,row);
+        vec3 paint=scenery.middle.color;
+        paint+=mountains?skyRockSeep(scenery.middle.uv,size,scenery.middle.window)*.72
+                        :vec3(.085,.042,.014)*scenery.middle.window;
+        vec3 facade=sceneryAir(paint,horizon,mountains?.34:.26,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.middle.coverage));
     }
     background=skyEffectOver(background,effects.layers[2]);
     if(scenery.near.coverage>0.0) {
-        vec3 paint=scenery.near.color+vec3(.15,.074,.025)*scenery.near.window;
-        vec3 facade=sceneryAir(paint,horizon,.06,row);
+        vec3 paint=scenery.near.color;
+        paint+=mountains?skyRockSeep(scenery.near.uv,size,scenery.near.window)
+                        :vec3(.15,.074,.025)*scenery.near.window;
+        vec3 facade=sceneryAir(paint,horizon,mountains?.045:.06,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.near.coverage));
     }
     return skyEffectOver(background,effects.layers[3]);
@@ -178,6 +183,7 @@ void main() {
     bool deepStorm=useAtmosphere||(deep&&cloudProfile==SKY_ART_BROWN_CLOUDS);
     bool depthScene=depthShells.x>0.0;
     bool composedScenery=sceneryProjection.x>0.0;
+    bool mountains=sceneryProjection.z==1.0;
     // Keep the cutoff outside the maximum vertical shift and filter reach.
     bool depthBand=depthScene&&v>=depthOrigin.w-.09;
     SkyScenerySamples scenery=sampleSkyScenery(depthBand,angle,rise,ray.xy/horizontal,uv,v,ivec2(size),filtered);
@@ -318,7 +324,8 @@ void main() {
         if(!obscured) {
             // Celestial light enters the atmosphere from behind both layers.
             if(!eclipse&&c.fx2.w>0.0)color.rgb=skyVisibleSun(color.rgb,ray,1.0);
-            vec3 key=c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
+            vec3 key=mountains&&eclipse?bloodEclipseCenter(eclipseRidge>0.0):
+                c.sun.w>0.0?skySunDirection():vec3(.56,-.45,.69);
             vec3 stormLight=vec3(0.0);
             if(c.weather.w>0.0) {
                 float halo=hellforgeBoltHalo(angle,rise,c.style.y);
@@ -391,13 +398,24 @@ void main() {
         outColor=color;
         return;
 #endif
+        if(sceneryProjection.w>0.0&&!obscured&&v>.015) {
+            vec4 wall=skySceneryBackdrop(uv,ivec2(size));
+            float opacity=wall.a*sceneryProjection.w*smoothstep(.015,.48,v);
+            // The translucent painting frames the eclipse. Leave the disc
+            // and immediate rim readable through its thinner central air.
+            if(eclipse) {
+                float chordSquared=2.0-2.0*dot(ray,bloodEclipseCenter(eclipseRidge>0.0));
+                opacity*=mix(.23,1.0,smoothstep(.019,.052,chordSquared));
+            }
+            color.rgb=skyCompositeOver(color.rgb,SkyLayerSample(wall.rgb*.71,opacity));
+        }
         vec3 opacity=vec3(scenery.far.alpha,middle.coverage,near.coverage);
         SkyEffects effects=sampleSkyEffects(angle,rise,ray.xy/horizontal,opacity,low,cloudCover,cloudTransmission);
 #if defined(SKY_EFFECTS_DEBUG) && SKY_EFFECTS_DEBUG < 6
         outColor=vec4((SKY_EFFECTS_DEBUG==1?color.rgb*.26:vec3(0.0))+effects.debug,1.0);
         return;
 #endif
-        color.rgb=composeSkyScenery(color.rgb,scenery,low,v,effects);
+        color.rgb=composeSkyScenery(color.rgb,scenery,low,v,effects,ivec2(size));
     } else if(depthBand) {
         for(int layer=0;layer<2;++layer) {
             SkyShellSample surface=layer==0?middle:near;
@@ -472,7 +490,7 @@ void main() {
     if(inferno) {
         float band=(1.0-smoothstep(-0.08,0.55,ray.z))*0.22;
         color.rgb=mix(color.rgb,vec3(0.31,0.10,0.065),band);
-    } else if(bloodHell) {
+    } else if(bloodHell&&!mountains) {
         // E3: a cold blood-grey horizon veil over the existing skull sky art.
         float band=(1.0-smoothstep(-.16,.80,ray.z))*.58;
         color.rgb=mix(color.rgb,vec3(.31,.17,.23),band);

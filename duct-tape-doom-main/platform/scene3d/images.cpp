@@ -665,7 +665,7 @@ Image &wallImage(int index) {
         }
     }
     if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode==commercial) {
-        if(image.skyArtwork==SkyArtwork::BurningCity&&image.skyPalette==stockSkyPalette)
+        if((image.skyArtwork==SkyArtwork::BurningCity||skyMountainProfile(image))&&image.skyPalette==stockSkyPalette)
             skyDepthScene(image);
         else if(devparm&&SDL_strcasecmp(name,"SKY2")==0) {
             const char *reason=image.skyArtwork==SkyArtwork::BurningCity?"custom PLAYPAL":"unrecognized artwork";

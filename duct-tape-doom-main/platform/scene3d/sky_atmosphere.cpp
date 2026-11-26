@@ -14,8 +14,10 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
                                                 const uint8_t *playpal,const uint8_t *skyMask,
                                                 SkyAtmosphereKind kind) {
     const bool city=kind==SkyAtmosphereKind::BurningCityDusk;
-    if((kind!=SkyAtmosphereKind::DuskStorm&&!city)||!indexed||!playpal||width<=0||height<8||
-       (city&&!skyMask))return {};
+    const bool infernal=kind==SkyAtmosphereKind::InfernalAbyss;
+    const bool masked=city||infernal;
+    if((kind!=SkyAtmosphereKind::DuskStorm&&!masked)||!indexed||!playpal||width<=0||height<8||
+       (masked&&!skyMask))return {};
 
     using RGB=std::array<float,3>;
     struct Tone {RGB rgb;float luminance;int count=0;};
@@ -32,12 +34,23 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
         return row[2*x+1]==255&&(!skyMask||skyMask[std::size_t(y)*width+x]>=224);
     };
     int total=0,varied=0,top=0,bottom=0;
+    RGB stone{};
+    int stoneCount=0;
     for(int y=0;y<height;++y) {
         const auto *row=indexed+std::size_t(y)*width*2;
         int covered=0;
         float mean=0;
         for(int x=0;x<width;++x) {
-            if(!coveredPixel(row,y,x))continue;
+            if(!coveredPixel(row,y,x)) {
+                if(infernal&&y>=height/2&&row[2*x+1]==255) {
+                    const auto &rgb=tones[row[2*x]].rgb;
+                    if(rgb[0]-rgb[1]<.08f||rgb[1]*2.0f>rgb[0]) {
+                        for(int c=0;c<3;++c)stone[c]+=rgb[c];
+                        ++stoneCount;
+                    }
+                }
+                continue;
+            }
             auto &tone=tones[row[2*x]];
             ++tone.count;
             ++covered;
@@ -45,7 +58,8 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
             if(y<bandRows) {
                 ++top;
                 for(int c=0;c<3;++c)profile.zenith[c]+=tone.rgb[c];
-            } else if(city ? (y>=height*7/16&&tone.rgb[0]-tone.rgb[2]>.10f&&tone.luminance>.19f)
+            } else if(infernal ? y>=height*3/8
+                              : city ? (y>=height*7/16&&tone.rgb[0]-tone.rgb[2]>.10f&&tone.luminance>.19f)
                            : y>=height-bandRows) {
                 ++bottom;
                 for(int c=0;c<3;++c)profile.horizon[c]+=tone.rgb[c];
@@ -59,7 +73,7 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
             varied+=std::abs(tones[row[2*x]].luminance-mean)>.06f;
         }
     }
-    if(!top||!bottom||double(total)<double(width)*height*(city?.16:.95))return {};
+    if(!top||!bottom||double(total)<double(width)*height*(masked?.16:.95))return {};
     for(int c=0;c<3;++c) {
         profile.zenith[c]/=top;
         profile.horizon[c]/=bottom;
@@ -105,6 +119,25 @@ SkyAtmosphereProfile analyzeMaskedSkyAtmosphere(const uint8_t *indexed,int width
         profile.nearOpacity=.91f;
         profile.farOpacity=.87f;
         profile.windSpeed=63;
+    } else if(infernal) {
+        // The painted wall uses pure red palette ramps. A little reflected
+        // color from the sampled stone gives the air and glow distinct tones.
+        constexpr RGB zenithGrade={.34f,.41f,.50f},horizonGrade={.69f,.67f,.80f};
+        for(int c=0;c<3;++c) {
+            const float bounce=stone[c]/std::max(1,stoneCount);
+            profile.zenith[c]=profile.zenith[c]*zenithGrade[c]+.08f*bounce;
+            profile.horizon[c]=profile.horizon[c]*horizonGrade[c]+.14f*bounce;
+            profile.cloudDark[c]=profile.cloudDark[c]*.25f+.035f*bounce;
+            profile.cloudMiddle[c]=profile.cloudMiddle[c]*.55f+.10f*bounce;
+            profile.cloudLight[c]=profile.cloudLight[c]*.86f+.24f*bounce;
+        }
+        profile.coverage=std::clamp(profile.coverage+.23f,.54f,.76f);
+        profile.nearAltitude=2450;
+        profile.nearScale=12000;
+        profile.farScale=.86f;
+        profile.nearOpacity=.84f;
+        profile.farOpacity=.80f;
+        profile.windSpeed=29.f;
     }
     profile.kind=kind;
     return profile;

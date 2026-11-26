@@ -555,7 +555,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Add slow cloud layers, inner shadows and light scattering to recognized skies. Uses artwork-aware silhouettes; requires Immersive Sky Environment.",
                     [](const Settings &d){return d.accelerated&&d.immersiveSky!=0;}),
                 check("doom2_deep_sky","DOOM II Deep Sky Environment",&s.doom2DeepSky,
-                    "Add distant storm layers, city fires and infernal haze to recognized DOOM II skies. Requires Immersive Sky Environment.",
+                    "Add distant storm layers, a burning city and layered infernal mountains to recognized DOOM II skies. Requires Immersive Sky Environment.",
                     [](const Settings &d){return d.accelerated&&d.immersiveSky!=0;}),
                 check("sky_fire_smoke","Sky Fire & Smoke",&s.skyFireSmoke,
                     "Add animated fires and fire-lit smoke to supported sky artwork. Requires DOOM II Deep Sky Environment.",

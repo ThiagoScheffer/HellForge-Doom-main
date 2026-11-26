@@ -148,6 +148,7 @@ static SkyAtmosphereKind atmosphereKind(const Image &sky) {
     if(sky.skyPalette!=stockSkyPalette)return SkyAtmosphereKind::Legacy;
     if(sky.skyArtwork==SkyArtwork::BrownClouds)return SkyAtmosphereKind::DuskStorm;
     if(sky.skyArtwork==SkyArtwork::BurningCity)return SkyAtmosphereKind::BurningCityDusk;
+    if(sky.skyArtwork==SkyArtwork::BloodHell)return SkyAtmosphereKind::InfernalAbyss;
     return SkyAtmosphereKind::Legacy;
 }
 
@@ -175,6 +176,7 @@ static const SkyAtmosphereProfile &cacheSkyAtmosphere(const Image &sky,const byt
 }
 
 #include "sky_depth_city.inc"
+#include "sky_depth_mountains.inc"
 
 static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const std::vector<int> &roof,
                                       const std::vector<SkyDepthBuilding> &buildings) {
@@ -283,6 +285,11 @@ static const SkyDepthCacheEntry &loadSkyDepth(const Image &sky,bool deep) {
     cached.attempted=true;
     const int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
+    if(deep)if(const auto *profile=skyMountainProfile(sky)) {
+        cached.scene=buildSkyDepthMountains(sky,palette,*profile);
+        if(cached.scene.atlas)return cached;
+        if(devparm)fprintf(stderr,"Sky A5: mountain profile rejected; using legacy SKY3.\n");
+    }
     const bool cloudOnly=skyDepthCloudOnly(sky.skyArtwork);
     const auto skyline=cloudOnly?std::vector<int>{}:findSkyline(sky,palette);
     if(!cloudOnly&&skyline.empty()) {
