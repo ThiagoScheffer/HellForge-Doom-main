@@ -26,7 +26,7 @@ convex subsector closed by real lines, and no seg is ever split.
   python3 tests/ragdoll_arena.py showcase [monster] [weapon[:aim]]
   plays MAP07 in a window with -ragdollloop: the row shot, left to lie, stood up and shot
   again until you quit (default mix, ssg:mix; rocket:mix for explosions). Your graphics.cfg and
-  default.cfg are copied to output/ragdoll-showcase/ (with Deaths "Ragdolls, Hollywood")
+  default.cfg are copied to output/ragdoll-showcase/ (with flying ragdolls enabled)
   and the game uses those, so it can't change yours.
 
   python3 tests/ragdoll_arena.py run <monster> <map 1-7> <weapon[:aim[:n[:tic]]]> <sheet.png> [--side]
@@ -36,7 +36,8 @@ convex subsector closed by real lines, and no seg is ever split.
   facing the player, away, east, west), tic kills it then (its random draw).
   --side watches the one victim from across its flight; --log adds the per-tic -ragdolllog to sheet.log. The game reads and writes a
   graphics.cfg and default.cfg beside the sheet (the player's graphics.cfg is
-  copied there once), never the player's own. -renderframes etc.: scene.cpp.
+  copied there once), never the player's own. Use --physical-bodies=0, =1 or =2
+  with run or showcase to select Legacy, Natural or Cinematic. -renderframes etc.: scene.cpp.
 
 No id data: plain geometry and stock texture names only."""
 import struct, sys
@@ -228,7 +229,16 @@ def blockmap(vertices, lines):
         offsets.append(header + len(data)); data += [0] + cell + [0xFFFF]
     return struct.pack('<4h', ox, oy, cols, rows) + struct.pack('<%dH' % len(offsets), *offsets) + struct.pack('<%dH' % len(data), *data)
 
-def run(args, side, trace=False):
+def configure_ragdolls(path, mode, flying):
+    from pathlib import Path
+    config = Path(path)
+    options = {'accelerated': 1, 'ragdoll_deaths': 1, 'ragdoll_flying': int(flying),
+               'physical_bodies': mode, 'physical_body_contacts': 1, 'physical_body_stable_cards': 1}
+    lines = config.read_text().splitlines() if config.exists() else []
+    lines = [line for line in lines if not line.split() or line.split()[0] not in options]
+    config.write_text('\n'.join(lines + [f'{key} {value}' for key, value in options.items()]) + '\n')
+
+def run(args, side, trace=False, mode=0):
     import os, shutil, subprocess
     monster, level, spec, sheet = args
     here = os.path.dirname(os.path.abspath(__file__))
@@ -241,6 +251,7 @@ def run(args, side, trace=False):
     player = os.path.expanduser('~/Library/Application Support/Local Games/DOOM/graphics.cfg')
     if not os.path.exists(graphics) and os.path.exists(player):
         shutil.copy(player, graphics)
+    configure_ragdolls(graphics, mode, spec.split(':')[0] == 'rocket')
     if not os.path.exists(config):
         shutil.copy(os.path.join(here, '..', 'build', 'play', 'smoke-data', 'smoke.cfg'), config)
     command = [game, '-iwad', iwad, '-file', wad, '-warp', level, '-skill', '3', '-ragdolltest', spec,
@@ -253,7 +264,7 @@ def run(args, side, trace=False):
         code = subprocess.call(command, stdout=log, stderr=subprocess.STDOUT)
     print('%s: exit %d' % (sheet, code))
 
-def showcase(monster, spec):
+def showcase(monster, spec, mode=0):
     import os, shutil, subprocess
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, '..', 'output', 'ragdoll-showcase')
@@ -264,10 +275,7 @@ def showcase(monster, spec):
     for name in ('graphics.cfg', 'default.cfg'):     # fresh copies each time: today's settings, never written back
         if os.path.exists(os.path.join(mine, name)):
             shutil.copy(os.path.join(mine, name), os.path.join(out, name))
-    graphics = os.path.join(out, 'graphics.cfg')     # whatever yours says: Deaths "Ragdolls, Hollywood"
-    lines = open(graphics).read().splitlines() if os.path.exists(graphics) else []
-    lines = [l for l in lines if l.split()[:1] not in (['deaths'], ['death_ragdoll'], ['death_blast'])]
-    open(graphics, 'w').write('\n'.join(lines + ['deaths 4']) + '\n')
+    configure_ragdolls(os.path.join(out, 'graphics.cfg'), mode, True)
     game = os.path.join(here, '..', 'build', 'play', 'Play DOOM.app', 'Contents', 'MacOS', 'Play DOOM')
     iwad = os.path.expanduser('~/Downloads/DOOM-gamedata/gog_doom/doom2.wad')
     command = [game, '-iwad', iwad, '-file', wad, '-warp', '7', '-skill', '3', '-ragdolltest', spec, '-ragdollloop']
@@ -290,14 +298,18 @@ def write(path, monster, doom1):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    modes = [a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('--physical-bodies=')]
+    if len(modes) > 1 or (modes and modes[0] not in ('0', '1', '2')):
+        raise SystemExit('--physical-bodies must be 0, 1 or 2')
+    mode = int(modes[0]) if modes else 0
     if args and args[0] == 'showcase':
         if len(args) > 3 or (len(args) > 1 and args[1] not in MONSTERS):
             raise SystemExit(__doc__)
-        return showcase(args[1] if len(args) > 1 else 'mix', args[2] if len(args) > 2 else 'ssg:mix')
+        return showcase(args[1] if len(args) > 1 else 'mix', args[2] if len(args) > 2 else 'ssg:mix', mode)
     if args and args[0] == 'run':
         if len(args) != 5 or args[1] not in MONSTERS:
             raise SystemExit(__doc__)
-        return run(args[1:], '--side' in sys.argv, '--log' in sys.argv)
+        return run(args[1:], '--side' in sys.argv, '--log' in sys.argv, mode)
     if len(args) != 2 or args[0] not in MONSTERS:
         raise SystemExit(__doc__)
     write(args[1], args[0], '--doom1' in sys.argv)

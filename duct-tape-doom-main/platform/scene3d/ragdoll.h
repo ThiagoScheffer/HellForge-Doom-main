@@ -16,6 +16,41 @@ inline float length(V3 a) {return std::sqrt(dot(a,a));}
 inline V3 unit(V3 a) {float n=length(a);return n>1e-9f?a*(1/n):V3{};}
 inline V3 middle(V3 a,V3 b) {return (a+b)*0.5f;}
 
+inline V3 dampBodyContact(V3 motion,V3 normal,float normalKeep,float tangentKeep) {
+    normal.z=0;
+    const float size=length(normal);
+    if(!std::isfinite(size)||size<1e-5f||!std::isfinite(normalKeep)||!std::isfinite(tangentKeep))return motion;
+    normal=normal*(1/size);
+    const V3 radial=normal*dot(motion,normal);
+    const V3 tangent=V3{motion.x,motion.y,0}-radial;
+    const V3 flat=radial*std::clamp(normalKeep,0.0f,1.0f)+tangent*std::clamp(tangentKeep,0.0f,1.0f);
+    return {flat.x,flat.y,motion.z};
+}
+
+inline V3 alignBodyProjection(V3 centre,V3 reference,V3 right,V3 up) {
+    const V3 offset=centre-reference;
+    const float x=dot(offset,right),y=dot(offset,up);
+    return centre+right*(std::round(x)-x)+up*(std::round(y)-y);
+}
+
+struct BodyPoseBudget {
+    static constexpr unsigned OrdinaryLimit=3,UrgentLimit=2;
+    unsigned level=0,ordinary=0,urgent=0;
+    int tic=-1;
+
+    bool resetIfNeeded(unsigned serial,int now) {
+        if(level==serial&&tic==now)return false;
+        *this={};level=serial;tic=now;
+        return true;
+    }
+    bool admit(bool important,bool reserveOrdinary) {
+        if(important&&urgent<UrgentLimit) {++urgent;return true;}
+        if(ordinary>=OrdinaryLimit-(reserveOrdinary?1:0))return false;
+        ++ordinary;
+        return true;
+    }
+};
+
 // The skeleton's points, and the parts of the body that follow them. The gun is a bone of its own:
 // every texel the rig carries follows it alone, never blended, so it stays hard however the body
 // bends. It is held in the chest's frame (let go, it would be the weapon dropping).

@@ -808,7 +808,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         const bool lavaCorpse=P_HazardLavaCorpse(thing);
         const bool charred=lavaCorpse||P_CombatCharred(thing);
         DeathView death = {thing->sprite, thing->frame, thing->angle, false, 1, 0, {}};
-        bool directed = !self && !acidCorpse && settings.deathDirector && deathView(*thing, fraction, death);
+        bool directed = !self && !acidCorpse && deathView(*thing, fraction, death);
         if (death.sprite < 0 || death.sprite >= numsprites)
             return;
         const auto &sprite = sprites[death.sprite];
@@ -852,18 +852,16 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         }
         if (posed)
             z += pose.lift;
-        bool ragdoll = false;
-        float strongest = 0;
-        ShadowLight shadowLight{};
+        const bool ragdoll = death.ragdoll != nullptr;
         const size_t casterIndex=casters.size();
-        if (!self && !acidCorpse)
+        if (!self && !acidCorpse && !ragdoll)
             addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera);
-        if (!self && !acidCorpse && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
+        if (!self && !acidCorpse && !ragdoll && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
             casters.push_back({thing, &image, lump, (bool)flipped(rotation), x, y, z, std::hypot(x - camera.eye[0], y - camera.eye[1])});
         auto pulse = lit.pulse, beamLight = lit.beam, baked = lit.baked;
         const auto &shadowLights = lit.shadows;
         const auto &statics = lit.statics;
-        if (!self && !acidCorpse)
+        if (!self && !acidCorpse && !ragdoll)
             for (const auto &light : shadowLights.lights)
                 if (light.strength > 0.025f)
                     addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera, &light);
@@ -1051,13 +1049,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             const bool flipImage=!residue&&flipped(seen);
             float u0 = flipImage ? image.width : 0, u1 = flipImage ? 0 : image.width;
             unsigned m = mode | ((mode & MODE_RELIT) && flipImage ? MODE_FLIPPED : 0);
-            auto &vertices = out[spriteKey];
-            size_t first = vertices.size();
-            if (collar && !self && !acidCorpse)
+            if (collar && !self && !acidCorpse && !ragdoll)
                 woundView(thing, players[displayplayer].mo, baseImage, flipped(seen), x, y, fittedFeet - sink, top, bottom, rx, ry, posed ? &pose : nullptr, (int)seen);
             // Wound holes (wounds.cpp): texels shot through, and their rims.
             std::vector<byte> holes;
-            bool wounded = !self && !acidCorpse && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
+            bool wounded = !self && !acidCorpse && !ragdoll && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
             const std::vector<byte> *cut = wounded ? &holes : nullptr;
             auto finish = [&](std::vector<Vertex> &batch, size_t from)
             {
@@ -1083,7 +1079,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             if (ragdoll)
             {
                 // A ragdoll: its virtual camera's picture on an upright card (ragdoll.cpp), already mirrored.
-                if (ragdollCard(*death.ragdoll, fraction, sink, camera.eye, cut, card))
+                if (ragdollCard(*death.ragdoll, fraction, sink, camera.eye, nullptr, card))
                 {
                     auto &batch = out[card.key];
                     size_t from = batch.size();
@@ -1097,14 +1093,41 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                         const Image &shadow = images.at(card.key);
                         int shadowLump = -1 - card.key; // the shadow renderer resolves images by -1-lump
                         addEnemyShadow(*thing, shadow, shadowLump, false, card.x, card.y, z, camera, nullptr, false, &card);
-                        if (strongest > 0.025f)
-                            addEnemyShadow(*thing, shadow, shadowLump, false, card.x, card.y, z, camera, &shadowLight, false, &card);
+                        for (const auto &nearLight : shadowLights.lights)
+                            if (nearLight.strength > 0.025f)
+                                addEnemyShadow(*thing, shadow, shadowLump, false, card.x, card.y, z, camera, &nearLight, false, &card);
                         if (beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
                             casters.push_back({thing, &shadow, shadowLump, false, card.x, card.y, z, std::hypot(card.x - camera.eye[0], card.y - camera.eye[1]), card});
                     }
+                    return;
+                }
+                // A first card can wait for admission. Draw the actor's current death frame
+                // at its normal position until a generated card is available.
+                const int fallbackFrame=thing->frame&FF_FRAMEMASK;
+                if(thing->sprite>=0&&thing->sprite<numsprites&&fallbackFrame<sprites[thing->sprite].numframes) {
+                    const auto &fallback=sprites[thing->sprite].spriteframes[fallbackFrame];
+                    float fx,fy,fz;
+                    interpolatedPosition(*thing,fraction,fx,fy,fz);
+                    const float *eye=collar||!mirror?camera.eye:mirror->eye;
+                    const unsigned facing=fallback.rotate?spriteRotation(fx-eye[0],fy-eye[1],thing->angle):0u;
+                    const int fallbackLump=firstspritelump+fallback.lump[facing];
+                    const Image &art=lumpImage(fallbackLump,false);
+                    if(art.width<=0||art.height<=0)return;
+                    const bool flip=fallback.flip[facing];
+                    const float l=-float(art.left),r=l+art.width,t=fz+art.top-sink,b=t-art.height;
+                    auto &batch=out[-1-fallbackLump];
+                    const size_t from=batch.size();
+                    const unsigned fm=(m&~MODE_FLIPPED)|((m&MODE_RELIT)&&flip?MODE_FLIPPED:0);
+                    const float u=flip?float(art.width):0,v=flip?0:float(art.width);
+                    quad(batch,{fx+rx*l,fy+ry*l,t,u,0,light,fm},{fx+rx*r,fy+ry*r,t,v,0,light,fm},
+                         {fx+rx*r,fy+ry*r,b,v,float(art.height),light,fm},{fx+rx*l,fy+ry*l,b,u,float(art.height),light,fm});
+                    finish(batch,from);
+                    if(collar)addEnemyShadow(*thing,art,fallbackLump,flip,fx,fy,fz,camera);
                 }
                 return;
             }
+            auto &vertices = out[spriteKey];
+            size_t first = vertices.size();
             if (death.fall.rig)
                 fallQuads(vertices, {0, 0, 0, 0, 0, light, m}, death.fall, x, y, z - sink, rx, ry, flipped(seen), cut);
             else if (posed)

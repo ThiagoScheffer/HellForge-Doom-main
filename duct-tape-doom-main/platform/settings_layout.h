@@ -49,7 +49,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
                        "gore_kinetic_impact","gore_sticky_fragments","gore_soft_deformation","gore_wet_deposits",
                        "gore_impact_audio","gore_impact_strength"}))return {"Combat","Gore"};
         if(settingIs(k,{"blood","blood_spray","blood_shine","severe_critical_bloodspill","monster_skin_damage","wounds"}))return {"Combat","Blood"};
-        if(settingIs(k,{"varied_deaths","death_falls","death_face_viewer","death_motion","body_motion_strength","soft_effects"}))return {"Combat","Deaths"};
+        if(settingIs(k,{"varied_deaths","death_falls","ragdoll_deaths","ragdoll_flying","physical_bodies","physical_body_contacts","physical_body_stable_cards","death_face_viewer","death_motion","body_motion_strength","soft_effects"}))return {"Combat","Deaths"};
         if(!strcmp(k,"shootable_lights"))return {"Destruction","Lights"};
         return {"Combat","Feedback"};
     }

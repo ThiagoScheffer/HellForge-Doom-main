@@ -308,6 +308,9 @@ static bool goreActive() {
     return settings.accelerated&&advancedGoreMode(settings)&&settings.blood&&totalkills<200&&
            levelSerial==r_levelserial&&!netgame&&!demoplayback&&!demorecording;
 }
+bool hasGoreCorpseAppearance(const mobj_t &thing) {
+    return goreActive()&&settings.goreHeads&&goreCorpses.count(&thing)!=0;
+}
 static bool goreDebug() {
     static const bool enabled=M_CheckParm((char*)"-goredebug")!=0;
     return enabled;
@@ -457,7 +460,7 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
             // End-shot synthetic damage can change the actor's life state.
             reason="health_gate";
         } else {
-            d.headEnabled=settings.goreHeads&&!settings.deathRagdoll;
+            d.headEnabled=settings.goreHeads;
             d.bodyEnabled=settings.goreBodyDamage&&!legacyOnly;
             d.legacyStock=d.fatal()&&d.distance<=goreRange&&goreStockDeath(target);
             d.already=goreLiving.count(&target)!=0;
@@ -902,7 +905,7 @@ static byte sawMark(float x,float y,unsigned char stage,uint32_t seed) {
 // Apply after ordinary wound masks, so an intact head cannot reappear on
 // later death frames. No texture rewriting and no extra GPU resources.
 static bool goreCorpseMask(const mobj_t &actor,const Image &image,std::vector<byte> &mask) {
-    if(!goreActive()||settings.deathRagdoll||actor.health>0||
+    if(!goreActive()||actor.health>0||
        (actor.flags&MF_NOBLOOD)||image.pixels.empty())return false;
     const auto corpse=goreCorpses.find(&actor);
     if(corpse==goreCorpses.end())return false;

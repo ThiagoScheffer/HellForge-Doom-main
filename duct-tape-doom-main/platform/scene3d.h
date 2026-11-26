@@ -138,6 +138,9 @@ struct Settings {
     int deathRagdoll=0; // Rigged monsters fall as ragdolls instead: the pain drawing raised into a relief on a small skeleton the hit knocks over.
     int deathGuided=1; // With deathRagdoll: chest blasts from the front sometimes play the shot death on strings (hand rigs that fit it: the zombieman).
     int deathBlast=0; // With deathRagdoll: explosions (rockets, barrels, the BFG) send bodies flying, glancing off walls until they land.
+    int physicalBodies=0; // Legacy, Natural, Cinematic.
+    int physicalBodyContacts=1;
+    int physicalBodyStableCards=1;
     int deathFaceViewer=0; // With deathDirector: a monster killed facing away turns toward the eye before its death frames.
     int deathDirector=0; // Optional varied staggers and turns from the monster's own frames.
     int hitFlinch=1; // Living monsters flinch from hits, leaning with the push.
@@ -287,6 +290,10 @@ struct Settings {
     int fewerSurfaceLights=0; // Only the 8 nearest glowing-texture lights stay dynamic, not 24.
 };
 inline bool advancedGoreMode(const Settings &s) {return s.goreLevel==1||s.goreLevel==2;}
+inline bool ragdollDeathsEnabled(const Settings &s) {return s.accelerated&&s.deathRagdoll;}
+inline bool physicalBodiesEnabled(const Settings &s) {
+    return ragdollDeathsEnabled(s)&&s.physicalBodies>=1&&s.physicalBodies<=2;
+}
 inline bool horrorGoreMode(const Settings &s) {return s.goreLevel==2;}
 
 // glassFrame: on textures with monitor screens, where each glass pixel sits

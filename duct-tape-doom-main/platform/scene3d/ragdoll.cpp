@@ -18,6 +18,8 @@
    Sometimes a chest blast plays the shot death on strings instead (guided
    falls, below). Drawing only. From the lab: tests/death_ragdoll.py. */
 #include "ragdoll.h"
+#include "../../linuxdoom-1.10/p_digwall.h"
+#include "../../linuxdoom-1.10/p_solid.h"
 
 namespace doom3d {
 constexpr float dollGravity=0.45f;  // units per tic per tic: 1.5x earth's at a body's scale, so throws read snappy (at earth's 0.3 a hard throw flew flat at chest height for half a second); Doom's 1 drops a body in 8 tics
@@ -62,7 +64,7 @@ static const std::vector<Link> muscles[MUSCLES]={
     {{P_HEAD,P_SPINE}}};
 
 // A wall or step near the body, in the world: a point below top (units above the body's floor) can't pass it.
-struct Wall { float ax,ay,bx,by,top; };
+struct Wall { float ax,ay,bx,by,top;bool fixed=false; };
 
 // The floors round the kill (tests/death_floors.py): a grid of floorCell-wide cells floorReach each
 // way, each holding its sector, whose floor is read live (a lift under a body carries it). Doom holds
@@ -182,6 +184,8 @@ struct Ragdoll {
     std::vector<Wall> nearWalls;           // the walls round it, in body space
     int slamAt=-1;float slamAge=-1;V3 slamWay{};   // a wall slam (Ragdoll::pin): its tic, age, the wall's way out
     float hitWall=0;V3 hitWay{};int hitPoint=-1;    // the hardest a torso point went into a wall this tic, and which
+    bool hitFixedWall=false,slamFixedWall=false;
+    bool assistContact=false;
     bool splashed=false;float drop=0,smearing=0;    // the wall splash made; the spine's fall last tic; slid since a smear
     float hold[MUSCLES]={},over[MUSCLES]={},late=0;
     float spin=0;int way=0;
@@ -204,6 +208,11 @@ struct Ragdoll {
     mutable std::vector<V3> posed;mutable int posedAt=-1;
     mutable int cardKey=0,cardBottom=0,cardLeft=0,cardRight=0,cardFirst=0;mutable uint64_t cardSignature=~0ull;   // the card's picture (ragdollCard)
     mutable float cardMiddle[2]={};                     // where the card stands, in the body's drawn space
+    mutable float cardCentre[2]={},cardLowest=0,cardLying=0;
+    V3 projectionReference{};
+    mutable bool cardStable=false,importantPosePending=true;
+    unsigned order=0;
+    mutable int cardAttempt=-1,deferredSince=-1,deferredLast=-1;
     mutable int lastStep=-1;                            // the camera's 45-degree step last drawn
     // Once it lies still the body is baked into a plain corpse sprite: the last picture, the camera
     // angle and tilt it was seen from, shown the same from every angle (rotation 0), its 3D data freed.
@@ -525,6 +534,11 @@ struct Ragdoll {
             for(int n=0;n<DOLL_POINTS;++n)v[n]=p[n]-prev[n];
             damp(v);
             if(slamAge>=0)pin(v);
+            if(assistContact) {
+                const float age=std::clamp(1.0f-slamAge/12.0f,0.0f,1.0f);
+                const float damp=age*(settings.physicalBodies==2?0.30f:0.20f);
+                for(int n:{P_HIP_L,P_HIP_R})v[n]=dampBodyContact(v[n],slamWay,1-damp,1-damp*0.5f);
+            }
             const DollPose begin=p;
             for(int n=0;n<DOLL_POINTS;++n) {prev[n]=p[n];p[n]=p[n]+v[n]+V3{0,0,-dollGravity*dt*dt};}
             if(shape&&kSub>0)shapeMatch(*shape,kSub);
@@ -555,7 +569,7 @@ struct Ragdoll {
                             V3 push=normal*(radius[n]-((p[n].x-w.ax)*normal.x+(p[n].y-w.ay)*normal.y));
                             p[n]=p[n]+push;prev[n]=prev[n]+push;walled[n]=normal;if(wallAt<0)wallAt=tics;
                             float into=dot(p[n]-prev[n],normal);++wallTouches;
-                            if(into<0) {prev[n]=prev[n]+normal*(into*(1+rebound()));struck(n,-into,normal);}
+                            if(into<0) {prev[n]=prev[n]+normal*(into*(1+rebound()));struck(n,-into,normal,w.fixed);}
                             prev[n].z=std::max(prev[n].z,p[n].z);   // rough: nothing slides up it (below)
                             continue;
                         }
@@ -567,7 +581,7 @@ struct Ragdoll {
                         p[n]=p[n]+out*(radius[n]-dist);prev[n]=prev[n]+out*(radius[n]-dist);
                         walled[n]=out;if(wallAt<0)wallAt=tics;
                         float into=dot(p[n]-prev[n],out);++wallTouches;
-                        if(into<0) {prev[n]=prev[n]+out*(into*(1+rebound()));struck(n,-into,out);}   // and stops going in
+                        if(into<0) {prev[n]=prev[n]+out*(into*(1+rebound()));struck(n,-into,out,w.fixed);}   // and stops going in
                         // Walls are rough: a point pressed to one does not slide up it. A body slamming
                         // in upright, still stiff, ran up the wall like a ladder whose foot slides in,
                         // and was thrown 40 units up (the arena's wall and pillar).
@@ -580,8 +594,10 @@ struct Ragdoll {
     }
     float rebound() const {return blasted&&!landed?blastRebound:0;}
     // A torso point stopped going into a wall at speed (units a substep), along out.
-    void struck(int n,float speed,V3 out) {
-        if((n==P_HEAD||n==P_NECK||n==P_SH_L||n==P_SH_R||n==P_SPINE)&&speed>hitWall) {hitWall=speed;hitWay=out;hitPoint=n;}
+    void struck(int n,float speed,V3 out,bool fixedWall) {
+        if((n==P_HEAD||n==P_NECK||n==P_SH_L||n==P_SH_R||n==P_SPINE)&&speed>hitWall) {
+            hitWall=speed;hitWay=out;hitPoint=n;hitFixedWall=fixedWall;
+        }
     }
     // The wall slam, film's way: a body thrown into a wall back or chest first, still up, sticks
     // and sinks down it into a slump instead of bouncing off. While pinned (slamAge tics in, up to
@@ -670,17 +686,63 @@ struct Ragdoll {
 };
 
 static std::unordered_map<const mobj_t*,Ragdoll> dolls;
+static BodyPoseBudget poseBudget;
+static const Ragdoll *nextDeferred=nullptr;
+static unsigned dollOrder=0;
+static unsigned cardCacheHits=0,cardDeferred=0;
+static int previousCardTic=-1;
+
+static void beginCardTic() {
+    if(poseBudget.level!=r_levelserial||poseBudget.tic!=leveltime) {
+        if(poseBudget.tic>=0&&M_CheckParm((char*)"-ragdolllog"))
+            fprintf(stderr,"ragdollbudget tic %d ordinary %u urgent %u hits %u deferred %u\n",
+                poseBudget.tic,poseBudget.ordinary,poseBudget.urgent,cardCacheHits,cardDeferred);
+        previousCardTic=poseBudget.level==r_levelserial&&poseBudget.tic<leveltime?poseBudget.tic:-1;
+        const bool hadDeferred=previousCardTic>=0&&cardDeferred>0;
+        poseBudget.resetIfNeeded(r_levelserial,leveltime);
+        nextDeferred=nullptr;cardCacheHits=cardDeferred=0;
+        // Hold one ordinary slot for the oldest request from the last rendered tic,
+        // including when a slow renderer skips simulation tics between frames.
+        if(hadDeferred)for(const auto &entry:dolls) {
+            const Ragdoll &waiting=entry.second;
+            if(waiting.deferredLast!=previousCardTic)continue;
+            if(!nextDeferred||waiting.deferredSince<nextDeferred->deferredSince||
+               (waiting.deferredSince==nextDeferred->deferredSince&&waiting.order<nextDeferred->order))
+                nextDeferred=&waiting;
+        }
+    }
+}
+
+static bool admitCard(const Ragdoll &doll,bool urgent) {
+    if(doll.cardAttempt==leveltime)return false;
+    if(poseBudget.admit(urgent,nextDeferred&&nextDeferred!=&doll)) {
+        if(nextDeferred==&doll)nextDeferred=nullptr;
+        doll.cardAttempt=leveltime;doll.deferredSince=doll.deferredLast=-1;
+        return true;
+    }
+    if(doll.deferredLast!=leveltime) {
+        if(doll.deferredLast!=previousCardTic||doll.deferredSince<0)doll.deferredSince=leveltime;
+        doll.deferredLast=leveltime;
+        ++cardDeferred;
+    }
+    return false;
+}
+
 static void dropCard(const Ragdoll &doll);
-bool hasRagdoll(const mobj_t *thing) {return thing->health<=0&&dolls.count(thing);}
+bool hasRagdoll(const mobj_t *thing) {
+    return ragdollDeathsEnabled(settings)&&thing->health<=0&&dolls.count(thing)&&!hasGoreCorpseAppearance(*thing);
+}
 bool ragdollSettled(const mobj_t *thing) {auto found=dolls.find(thing);return found==dolls.end()||found->second.resting;}
 void forgetRagdoll(const mobj_t *thing) {
     auto found=dolls.find(thing);
     if(found==dolls.end())return;
+    if(nextDeferred==&found->second)nextDeferred=nullptr;
     dropCard(found->second);dolls.erase(found);
 }
 void ragdollsShutdown() {
     for(auto &entry:dolls)dropCard(entry.second);
     dolls.clear();reliefsShutdown();
+    poseBudget={};nextDeferred=nullptr;dollOrder=cardCacheHits=cardDeferred=0;previousCardTic=-1;
 }
 
 static int frameLump(int state,int rotation,bool *flip=nullptr) {
@@ -690,7 +752,7 @@ static int frameLump(int state,int rotation,bool *flip=nullptr) {
     int frame=s.frame&FF_FRAMEMASK;
     if(frame>=sprites[s.sprite].numframes)return -1;
     const spriteframe_t &sf=sprites[s.sprite].spriteframes[frame];
-    if(!sf.rotate&&rotation)return -1;
+    if((!sf.rotate&&rotation)||sf.lump[rotation]<0)return -1;
     if(flip)*flip=sf.flip[rotation];
     return firstspritelump+sf.lump[rotation];
 }
@@ -700,7 +762,7 @@ static const Relief *reliefOfState(int state) {
     return reliefFor(frameLump(state,0),side,flip,back,backFlip);
 }
 void prepareRagdolls() {
-    if(!settings.deathRagdoll)return;
+    if(!ragdollDeathsEnabled(settings))return;
     for(int type=0;type<NUMMOBJTYPES;++type)
         if(mobjinfo[type].flags&MF_COUNTKILL)reliefOfState(mobjinfo[type].painstate);
 }
@@ -722,7 +784,7 @@ static std::vector<Wall> wallsNear(const mobj_t &thing,float reach) {
             if(hi-lo>=16&&lo-floor<=16)continue;
             top=hi-lo<16?1e9f:lo-floor;
         }
-        out.push_back({units(line.v1->x),units(line.v1->y),units(line.v2->x),units(line.v2->y),top});
+        out.push_back({units(line.v1->x),units(line.v1->y),units(line.v2->x),units(line.v2->y),top,!line.backsector});
     }
     return out;
 }
@@ -773,7 +835,7 @@ static std::vector<Wall> wallsHere(const Ragdoll &doll) {
     for(const Wall &w:doll.walls) {
         float a0=w.ax-doll.ox,a1=w.ay-doll.oy,b0=w.bx-doll.ox,b1=w.by-doll.oy;
         out.push_back({side*(a0*doll.ax[0]+a1*doll.ax[1]),a0*doll.ay[0]+a1*doll.ay[1],
-                       side*(b0*doll.ax[0]+b1*doll.ax[1]),b0*doll.ay[0]+b1*doll.ay[1],w.top});
+                       side*(b0*doll.ax[0]+b1*doll.ax[1]),b0*doll.ay[0]+b1*doll.ay[1],w.top,w.fixed});
     }
     return out;
 }
@@ -787,6 +849,7 @@ bool startRagdoll(const mobj_t &thing,float dx,float dy,float speed,float side,f
     blast=blast&&settings.deathBlast;
     if(punch)speed*=hitPunch;
     const mobjinfo_t &info=*thing.info;
+    if((info.flags&MF_FLOAT)||voxelMonster(thing))return false;
     const Relief *body=reliefOfState(info.painstate);
     if(!body)return false;
     Ragdoll doll;
@@ -947,6 +1010,9 @@ bool startRagdoll(const mobj_t &thing,float dx,float dy,float speed,float side,f
         for(int n=0;n<DOLL_POINTS;++n)doll.push(n,carried);
     }
     doll.shown=doll.p;
+    doll.projectionReference=doll.p[P_SPINE];
+    if(doll.mirror)doll.projectionReference.x=-doll.projectionReference.x;
+    doll.order=++dollOrder;
     doll.walls=wallsNear(thing,doll.reach);
     doll.floors=floorsNear(thing,doll.walls,doll.reach);
     doll.gx=doll.ox-doll.floors.x0;doll.gy=doll.oy-doll.floors.y0;doll.gz=units(thing.z);
@@ -964,7 +1030,11 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
     if(found==dolls.end())return false;
     Ragdoll &doll=found->second;
     // Crushed to gibs, raised, or otherwise moved on: the game's own frames again.
-    if(thing.health>0||std::find(doll.steps.begin(),doll.steps.end(),(int)(thing.state-states))==doll.steps.end())return false;
+    if(thing.health>0||!thing.state||hasGoreCorpseAppearance(thing)||
+       std::find(doll.steps.begin(),doll.steps.end(),(int)(thing.state-states))==doll.steps.end()) {
+        forgetRagdoll(&thing);
+        return false;
+    }
     // The fall runs in game tics, in the world from where it died. A pose is drawn every earlyPose
     // tics through the hit (at the death frames' pace the recoil fell between the first two poses),
     // then as often as the monster's own death frames change (the zombieman's every 5 tics, the
@@ -988,6 +1058,9 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
         // Held until its hips reach the floor (let go by the clock, half slumped, the legs folded under
         // the pinned torso sprang it off the wall at 6 units a tic), slamTics at most.
         doll.slamAge=doll.slamAt>=0&&doll.tics-doll.slamAt<slamTics&&doll.up(P_SPINE)>10&&!doll.seated()?(float)(doll.tics-doll.slamAt):-1;
+        doll.assistContact=physicalBodiesEnabled(settings)&&settings.physicalBodyContacts&&
+            doll.slamAge>=0&&doll.slamAge<12&&doll.slamFixedWall&&!doll.blasted&&
+            !SV_MapMode()&&!P_GlobalDigEnabled()&&!M_CheckParm((char*)"-digging");
         if(doll.slamAge>=0) {             // slammed: the legs give at once, the trunk half held
             muscle[M_LEGS]=0;muscle[M_TRUNK]=std::min(muscle[M_TRUNK],0.5f);
             k=0;
@@ -1017,7 +1090,7 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
         // A slam when the body hits a wall with its torso, hard, still up: not when it slumps into one.
         if(doll.slamAt<0&&!doll.landed&&!doll.blasted&&doll.hitWall*dollSubsteps>slamSpeed&&doll.up(P_SPINE)>14&&
            unit(doll.p[P_NECK]-doll.hips()).z>0.4f) {
-            doll.slamAt=doll.tics;doll.slamWay=doll.hitWay;slam=true;
+            doll.slamAt=doll.tics;doll.slamWay=doll.hitWay;doll.slamFixedWall=doll.hitFixedWall;slam=true;
             // The knees buckle out from the wall (on straight legs a slammed body stood pinned upright).
             for(int n:{P_KNEE_L,P_KNEE_R})doll.push(n,doll.slamWay*slamBuckle+V3{0,0,-0.3f});
             doll.push(P_HIP_L,doll.slamWay*(0.3f*slamBuckle));doll.push(P_HIP_R,doll.slamWay*(0.3f*slamBuckle));
@@ -1085,9 +1158,9 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
             V3 sw=doll.shouldersWas-axis*dot(doll.shouldersWas,axis);
             float twist=doll.tics>1&&length(sw)>1e-3f&&length(sh)>1e-3f?std::atan2(dot(axis,cross(sw,sh)),dot(sw,sh))*180/doomPi:0;
             doll.shouldersWas=doll.p[P_SH_R]-doll.p[P_SH_L];
-            fprintf(stderr,"ragdoll %u tic %d landed %d lying %d heavy %d slam %d wall %d mid %.1f speed %.2f yaw %.3f roll %.3f tumble %.3f up %.2f hips %.1f neck %.1f head %.1f hip %.0f twist %.1f\n",
+            fprintf(stderr,"ragdoll %u tic %d landed %d lying %d heavy %d slam %d wall %d mid %.1f speed %.2f yaw %.3f roll %.3f tumble %.3f up %.2f hips %.1f neck %.1f head %.1f hip %.0f twist %.1f assist %d\n",
                 (unsigned)((uintptr_t)&thing%100000),doll.tics,doll.landed,doll.lyingAt>=0?doll.tics-doll.lyingAt:-1,doll.heavy,doll.slamAt,doll.wallTouches,
-                c.z,std::hypot(vc.x,vc.y),yaw,roll,tumble,axis.z,doll.up(P_HIP_L),doll.up(P_NECK),doll.up(P_HEAD),hip,twist);
+                c.z,std::hypot(vc.x,vc.y),yaw,roll,tumble,axis.z,doll.up(P_HIP_L),doll.up(P_NECK),doll.up(P_HEAD),hip,twist,doll.assistContact);
         }
         // In the air at most the zombieman's pace: at the imp's 8 tics a throw was one held pose sliding
         // through the air, a statue, then lying.
@@ -1095,6 +1168,7 @@ bool ragdollView(const mobj_t &thing,DeathView &view) {
         if(doll.tics==1||doll.tics-doll.lastPose>=every||top||landing||torso||slam||doll.resting) {
             doll.shown=doll.p;++doll.shownAt;doll.lastPose=doll.tics;
             std::copy(doll.centre,doll.centre+2,doll.centreShown);
+            if(doll.tics==1||landing||torso||slam||doll.resting)doll.importantPosePending=true;
         }
     }
     view.sprite=states[doll.state].sprite;view.frame=states[doll.state].frame;view.mirror=doll.mirror;
@@ -1132,6 +1206,15 @@ static const std::vector<V3> &posedCorners(const Ragdoll &doll) {
     }
     return doll.posed;
 }
+static V3 cardBoundsCentre(const std::vector<V3> &posed,float side) {
+    V3 lo{1e9f,1e9f,1e9f},hi{-1e9f,-1e9f,-1e9f};
+    for(const V3 &q:posed) {
+        const V3 m{side*q.x,q.y,q.z};
+        lo={std::min(lo.x,m.x),std::min(lo.y,m.y),std::min(lo.z,m.z)};
+        hi={std::max(hi.x,m.x),std::max(hi.y,m.y),std::max(hi.z,m.z)};
+    }
+    return middle(lo,hi);
+}
 static byte nearestColour(const byte *palette,int r,int g,int b) {
     int best=0,bestDistance=INT_MAX;
     for(int i=0;i<256;++i) {
@@ -1143,49 +1226,57 @@ static byte nearestColour(const byte *palette,int r,int g,int b) {
 // Where it is drawn: where it died, moved on by how far its middle has gone since the pose shown,
 // between the last two tics: the pose steps on Doom's tics, its flight runs smooth, as a walking
 // monster's does. Resting, the floor it lies on carries it (a lift). feet: the floor it died on.
-static void dollPlace(const Ragdoll &doll,float fraction,float &x,float &y,float &feet) {
+static void dollPlace(const Ragdoll &doll,const float *centre,float fraction,float &x,float &y,float &feet) {
     float side=doll.mirror?-1.0f:1.0f;
-    float mx=doll.centreWas[0]+(doll.centre[0]-doll.centreWas[0])*fraction-doll.centreShown[0];
-    float my=doll.centreWas[1]+(doll.centre[1]-doll.centreWas[1])*fraction-doll.centreShown[1];
+    float mx=doll.centreWas[0]+(doll.centre[0]-doll.centreWas[0])*fraction-centre[0];
+    float my=doll.centreWas[1]+(doll.centre[1]-doll.centreWas[1])*fraction-centre[1];
     x=doll.ox+doll.ax[0]*side*mx+doll.ay[0]*my;y=doll.oy+doll.ax[1]*side*mx+doll.ay[1]*my;
     feet=doll.gz+(doll.restSector?units(doll.restSector->floorheight)-doll.restFloor:0);
 }
 bool ragdollWhere(const Ragdoll &doll,float fraction,float &x,float &y,float &z) {
-    dollPlace(doll,fraction,x,y,z);
-    x+=doll.ax[0]*doll.cardMiddle[0]+doll.ay[0]*doll.cardMiddle[1];y+=doll.ax[1]*doll.cardMiddle[0]+doll.ay[1]*doll.cardMiddle[1];
+    const bool cached=doll.cardKey&&images.count(doll.cardKey);
+    dollPlace(doll,cached?doll.cardCentre:doll.centreShown,fraction,x,y,z);
+    const float mx=cached?doll.cardMiddle[0]:doll.shown[P_SPINE].x*(doll.mirror?-1.0f:1.0f);
+    const float my=cached?doll.cardMiddle[1]:doll.shown[P_SPINE].y;
+    x+=doll.ax[0]*mx+doll.ay[0]*my;y+=doll.ax[1]*mx+doll.ay[1]*my;
     return doll.landed;
 }
 bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,const std::vector<byte> *holes,RagdollCard &card) {
     const Relief &body=*doll.body;
     if(body.cardSize<=0)return false;
     int size=body.cardSize;
+    const bool stable=physicalBodiesEnabled(settings)&&settings.physicalBodyStableCards;
+    if(stable)beginCardTic();
     // Drawn space: the body's own, mirrored when it is drawn mirrored (the world is x + ax*m.x + ay*m.y).
     float side=doll.mirror?-1.0f:1.0f;
-    float x,y,feet;dollPlace(doll,fraction,x,y,feet);feet-=sink;
+    float x,y,feet;dollPlace(doll,doll.centreShown,fraction,x,y,feet);feet-=sink;
     V3 upright=unit(doll.shown[P_NECK]-middle(doll.shown[P_HIP_L],doll.shown[P_HIP_R]));
     float lying=std::clamp(1-upright.z,0.0f,1.0f);
     auto found=images.find(doll.cardKey);
+    const bool cached=doll.cardKey&&found!=images.end()&&found->second.texture;
     auto place=[&] {
+        float px,py,base;
+        dollPlace(doll,doll.cardCentre,fraction,px,py,base);
         card.key=doll.cardKey;card.size=size;card.half=size/2.0f;
         card.u0=doll.cardLeft;card.v0=doll.cardFirst;card.u1=doll.cardRight;card.v1=doll.cardBottom+1;
-        card.x=x+doll.ax[0]*doll.cardMiddle[0]+doll.ay[0]*doll.cardMiddle[1];card.y=y+doll.ax[1]*doll.cardMiddle[0]+doll.ay[1]*doll.cardMiddle[1];
+        card.x=px+doll.ax[0]*doll.cardMiddle[0]+doll.ay[0]*doll.cardMiddle[1];card.y=py+doll.ax[1]*doll.cardMiddle[0]+doll.ay[1]*doll.cardMiddle[1];
         // Its lowest solid row on the body's lowest surface (the floor it lies on, which may be below
         // the thing's: Doom holds a corpse up at the highest floor under its box), not the thing's feet.
-        float lowest=1e9f;
-        for(int n=0;n<DOLL_POINTS;++n)lowest=std::min(lowest,doll.shown[n].z-radius[n]);
         // Lying, pressed cardSink into the floor: the picture's lowest rows are the body's near
         // edge seen from above, and a row or two of floor-coloured fringe read as a gap under it.
-        card.top=feet+lowest+doll.cardBottom+1-cardSink*lying;
+        card.top=base-sink+doll.cardLowest+doll.cardBottom+1-cardSink*doll.cardLying;
         return true;
     };
-    if(doll.baked&&doll.cardKey&&found!=images.end())return place();   // a corpse sprite now: the same from every angle
-    const std::vector<V3> &posed=posedCorners(doll);
-    if(posed.empty())return false;
+    if(doll.baked&&cached&&stable==doll.cardStable) {
+        if(stable)++cardCacheHits;
+        return place();   // a corpse sprite now: the same from every angle
+    }
     // The camera aims at the body's middle, in height too: aimed at its feet, the top of a body
     // still standing reached past the picture (the canvas only spans the body's own size).
-    V3 lo{1e9f,1e9f,1e9f},hi{-1e9f,-1e9f,-1e9f};
-    for(const V3 &q:posed) {V3 m{side*q.x,q.y,q.z};lo={std::min(lo.x,m.x),std::min(lo.y,m.y),std::min(lo.z,m.z)};hi={std::max(hi.x,m.x),std::max(hi.y,m.y),std::max(hi.z,m.z)};}
-    V3 o=middle(lo,hi);
+    // The cheap core point selects a camera bucket before stable-mode admission.
+    // The actual picture is still centred on the skinned bounds.
+    V3 o=stable?V3{side*doll.shown[P_SPINE].x,doll.shown[P_SPINE].y,doll.shown[P_SPINE].z}:
+        cardBoundsCentre(posedCorners(doll),side);
     // The virtual camera: from the eye's side of the body, stepped to 45 degrees from its front, as
     // the eye sees every sprite, all through the fall: what the shot did is what is drawn. (It used to
     // turn side-on as the body went flat, which hid the far half of a lying body hanging over the
@@ -1197,7 +1288,7 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
     // A step is kept until the view is well past the next one's middle: flipping between two on the
     // line between them looked like the body turning.
     if(doll.lastStep>=0&&std::abs(std::remainder(azimuth-doll.lastStep*doomPi/4,2*doomPi))<doomPi/8+doomPi/18)step=doll.lastStep;
-    doll.lastStep=step;
+    if(!stable)doll.lastStep=step;
     int angle=doll.baked?doll.bakedAngle:step*45;   // whole degrees
     float a=angle*doomPi/180;
     V3 along=doll.shown[P_HEAD]-middle(doll.shown[P_ANK_L],doll.shown[P_ANK_R]);
@@ -1215,13 +1306,28 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
     uint32_t wounds=0;
     if(holes)for(size_t i=0;i<holes->size();++i)wounds=wounds*31+(*holes)[i];
     uint64_t signature=((uint64_t)(uint32_t)doll.shownAt<<32)^((uint64_t)angle<<20)^((uint64_t)tilt<<14)^((uint64_t)doll.mirror<<8)^((uint64_t)wounds*0x9e3779b97f4a7c15ull);
-    if((!doll.cardKey||found==images.end()||signature!=doll.cardSignature)&&M_CheckParm((char*)"-ragdolllog")) {
+    const bool rebuild=!cached||stable!=doll.cardStable||signature!=doll.cardSignature;
+    if(rebuild&&stable&&!admitCard(doll,!cached||doll.importantPosePending||doll.resting))return cached&&place();
+    if(!rebuild&&stable)++cardCacheHits;
+    if(rebuild&&M_CheckParm((char*)"-ragdolllog")) {
         // Test runs: each new picture's camera angle and the body's own heading in it (degrees).
         float heading=std::atan2(ly,lx)*(180/doomPi);
         fprintf(stderr,"ragdollcard %u pose %d angle %d heading %.1f tilt %d looks %.1f\n",(unsigned)((uintptr_t)&doll%100000),
             doll.shownAt,angle,heading,tilt,looks);
     }
-    if(!doll.cardKey||found==images.end()||signature!=doll.cardSignature) {
+    if(rebuild) {
+        const std::vector<V3> &posed=posedCorners(doll);
+        if(posed.empty())return cached&&place();
+        if(stable) {
+            o=cardBoundsCentre(posed,side);
+            const V3 aligned=alignBodyProjection(o,doll.projectionReference,r,u);
+            const float half=size/2.0f;
+            const bool fits=std::all_of(posed.begin(),posed.end(),[&](V3 q) {
+                const V3 offset=V3{side*q.x,q.y,q.z}-aligned;
+                return std::abs(dot(offset,r))<=half&&std::abs(dot(offset,u))<=half;
+            });
+            if(fits)o=aligned;
+        }
         static const byte *palette=nullptr,*colormap=nullptr;
         static byte rims[4];
         if(!palette) {
@@ -1269,22 +1375,32 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
         for(int j=0;j<size;++j)for(int i=0;i<size;++i)if(pixels[((size_t)j*size+i)*2+1]) {
             left=std::min(left,i);right=std::max(right,i+1);first=std::min(first,j);bottom=j;
         }
-        doll.cardBottom=bottom<0?size-1:bottom;
-        doll.cardLeft=left;doll.cardRight=right;doll.cardFirst=first;
+        if(bottom<0)return cached&&place();
         std::vector<byte> normals=spriteNormals(size,size,pixels.data());
-        if(!doll.cardKey)doll.cardKey=cardKeyBase+(++cardSerial&0x0fffffff);
-        found=images.find(doll.cardKey);
-        if(found==images.end())found=images.emplace(doll.cardKey,upload(size,size,pixels.data(),0,0,nullptr,normals.data())).first;
-        else {
+        if(!cached) {
+            Image picture=upload(size,size,pixels.data(),0,0,nullptr,normals.data());
+            if(!picture.texture)return false;
+            if(!doll.cardKey)doll.cardKey=cardKeyBase+(++cardSerial&0x0fffffff);
+            images.insert_or_assign(doll.cardKey,std::move(picture));
+        } else {
             std::vector<byte> packed((size_t)size*size*4);
             for(size_t i=0;i<(size_t)size*size;++i) {packed[4*i]=pixels[2*i];packed[4*i+1]=pixels[2*i+1];packed[4*i+2]=normals[2*i];packed[4*i+3]=normals[2*i+1];}
             gpuUpdateTexture(found->second.texture,GpuFormat::RGBA8,{{0,0,size,size}},packed.data(),size*4);
             found->second.pixels=std::move(pixels);
         }
+        doll.cardBottom=bottom;
+        doll.cardLeft=left;doll.cardRight=right;doll.cardFirst=first;
+        doll.cardMiddle[0]=o.x;doll.cardMiddle[1]=o.y;
+        std::copy(doll.centreShown,doll.centreShown+2,doll.cardCentre);
+        doll.cardLowest=1e9f;
+        for(int n=0;n<DOLL_POINTS;++n)doll.cardLowest=std::min(doll.cardLowest,doll.shown[n].z-radius[n]);
+        doll.cardLying=lying;
+        doll.cardStable=stable;
         doll.cardSignature=signature;
+        doll.lastStep=step;
+        doll.importantPosePending=false;
     }
-    doll.cardMiddle[0]=o.x;doll.cardMiddle[1]=o.y;
-    if(doll.resting&&!doll.baked&&doll.cardSignature==signature) {
+    if(doll.resting&&!doll.baked) {
         // At rest and drawn in its last pose: from now on a sprite, the doll's posed body freed.
         doll.baked=true;doll.bakedAngle=angle;doll.bakedTilt=tilt;
         doll.posed.clear();doll.posed.shrink_to_fit();doll.posedAt=-1;

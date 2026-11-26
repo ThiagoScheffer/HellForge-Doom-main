@@ -18,7 +18,7 @@ struct Body { int health;float momx,momy;bool alive,seen; };
 // This tic's hits on one body: hitscan points (exact) and the attack that
 // did the damage (its inflictor: the shooter for hitscan, else the missile
 // or blast), which groups bodies struck by one blast.
-struct Hit { int tic;float z,dx,dy,side;int count;const mobj_t *attack;float missileZ,missileSide;bool missile; float kinetic=0.f; };
+struct Hit { int tic;float z,dx,dy,side;int count;const mobj_t *attack;float missileZ,missileSide;bool missile;float kinetic=0.f;bool blast=false; };
 static std::unordered_map<const mobj_t*,Body> watched;
 static std::unordered_map<const mobj_t*,std::vector<Impulse>> impulses;
 static std::unordered_map<const mobj_t*,Hit> hits;
@@ -40,7 +40,7 @@ static int deathTics(int state) {
 }
 void bodyHit(mobj_t *target,fixed_t fx,fixed_t fy,fixed_t fz,fixed_t fdx,fixed_t fdy,int damage) {
     (void)damage;
-    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector)||!target||!monster(*target))return;
+    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!ragdollDeathsEnabled(settings))||!target||!monster(*target))return;
     float dx=units(fdx),dy=units(fdy),length=std::hypot(dx,dy);
     if(length<1e-4f)return;
     dx/=length;dy/=length;
@@ -70,10 +70,14 @@ static void pushOf(const mobj_t &thing,const Body &before,float hitDx,float hitD
 }
 void bodyDamaged(mobj_t *target,mobj_t *inflictor,mobj_t *source,int damage) {
     (void)damage;
-    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector)||!target||!monster(*target))return;
+    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!ragdollDeathsEnabled(settings))||!target||!monster(*target))return;
     Hit &hit=hits[target];
     if(hit.tic!=leveltime)hit={leveltime,0,0,0,0,0,nullptr,0,0,false};
     if(!hit.attack)hit.attack=inflictor?inflictor:source;
+    if(inflictor&&inflictor!=source) {
+        const auto role=Game_ThingRole(inflictor->type);
+        hit.blast=role==GAME_THING_ROCKET||role==GAME_THING_BIG_SHOT||role==GAME_THING_BARREL;
+    }
     // A missile or blast: its height on the body, and for a direct hit
     // (still flying) how far off the middle, across its flight.
     if(inflictor&&inflictor!=source&&!hit.missile) {
@@ -141,7 +145,8 @@ static void addImpulse(const mobj_t &thing,const Body &before,float hitZ,bool hi
 }
 void watchBodies() {
     bool spray=settings.blood&&settings.bloodSpray;
-    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!settings.wounds&&!spray&&
+    const bool ragdolls=ragdollDeathsEnabled(settings);
+    if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!ragdolls&&!settings.wounds&&!spray&&
         !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&
         !(advancedGoreMode(settings)&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
     if(bodyLevelSerial!=r_levelserial) {bodyMotionShutdown();bodyLevelSerial=r_levelserial;}
@@ -159,10 +164,10 @@ void watchBodies() {
         if(died||(hurt&&(settings.hitFlinch||spray))) {
             float z=0,hdx=0,hdy=0,side=0;bool known=false;const mobj_t *attack=nullptr;
             auto hit=hits.find(thing);
-            bool missile=false;
+            bool missile=false,blast=false;
             float kinetic=0.f;
             if(hit!=hits.end()&&leveltime-hit->second.tic<=1) {
-                Hit &h=hit->second;attack=h.attack;kinetic=h.kinetic;h.kinetic=0.f;
+                Hit &h=hit->second;attack=h.attack;blast=h.blast;kinetic=h.kinetic;h.kinetic=0.f;
                 if(h.count>0) {z=h.z/h.count;hdx=h.dx;hdy=h.dy;side=h.side/h.count;known=true;}
                 else if(h.missile) {z=h.missileZ;side=h.missileSide;known=true;missile=true;}
             }
@@ -174,7 +179,7 @@ void watchBodies() {
                 else sprayHurt(*thing,dx,dy,z,body.health-thing->health);
             }
             if(died?settings.deathMotion:settings.hitFlinch)addImpulse(*thing,body,z,known,hdx,hdy,died,kinetic);
-            if(died&&settings.deathDirector) {
+            if(died&&(settings.deathDirector||ragdolls)) {
                 float dx,dy,speed;pushOf(*thing,body,hdx,hdy,dx,dy,speed);
                 // Hit height: 1 well above the hip, -1 at the legs (as addImpulse).
                 float tall=std::max(16.0f,units(thing->info->height));
@@ -182,7 +187,11 @@ void watchBodies() {
                 // Where the killing blow struck, for a shot through the head: hitscan only.
                 bool shot=hit!=hits.end()&&leveltime-hit->second.tic<=1&&hit->second.count>0;
                 float hitU=-side*units(thing->radius);    // side: in radii, the shooter's left
-                startDeath(*thing,dx,dy,speed,side,high,gibbed(*thing),attack,shot?z:-1,hitU);
+                const bool gib=gibbed(*thing);
+                const bool useDoll=ragdolls&&!P_HazardAcidCorpse(thing)&&!hasGoreCorpseAppearance(*thing)&&
+                    (!gib||(blast&&settings.deathBlast))&&
+                    startRagdoll(*thing,dx,dy,speed,side,high,shot?z:-1,hitU,blast);
+                if(!useDoll)startDeath(*thing,dx,dy,speed,side,high,gib,attack,shot?z:-1,hitU);
             }
         }
         body.health=thing->health;body.momx=units(thing->momx);body.momy=units(thing->momy);body.alive=alive;

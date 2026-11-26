@@ -170,6 +170,7 @@ void forgetDeath(const mobj_t *thing) {deaths.erase(thing);forgetFall(thing);for
 void deathsShutdown() {deaths.clear();arts.clear();attackPace.clear();attackTic=-1;fallsShutdown();ragdollsShutdown();}
 
 bool deathView(const mobj_t &thing,float fraction,DeathView &view) {
+    if(thing.health<=0&&ragdollDeathsEnabled(settings)&&ragdollView(thing,view))return true;
     if(!settings.deathDirector)return false;
     if(settings.deathFalls&&fallView(thing,fraction,view))return true;
     auto found=deaths.find(&thing);

@@ -92,7 +92,6 @@ bool hasAuthored(const Settings&) {return Game_HasEffect(GAME_EFFECT_AUTHORED_EP
 }
 
 void fitGame(Settings &s) {
-    s.deathRagdoll=s.deathGuided=s.deathBlast=0; // Keep the existing, individually toggled death behavior.
     if(!Game_HasEffect(GAME_EFFECT_WINDOW_GLASS))s.windowGlass=0;
     if(!Game_HasEffect(GAME_EFFECT_SHOOTABLE_LIGHTS))s.shootableLights=0;
     if(!Game_HasEffect(GAME_EFFECT_NATURAL_FALLOFF))s.naturalFalloff=0;
@@ -338,6 +337,16 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "shot through the head cuts the strings and the body crumples. Drawing only: damage is the game's own. The "
                     "fixed choices are for judging each one.",
                     [](const Settings &d){return d.deathDirector!=0;}),
+                check("ragdoll_deaths","Ragdoll deaths",&s.deathRagdoll,
+                    "Use the rigged sprite physics for supported monsters.",[](const Settings &d){return d.accelerated!=0;}),
+                check("ragdoll_flying","Flying ragdolls",&s.deathBlast,
+                    "Allow the existing blast throws and wall rebounds for ragdoll deaths.",ragdollDeathsEnabled),
+                choice("physical_bodies","Physical Bodies",&s.physicalBodies,{"Legacy","Natural","Cinematic"},{0,1,2},
+                    "Improves cosmetic ragdoll contacts and generated sprites. Requires ragdoll deaths.",ragdollDeathsEnabled),
+                check("physical_body_contacts","Environmental body contacts",&s.physicalBodyContacts,
+                    "Damps sideways pelvic motion after a supported torso wall impact.",physicalBodiesEnabled),
+                check("physical_body_stable_cards","Stable ragdoll sprites",&s.physicalBodyStableCards,
+                    "Stabilizes pixel alignment and limits sprite reconstruction per game tic.",physicalBodiesEnabled),
                 check("death_face_viewer","Dying turn to face you",&s.deathFaceViewer,
                     "A monster killed facing away turns toward you before its death frames, which are drawn facing the viewer, "
                     "instead of snapping round.",

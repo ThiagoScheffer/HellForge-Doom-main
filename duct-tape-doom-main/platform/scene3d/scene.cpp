@@ -350,6 +350,7 @@ void applySettings() {
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
+    if(!ragdollDeathsEnabled(settings))ragdollsShutdown();
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
     P_HazardConfigure(settings.monsterEnvironmentDamage,settings.monsterHazardAvoidance,settings.acidCorpseDissolution);

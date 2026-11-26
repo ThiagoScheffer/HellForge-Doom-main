@@ -20,7 +20,8 @@
    (toward the eye). Only the one in turn can be hurt, so each blast throws one body; it gibs as in
    the game, drawn as a body thrown with Flying enemies on. Weapon chaingun fires a burst of three bullets 4 tics apart (the gun's pace), the last
    one killing. A test switch only: it changes the game. */
-#include "internal.h"
+#include "ragdoll.h"
+#include <limits>
 extern "C" {
 void P_LineAttack(mobj_t *t1,angle_t angle,fixed_t distance,fixed_t slope,int damage);
 fixed_t P_AproxDistance(fixed_t dx,fixed_t dy);
@@ -33,6 +34,39 @@ void P_ExplodeMissile(mobj_t *mo);
 namespace doom3d {
 // -ragdollloop: the tic the current round began (its kills from first tics on), and its number
 static int roundAt=0,round=0,settledFor=0;
+static void testPhysicalBodyHelpers() {
+    static_assert(DOLL_POINTS==11);
+    const V3 motion{4,-3,2};
+    const V3 damped=dampBodyContact(motion,{2,0,7},0.5f,0.75f);
+    const V3 clamped=dampBodyContact(motion,{2,0,0},-1,3);
+    const V3 invalid=dampBodyContact(motion,{std::numeric_limits<float>::infinity(),0,0},0,0);
+    const V3 invalidKeep=dampBodyContact(motion,{1,0,0},std::numeric_limits<float>::quiet_NaN(),0);
+    if(damped.x!=2||damped.y!=-2.25f||damped.z!=motion.z||length(damped)>length(motion)||
+       clamped.x!=0||clamped.y!=motion.y||clamped.z!=motion.z||
+       length(invalid-motion)!=0||length(invalidKeep-motion)!=0||length(dampBodyContact(motion,{},0,0)-motion)!=0)
+        I_Error((char*)"Physical Bodies contact damping failed");
+
+    const V3 reference{-6,-3,2},right{0.6f,0.8f,0},up{0,0,1};
+    const V3 centre=reference+right*(-4.3f)+up*2.25f;
+    const V3 aligned=alignBodyProjection(centre,reference,right,up);
+    const V3 again=alignBodyProjection(centre,reference,right,up);
+    const V3 mirrored=alignBodyProjection({-centre.x,centre.y,centre.z},
+        {-reference.x,reference.y,reference.z},{-right.x,right.y,0},up);
+    if(length(aligned-again)!=0||std::abs(dot(aligned-reference,right)+4)>1e-5f||
+       std::abs(dot(aligned-reference,up)-2)>1e-5f||
+       std::abs(dot(aligned-centre,right))>0.5f||std::abs(dot(aligned-centre,up))>0.5f||
+       length(mirrored-V3{-aligned.x,aligned.y,aligned.z})>1e-5f)
+        I_Error((char*)"Physical Bodies projection alignment failed");
+
+    BodyPoseBudget budget;
+    if(!budget.resetIfNeeded(1,42)||!budget.admit(true,true)||!budget.admit(true,true)||
+       !budget.admit(false,true)||!budget.admit(false,true)||budget.admit(true,true)||
+       budget.resetIfNeeded(1,42)||!budget.admit(false,false)||budget.admit(true,false)||
+       !budget.resetIfNeeded(1,43)||!budget.admit(false,false)||!budget.resetIfNeeded(2,43)||
+       budget.ordinary!=0||budget.urgent!=0)
+        I_Error((char*)"Physical Bodies pose budget failed");
+    if(M_CheckParm((char*)"-ragdolllog"))puts("PASS Physical Bodies contact, projection and budget helpers");
+}
 // The row stood up again where it was placed, its corpses and their bodies gone.
 static void standUp(std::vector<mobj_t*> &victims) {
     std::vector<mobj_t*> drops;         // the clips and guns the last round dropped
@@ -48,6 +82,8 @@ static void standUp(std::vector<mobj_t*> &victims) {
 void ragdollTestTic() {
     int option=M_CheckParm((char*)"-ragdolltest");
     if(!option||option+1>=myargc||gamestate!=GS_LEVEL)return;
+    static const bool helpersChecked=(testPhysicalBodyHelpers(),true);
+    (void)helpersChecked;
     mobj_t *shooter=players[consoleplayer].mo;
     if(!shooter)return;
     std::string spec=myargv[option+1];
