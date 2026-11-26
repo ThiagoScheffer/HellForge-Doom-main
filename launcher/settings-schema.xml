@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="7ad83eaeccf34d9afe4871315385b5753bcf8371e0663986bfe3fb0de7c6d08a">
+<settings source="platform/settings_panel.cpp" source_sha256="e822107c1a9f6d130073b22d792cc5ff869d321e8bc2ccd86eba4c2f2e101fde">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -196,6 +196,7 @@
   <option key="artwork_sky_depth" title="Artwork-Aware Sky Depth" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="atmospheric_cloud_depth" title="Atmospheric Cloud Depth" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="doom2_deep_sky" title="DOOM II Deep Sky Environment" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="sky_fire_smoke" title="Sky Fire &amp; Smoke" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_disc" title="Sun in the sky" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="dust_motes" title="Dust motes" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="embers" title="Embers" category="Atmosphere" kind="check" choices="0=Off|1=On" />

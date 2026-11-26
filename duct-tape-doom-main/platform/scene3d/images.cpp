@@ -655,7 +655,7 @@ Image &wallImage(int index) {
     setWallImmersion(image,patches,owners,frame,frameWidth,frameHeight);
     image.switchIndicator=doom_switch_texture(name);
     image.skyArtwork=classifySkyArtwork(image,index,name);
-    if(image.skyArtwork!=SkyArtwork::Unknown) {
+    if(image.skyFingerprint!=0) {
         const int lump=W_GetNumForName((char*)"PLAYPAL");
         if(W_LumpLength(lump)>=768) {
             const auto *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);

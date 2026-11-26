@@ -13,6 +13,9 @@ layout(set=2,binding=3) uniform sampler2D skyDepthArt;
 layout(std140,set=3,binding=0) uniform Camera CAMERA_BLOCK c;
 layout(std140,set=3,binding=1) uniform Lights FLASH_BLOCK;
 layout(std140,set=3,binding=2) uniform Fog FOG_BLOCK;
+struct SkyFireSource {
+    vec4 anchor,flame,smoke,motion,illumination;
+};
 // Runtime F4 mode, passed on sky fragment uniform slot 3 for all sky passes.
 layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 skyEnvironment;
@@ -29,6 +32,9 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 atmosphereProjection; // near height, near scale, far scale
     vec4 atmosphereWind; // fixed per-level wind heading in XY
     vec4 sceneryProjection; // far radius, normalized far skyline top
+    vec4 fireHeader; // count, nearest radius (without scenery), wind speed, haze blend
+    vec4 fireSmokeDark,fireSmokeWarm,fireFlameOuter,fireFlameCore;
+    SkyFireSource fireSources[4];
 };
 layout(location=0) out vec4 outColor;
 #include "indexed.glsl"
@@ -82,6 +88,7 @@ struct SkyLayerSample {
     vec3 color;
     float alpha;
 };
+#include "sky_effects.glsl"
 
 vec3 skyCompositeOver(vec3 behind,SkyLayerSample foreground) {
     return mix(behind,foreground.color,clamp(foreground.alpha,0.0,1.0));
@@ -125,26 +132,26 @@ vec3 sceneryAir(vec3 facade,vec3 horizon,float haze,float row) {
     return mix(subdued,horizon*.56,distance);
 }
 
-vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,float row) {
-    // Effects between facades can be composited at either of these depth
-    // boundaries. Foreground coverage never depends on cloud transmission.
+vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,float row,
+                       SkyEffects effects) {
+    background=skyEffectOver(background,effects.layers[0]);
     if(scenery.far.alpha>0.0) {
         scenery.far.color=sceneryAir(scenery.far.color,horizon,.58,row);
         background=skyCompositeOver(background,scenery.far);
     }
-    // Intermediate effects between distant and middle scenery.
+    background=skyEffectOver(background,effects.layers[1]);
     if(scenery.middle.coverage>0.0) {
         vec3 paint=scenery.middle.color+vec3(.085,.042,.014)*scenery.middle.window;
         vec3 facade=sceneryAir(paint,horizon,.26,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.middle.coverage));
     }
-    // Intermediate effects between middle and near scenery.
+    background=skyEffectOver(background,effects.layers[2]);
     if(scenery.near.coverage>0.0) {
         vec3 paint=scenery.near.color+vec3(.15,.074,.025)*scenery.near.window;
         vec3 facade=sceneryAir(paint,horizon,.06,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.near.coverage));
     }
-    return background;
+    return skyEffectOver(background,effects.layers[3]);
 }
 
 void main() {
@@ -306,6 +313,7 @@ void main() {
     bool citySmoke=city||hfMode==5||depthMode==3.0||(skyEnvironment.y==2.0&&c.effects.z==0.0&&
         (uint(c.map.w)&(LS_ENABLED|LS_MORPH))==(LS_ENABLED|LS_MORPH));
     float cloudCover=0.0;
+    float cloudTransmission=1.0;
     if(useAtmosphere) {
         if(!obscured) {
             // Celestial light enters the atmosphere from behind both layers.
@@ -318,6 +326,8 @@ void main() {
             }
             SkyAtmosphereResult atmosphere=renderSkyAtmosphere(color.rgb,ray,angle,key,stormLight);
             color.rgb=atmosphere.color;
+            cloudCover=atmosphere.cloudCoverage;
+            cloudTransmission=atmosphere.transmission;
         }
     } else if(cloudProfile>0&&(foregroundMask<1.0||(deepCity&&(depthScene?middle.coverage>0.0:artworkData.x>.25)))) {
         vec3 eclipseCenter=eclipse?bloodEclipseCenter(eclipseRidge>0.0):vec3(0.0);
@@ -372,7 +382,7 @@ void main() {
         color.rgb=skyVisibleSun(color.rgb,ray,1.0-0.80*cloudCover);
     }
     // Resolve the shells back to front, over the existing smoke and celestial layers.
-    if(composedScenery) {
+    if(composedScenery||(fireHeader.x>0.0&&!depthScene)) {
 #if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG != 5
         if(SKY_COMPOSITION_DEBUG==2)color.rgb=vec3(foregroundMask);
         if(SKY_COMPOSITION_DEBUG==3)color.rgb=vec3(near.coverage,middle.coverage,scenery.far.alpha);
@@ -381,7 +391,13 @@ void main() {
         outColor=color;
         return;
 #endif
-        color.rgb=composeSkyScenery(color.rgb,scenery,low,v);
+        vec3 opacity=vec3(scenery.far.alpha,middle.coverage,near.coverage);
+        SkyEffects effects=sampleSkyEffects(angle,rise,ray.xy/horizontal,opacity,low,cloudCover,cloudTransmission);
+#if defined(SKY_EFFECTS_DEBUG) && SKY_EFFECTS_DEBUG < 6
+        outColor=vec4((SKY_EFFECTS_DEBUG==1?color.rgb*.26:vec3(0.0))+effects.debug,1.0);
+        return;
+#endif
+        color.rgb=composeSkyScenery(color.rgb,scenery,low,v,effects);
     } else if(depthBand) {
         for(int layer=0;layer<2;++layer) {
             SkyShellSample surface=layer==0?middle:near;

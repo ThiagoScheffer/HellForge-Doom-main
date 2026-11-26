@@ -23,8 +23,9 @@ static uint64_t skyFingerprint(const byte *pixels,size_t count) {
     return hash;
 }
 
-static SkyArtwork classifySkyArtwork(const Image &image,int index,const char *name) {
+static SkyArtwork classifySkyArtwork(Image &image,int index,const char *name) {
     if(SDL_strncasecmp(name,"SKY",3)!=0||name[3]<'1'||name[3]>'4'||name[4])return SkyArtwork::Unknown;
+    image.skyFingerprint=skyFingerprint(image.pixels.data(),image.pixels.size());
     if(name[3]=='4') {
         // Ultimate Doom's cloud-only sky must come from the original retail
         // data, including the composite and every patch. Verify its colors too.
@@ -42,8 +43,7 @@ static SkyArtwork classifySkyArtwork(const Image &image,int index,const char *na
         return covered>=image.pixels.size()*7/16&&warm>=covered/8?SkyArtwork::OrangeClouds:SkyArtwork::Unknown;
     }
     if(image.width!=256||image.height!=128)return SkyArtwork::Unknown;
-    const uint64_t hash=skyFingerprint(image.pixels.data(),image.pixels.size());
-    switch(hash) {
+    switch(image.skyFingerprint) {
         case 0x4903f3c6668a384eULL: // Registered Doom's SKY1 composite starts eight rows early.
         case 0xbc9519b06539ef69ULL: if(name[3]=='1')return SkyArtwork::ColdMountains; break;
         case 0xb451911c760f176eULL: if(name[3]=='2')return SkyArtwork::RedMountains; break;

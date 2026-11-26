@@ -52,8 +52,13 @@ static void run(){
  I_Render3DSettingsMenu();choose("immersive_sky");for(int i=0;i<6;++i)I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.immersiveSky==0,"six sky profiles cycle");choose("hell_blood_eclipse");check(!panel.draft.hellBloodEclipse&&!selectedOption().isEnabled(panel.draft),"eclipse defaults off and needs immersive sky");choose("immersive_sky");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);choose("hell_blood_eclipse");check(selectedOption().isEnabled(panel.draft),"eclipse supports Auto");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
  choose("artwork_sky_depth");check(!panel.draft.artworkSkyDepth&&selectedOption().isEnabled(panel.draft),"artwork depth defaults off and supports Auto");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
  choose("atmospheric_cloud_depth");check(!panel.draft.atmosphericCloudDepth&&selectedOption().isEnabled(panel.draft),"cloud depth defaults off and supports Auto");
+ choose("sky_fire_smoke");check(!panel.draft.skyFireSmoke&&!selectedOption().isEnabled(panel.draft),"sky fire defaults off and requires Deep Sky");
  choose("doom2_deep_sky");check(!panel.draft.doom2DeepSky&&selectedOption().isEnabled(panel.draft),"Doom II Deep Sky defaults off and supports Auto");
  I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+ choose("sky_fire_smoke");check(selectedOption().isEnabled(panel.draft),"Deep Sky enables editing sky fire");
+ I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+ Settings withoutDeepSky=panel.draft;withoutDeepSky.doom2DeepSky=0;
+ check(withoutDeepSky.skyFireSmoke&&!selectedOption().isEnabled(withoutDeepSky),"sky fire preference is independent of Deep Sky");
  choose("atmospheric_cloud_depth");
  Settings withoutSky=panel.draft;withoutSky.immersiveSky=0;check(!selectedOption().isEnabled(withoutSky),"cloud depth requires immersive sky");
  I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
@@ -69,6 +74,7 @@ static void run(){
  I_Render3DSettingsMenu();choose("encounter_director_enabled");I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);choose("encounter_debug");bool reset=false;for(size_t i=0;i<panel.lines.size();++i)if(panel.lines[i].option&&panel.lines[i].option->action==resetDirectorDraft){panel.selected=(int)i;reset=true;break;}check(reset,"director reset retained");panel.draft.fov=100;I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);check(!panel.draft.encounter.enabled&&panel.draft.fov==100,"director reset isolated");I_Render3DSettingsKey(SDL_SCANCODE_F10,0);
  check(settings.atmosphericCloudDepth&&restored.atmosphericCloudDepth,"cloud depth applies and persists");
  check(settings.doom2DeepSky&&restored.doom2DeepSky,"Doom II Deep Sky applies and persists");
+ check(settings.skyFireSmoke&&restored.skyFireSmoke&&written.count("sky_fire_smoke"),"sky fire applies and persists");
  check(!settings.goreBodyDamage&&!restored.goreBodyDamage&&written.count("gore_body_damage"),
        "Body damage applies and persists");
  check(!registry.count("gore_limbs")&&!written.count("gore_limbs"),"Unsupported limb control is hidden");

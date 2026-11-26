@@ -42,10 +42,15 @@ vec3 skyDepthEye(vec3 eye,vec3 origin,float nearestRadius) {
 // The XY intersection decomposes in the horizontal ray basis. The hit has
 // the same transverse coordinate as the eye. Its forward coordinate is the
 // positive root on a unit cylinder. The bounded eye is always inside it.
-vec2 skyShellUV(float angle,float rise,vec3 eyeInRayBasis,float radius,vec2 size) {
+vec2 skyShellDirection(float angle,float rise,vec3 eyeInRayBasis,float radius) {
     vec3 relative=eyeInRayBasis/radius;
     float travel=sqrt(1.0-relative.y*relative.y)-relative.x;
-    return skyPlateUV(angle+asin(relative.y),rise*travel+relative.z,size);
+    return vec2(angle+asin(relative.y),rise*travel+relative.z);
+}
+
+vec2 skyShellUV(float angle,float rise,vec3 eyeInRayBasis,float radius,vec2 size) {
+    vec2 direction=skyShellDirection(angle,rise,eyeInRayBasis,radius);
+    return skyPlateUV(direction.x,direction.y,size);
 }
 
 struct SkyShellSample {

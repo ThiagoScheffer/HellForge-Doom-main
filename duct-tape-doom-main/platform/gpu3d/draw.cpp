@@ -2,6 +2,7 @@
    data, resource binding, and the world and overlay draws the passes share. */
 #include "internal.h"
 #include "../scene3d/sky_atmosphere.h"
+#include "../scene3d/sky_effects.h"
 #include "../shaders/living_surfaces.h"
 #include <set>
 
@@ -10,9 +11,10 @@ namespace gpu3d {
 struct alignas(16) SkyUniforms {
     float legacy[16];
     std::array<float,4> horizon,zenith,dark,middle,light,projection,wind,scenery;
+    doom3d::SkyFireSmokeGpuBlock fireSmoke;
 };
 static_assert(offsetof(SkyUniforms,horizon)==64 && offsetof(SkyUniforms,scenery)==176 &&
-              sizeof(SkyUniforms)==192);
+              offsetof(SkyUniforms,fireSmoke)==192 && sizeof(SkyUniforms)==592);
 
 struct Arena { SDL_GPUBuffer *buffer=nullptr; Uint32 capacity=0; };
 static Arena vertexArena,blockerArena,sectorArena;
@@ -333,6 +335,13 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
             uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,0};
             uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
             if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,0,0};
+        }
+        if(settings.skyFireSmoke&&settings.doom2DeepSky&&skyMode>=2) {
+            if(const auto *effects=skyFireSmokeData(skyArt,uniforms.scenery[0]>0.f)) {
+                uniforms.fireSmoke=*effects;
+                std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),legacy+8);
+                uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],0,0};
+            }
         }
         SDL_PushGPUFragmentUniformData(command,3,&uniforms,sizeof(uniforms));
         SDL_GPUTextureSamplerBinding images[]={{gpu(skyArt.texture),linearRepeat},{paletteTexture,nearestClamp},
