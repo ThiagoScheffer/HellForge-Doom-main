@@ -500,8 +500,9 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "Light from colored lamps, bounced around the room, tints its even light level too, so corners "
                     "the lamps never reach directly still take their color.",
                     [](const Settings &d){return d.bakedLights!=0&&d.bounce!=0;}),
-                check("sky_light","Sky light",&s.skyLight,
-                    "A cool fill from the visible sky, tinted by the sky texture: windows glow faintly, overhangs and alcoves outdoors stay darker."),
+               check("sky_light","Sky light",&s.skyLight,
+                "Diffuse environmental illumination tinted by the sky texture. Darkens sheltered areas and adds natural outdoor shading. Recommended with Window Light for "
+                "smooth illumination entering buildings."),
                 check("baked_occlusion","Ambient occlusion",&s.bakedAO,"Corners, ledges, stair risers and alcoves darken in light-level steps."),
                 check("decoration_shadows","Decoration shadows",&s.thingShadows,
                     "Columns, trees and hanging bodies cast baked sun and lamp shadows shaped like their sprites. Changing it re-bakes the level."),

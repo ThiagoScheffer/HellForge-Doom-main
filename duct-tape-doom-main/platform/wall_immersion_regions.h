@@ -5,7 +5,7 @@
 #include <cstring>
 
 namespace doom_wall_immersion {
-enum class Effect : uint8_t { BleedingBody, CorpseAmbience, SkullEyes, ReactiveEyes, RedLED, GreenLED, Fluorescent };
+enum class Effect : uint8_t { BleedingBody, CorpseAmbience, SkullEyes, FixedSkullSwitch, ReactiveEyes, RedLED, GreenLED, Fluorescent };
 
 using Rect=std::array<int,4>;
 struct EyePair { float lx,ly,rx,ry,width,height,tilt; };
@@ -28,9 +28,11 @@ inline constexpr Artwork artworks[]={
     {"WALL50_2",E::CorpseAmbience,128,128,0xc0a337f8, {{{57,44,75,70}}}},
     {"WALL51_2",E::CorpseAmbience,64,128,0x2be92aa0, {{{26,51,40,91}}}},
     {"WALL51_3",E::CorpseAmbience,64,128,0x7f91e78b, {{{28,69,39,94}}}},
-    {"W108_2", E::SkullEyes,16,24,0x2b0f9e6e, {{{5,10,6,11},{11,10,12,11}}}},
+    {"W108_2", E::SkullEyes,16,24,0x2b0f9e6e, {{{5,15,6,16},{11,15,12,16}}}},
     {"W108_3", E::SkullEyes,16,24,0x9f2b865a, {{{5,14,6,15},{11,14,12,15}}}},
     {"W108_4", E::SkullEyes,16,24,0x308112b5, {{{5,14,6,15},{11,14,12,15}}}},
+    {"SW2_8", E::FixedSkullSwitch,36,38,0x9ee5311b},
+    {"SW2_2", E::FixedSkullSwitch,22,26,0x5dd1e04e},
     {"WALL42_1",E::ReactiveEyes,40,128,0x67b5a37e, {}, {12,21,27,21,3.2f,2.1f,.27f}},
     {"WALL42_6",E::ReactiveEyes,40,128,0x86ce8b6d, {}, {12,20,27,20,3.4f,2.1f,.21f}},
     {"WALL42_5",E::ReactiveEyes,40,128,0xead1a5b0, {}, {15,21,24,21,3.f,2.1f,.30f}},

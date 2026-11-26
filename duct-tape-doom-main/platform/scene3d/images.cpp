@@ -288,6 +288,16 @@ struct ImmersivePatch {
     int part;
 };
 
+static bool matchesPatch(int lump,uint32_t expected) {
+    if(lump<0)return false;
+    const int size=W_LumpLength(lump);
+    if(size<8||size>65536)return false;
+    const auto *data=static_cast<const byte*>(W_CacheLumpNum(lump,PU_CACHE));
+    uint32_t fingerprint=2166136261u;
+    for(int i=0;i<size;++i)fingerprint=(fingerprint^data[i])*16777619u;
+    return fingerprint==expected;
+}
+
 static std::vector<ImmersivePatch> immersivePatches(int texture) {
     std::vector<ImmersivePatch> result;
     for(int part=0;;++part) {
@@ -296,12 +306,7 @@ static std::vector<ImmersivePatch> immersivePatches(int texture) {
         if(lump<0)break;
         const auto *art=doom_wall_immersion::findArtwork(name);
         if(!art||placement[2]!=art->width||placement[3]!=art->height)continue;
-        const int size=W_LumpLength(lump);
-        if(size<8||size>65536)continue;
-        const auto *data=static_cast<const byte*>(W_CacheLumpNum(lump,PU_CACHE));
-        uint32_t fingerprint=2166136261u;
-        for(int i=0;i<size;++i)fingerprint=(fingerprint^data[i])*16777619u;
-        if(fingerprint==art->fingerprint)result.push_back({art,placement,part});
+        if(matchesPatch(lump,art->fingerprint))result.push_back({art,placement,part});
     }
     return result;
 }
@@ -309,6 +314,50 @@ static std::vector<ImmersivePatch> immersivePatches(int texture) {
 static Rect clippedArtwork(const ImmersivePatch &patch,Rect region,int w,int h) {
     return {std::clamp(region[0]+patch.placement[0],0,w),std::clamp(region[1]+patch.placement[1],0,h),
             std::clamp(region[2]+patch.placement[0],0,w),std::clamp(region[3]+patch.placement[1],0,h)};
+}
+
+static std::vector<byte> indexedPatchPixels(const byte *data,int size,int w,int h) {
+    const auto *patch=reinterpret_cast<const patch_t*>(data);
+    std::vector<byte> pixels((size_t)w*h*2);
+    for(int x=0;x<w;++x) {
+        size_t pos=(uint32_t)LONG(patch->columnofs[x]); int previous=-1;
+        while(pos<(size_t)size && data[pos]!=255) {
+            if(pos+4>(size_t)size||pos+4+data[pos+1]>(size_t)size) I_Error((char*)"Invalid indexed patch column");
+            int top=data[pos]; if(top<=previous) top+=previous; previous=top;
+            for(int y=0;y<data[pos+1];++y) if(top+y>=0&&top+y<h) {
+                size_t pixel=((size_t)(top+y)*w+x)*2;
+                pixels[pixel]=data[pos+3+y]; pixels[pixel+1]=255;
+            }
+            pos+=data[pos+1]+4;
+        }
+    }
+    return pixels;
+}
+
+// The pressed variants keep their painted red sockets on the dormant face.
+// Only texels still owned by this patch can change in the composite.
+static void preservePressedSkullFaces(const std::vector<ImmersivePatch> &patches,
+        const std::vector<short> &owners,int w,int h,std::vector<byte> &pixels) {
+    for(const auto &patch:patches) {
+        const auto &art=*patch.art;
+        if(art.effect!=Effect::FixedSkullSwitch)continue;
+        const bool wide=std::strcmp(art.name,"SW2_8")==0;
+        const int dormant=W_CheckNumForName((char*)(wide?"SW2_7":"SW2_1"));
+        if(!matchesPatch(dormant,wide?0x60c9cdfcu:0x8957fd8au))continue;
+        const auto *data=static_cast<const byte*>(W_CacheLumpNum(dormant,PU_CACHE));
+        const auto face=indexedPatchPixels(data,W_LumpLength(dormant),art.width,art.height);
+        const Rect bounds=clippedArtwork(patch,{0,0,art.width,art.height},w,h);
+        const int eyeTop=wide?22:16;
+        for(int y=bounds[1];y<bounds[3];++y)for(int x=bounds[0];x<bounds[2];++x) {
+            const size_t i=(size_t)y*w+x;
+            if(owners[i]!=patch.part)continue;
+            const int localY=y-patch.placement[1],localX=x-patch.placement[0];
+            const size_t j=(size_t)localY*art.width+localX;
+            const byte index=pixels[2*i];
+            const bool redEye=localY>=eyeTop&&localY<eyeTop+3&&index>=176&&index<=190;
+            if(!redEye&&face[2*j+1])pixels[2*i]=face[2*j];
+        }
+    }
 }
 
 struct PatchEmission {
@@ -549,8 +598,7 @@ static LivingMaterial livingSurfaceProfile(const char *name) {
         {"RP2_1",{LS_BLOOD_FLOW}}, {"RP2_2",{LS_BLOOD_FLOW}}, {"RP2_3",{LS_BLOOD_FLOW}}, {"RP2_4",{LS_BLOOD_FLOW}},
         {"WALL58_1",{LS_BLOOD_FLOW,1}}, {"WALL58_2",{LS_BLOOD_FLOW,1}}, {"WALL58_3",{LS_BLOOD_FLOW,1}},
         {"SW2_5",{LS_EYE_SWITCH}}, {"SW2_6",{LS_EYE_SWITCH,1}},
-        {"SW2_7",{LS_SKULL_SWITCH}}, {"SW2_8",{LS_SKULL_SWITCH,1}},
-        {"SW2_1",{LS_SKULL_SWITCH,2}}, {"SW2_2",{LS_SKULL_SWITCH,3}}, {"SW2_4",{LS_SKULL_SWITCH,4}},
+        {"SW2_4",{LS_SKULL_SWITCH,4}},
         {"SNAK7_1",{LS_INTESTINES}}, {"SNAK8_1",{LS_INTESTINES,1}},
         {"W65B_1",{LS_FIRE,1}}, {"W65B_2",{LS_FIRE,1}},
         {"W73A_1",{LS_FIRE}}, {"W73A_2",{LS_FIRE}}, {"W73B_1",{LS_FIRE}}, {"W73B_2",{LS_FIRE}},
@@ -570,8 +618,6 @@ static bool livingArtworkFits(LivingMaterial material,int width,int height) {
     if(material.profile==LS_MARBLE_FACES)return width==128&&height==128;
     if(material.profile==LS_INTESTINES)return width==64&&height==128;
     if(material.profile!=LS_SKULL_SWITCH)return true;
-    if(material.variant<2)return width==36&&height==38;
-    if(material.variant<4)return width==22&&height==26;
     return width==53&&height==41;
 }
 // Adjacent patches with the same material can animate as one wall. Leave
@@ -594,13 +640,6 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
             continue;
         }
         auto &region=image.livingBounds;
-        // WOOD4 stacks the compact lit skull over the dormant skull.
-        if(joined<0&&material.profile==LS_SKULL_SWITCH&&material.variant==3&&
-           candidate.profile==LS_SKULL_SWITCH&&candidate.variant==2&&
-           region[0]==bounds[0]&&region[2]==bounds[2]&&bounds[1]-region[1]==58) {
-            joined=part;material.variant=5;region[3]=bounds[3];
-            continue;
-        }
         if(joined>=0||material.profile!=candidate.profile||material.variant!=candidate.variant||
            bounds[1]!=region[1]||bounds[3]!=region[3]||
            (bounds[0]!=region[2]&&bounds[2]!=region[0]))return;
@@ -631,6 +670,7 @@ Image &wallImage(int index) {
     std::vector<short> owners(patches.empty()?0:(size_t)w*h);
     std::vector<byte> pixels((size_t)w*h*2);
     R_CopyIndexedTextureOwners(index,pixels.data(),owners.empty()?nullptr:owners.data());
+    preservePressedSkullFaces(patches,owners,w,h,pixels);
     char name[9]; R_TextureName(index,name);
     PatchEmission patchEmission;
     auto mask=emissionMask(name,false,w,h,pixels.data(),&patches,&owners,&patchEmission);
@@ -712,19 +752,7 @@ Image &lumpImage(int lump,bool flat) {
     int w=SHORT(patch->width),h=SHORT(patch->height);
     if(w<1||h<1||w>8192||h>8192||8+(size_t)w*4>(size_t)size)
         I_Error((char*)"Invalid sprite dimensions");
-    std::vector<byte> pixels((size_t)w*h*2);
-    for(int x=0;x<w;++x) {
-        size_t pos=(uint32_t)LONG(patch->columnofs[x]); int previous=-1;
-        while(pos<(size_t)size && data[pos]!=255) {
-            if(pos+4>(size_t)size||pos+4+data[pos+1]>(size_t)size) I_Error((char*)"Invalid sprite column");
-            int top=data[pos]; if(top<=previous) top+=previous; previous=top;
-            for(int y=0;y<data[pos+1];++y) if(top+y>=0&&top+y<h) {
-                size_t pixel=((size_t)(top+y)*w+x)*2;
-                pixels[pixel]=data[pos+3+y]; pixels[pixel+1]=255;
-            }
-            pos+=data[pos+1]+4;
-        }
-    }
+    auto pixels=indexedPatchPixels(data,size,w,h);
     int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     if(W_LumpLength(paletteLump)<768) I_Error((char*)"Invalid lighting palette");
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
