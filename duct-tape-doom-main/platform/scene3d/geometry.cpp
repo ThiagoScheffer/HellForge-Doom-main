@@ -1128,6 +1128,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             }
             auto &vertices = out[spriteKey];
             size_t first = vertices.size();
+            const BloodSourceScope woundTint(wounded?monsterBloodTint(thing):0);
             if (death.fall.rig)
                 fallQuads(vertices, {0, 0, 0, 0, 0, light, m}, death.fall, x, y, z - sink, rx, ry, flipped(seen), cut);
             else if (posed)

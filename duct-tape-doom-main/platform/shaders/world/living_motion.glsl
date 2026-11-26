@@ -69,9 +69,18 @@ vec2 trappedFaceMotion(vec2 tile,float seed) {
 
 const vec4 marbleEyes[3]=vec4[3](vec4(45.5,61.0,81.5,61.0),vec4(51.0,77.0,78.0,77.0),
                                  vec4(48.0,64.0,80.0,64.0));
-const vec4 skullEyes[5]=vec4[5](vec4(13.5,22.8,22.5,22.8),vec4(14.7,23.9,21.6,23.9),
-                                vec4(6.7,16.7,15.4,16.7),vec4(6.5,17.6,15.6,17.6),
+const vec4 skullEyes[5]=vec4[5](vec4(14.5,23.5,21.5,23.5),vec4(14.5,23.5,21.5,23.5),
+                                vec4(6.5,17.5,15.5,17.5),vec4(6.5,17.5,15.5,17.5),
                                 vec4(20.1,20.0,34.1,20.0));
+
+// Both stock skull sizes paint the same three rows per socket. Reflect
+// the right socket into the left so every animated texel stays inside the art.
+bool paintedSkullSocket(vec2 tile,bool wide,bool right) {
+    ivec2 pixel=ivec2(floor(tile));
+    int row=pixel.y-(wide?22:16);
+    int column=(right?(wide?35:21)-pixel.x:pixel.x)-(wide?12:4);
+    return row>=0&&row<=2&&column>=(row==0?1:0)&&column<=(row==2?3:4);
+}
 
 float engravedBlink(float clock,float seed) {
     float cycle=(clock+seed*8.0)/6.3;
@@ -105,15 +114,21 @@ float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float
     bool right=tile.x>0.5*(eyes.x+eyes.z);
     vec2 center=right?eyes.zw:eyes.xy;
     bool lit=!stone&&(variant==1u||variant==3u||variant==4u);
+    bool fixedSocket=!stone&&variant<4u;
     vec2 radius=stone?(variant==2u?vec2(8.3,3.4):vec2(6.4,3.5)):
-               (variant==4u?vec2(5.7,3.45):lit?vec2(4.45,2.95):vec2(4.0,2.55));
+               vec2(5.7,3.45);
     vec2 p=tile-center;
-    float tilt=stone?(variant==1u?0.18:0.32):variant==1u?-0.27:0.10;
-    p.y-=p.x*tilt*(right?-1.0:1.0);
-    if(any(greaterThan(abs(p),radius)))return 1.0;
-    float shape=length(p/radius);
-    float socket=1.0-smoothstep(lit?0.82:0.67,1.0,shape);
-    if(socket<=0.0)return 1.0;
+    float socket=1.0;
+    if(fixedSocket) {
+        if(!paintedSkullSocket(tile-vec2(0,row),variant<2u,right))return 1.0;
+    } else {
+        float tilt=stone?(variant==1u?0.18:0.32):0.10;
+        p.y-=p.x*tilt*(right?-1.0:1.0);
+        if(any(greaterThan(abs(p),radius)))return 1.0;
+        float shape=length(p/radius);
+        socket=1.0-smoothstep(lit?0.82:0.67,1.0,shape);
+        if(socket<=0.0)return 1.0;
+    }
 
     // Invert the texture derivatives to recover world units per texel.
     // Both sockets must use the same world-space center, even at an angle.
@@ -123,12 +138,26 @@ float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float
     vec3 worldV=(dp2*duv1.x-dp1*duv2.x)/determinant;
     vec2 offset=tile-0.5*(eyes.xy+eyes.zw);
     vec3 origin=vWorld-worldU*offset.x-worldV*offset.y;
-    vec3 toward=c.eye.xyz-origin;
+    vec3 viewer=fixedSocket&&weaponProbe[0].w>0.0?weaponProbe[0].xyz:c.eye.xyz;
+    vec3 toward=viewer-origin;
     vec2 aim=vec2(dot(toward,normalize(worldU)),dot(toward,normalize(worldV)));
     vec2 gaze=morph?clamp(aim/(abs(dot(toward,normal))+13.0),vec2(-0.85),vec2(0.85)):vec2(0);
     ivec3 cell=ivec3(floor(origin*0.125+vec3(0.313,0.423,0.317)));
     float seed=float(tileHash(cell.xy,uint(cell.z))&65535u)/65536.0;
     float close=pulse?engravedBlink(c.fog.w,seed):0.0;
+    if(fixedSocket) {
+        vec2 at=p-gaze*vec2(1.7,0.75);
+        float iris=1.0-smoothstep(0.70,1.22,length(at/vec2(1.48,1.28)));
+        float pupil=1.0-smoothstep(0.44,1.04,length(at/vec2(0.58,1.15)));
+        float glint=1.0-smoothstep(0.18,0.57,length(at-vec2(-0.48,-0.48)));
+        vec3 tint=lit?vec3(0.38,0.075,0.022):vec3(0.22,0.13,0.070);
+        vec3 eye=mix(rgb+iris*tint,rgb*0.11,pupil*iris);
+        eye+=glint*tint*0.50;
+        float exposed=smoothstep(-0.26,0.26,p.y-mix(-1.85,1.85,close));
+        float weight=saturate(strength*1.55);
+        rgb=mix(rgb,mix(rgb*(lit?0.09:0.72),eye,exposed),weight);
+        return lit?mix(1.0,mix(0.05,1.0,exposed),weight):1.0;
+    }
     float open=1.0-close;
     float edge=clamp(footprint*0.48,0.16,0.46);
     float along=p.x/(radius.x*0.87);

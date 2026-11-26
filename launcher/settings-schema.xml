@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="168cb3c238cb944dd9ab9544e9b260f8ce96aea1b7814a46359c3d83c3e033fb">
+<settings source="platform/settings_panel.cpp" source_sha256="76a6cf77ab8aacc49a771ccbbe28cf463b6575cb1fc125fd37989a2b9af1e6e5">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -104,7 +104,9 @@
   <option key="gore_wet_deposits" title="Wet gore deposits" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="gore_impact_audio" title="Heavy impact sounds" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="gore_impact_strength" title="Impact strength" category="Destruction" kind="slider" min=".5" max="1.5" step=".1" />
-  <option key="wounds" title="Wound holes" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_recognizable_gibs" title="Recognizable giblets" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="gore_fatal_appearance" title="Fatal corpse appearance" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="wounds" title="Wound presentation" category="Destruction" kind="choice" choices="0=Off|1=Classic|2=Deep" />
   <option key="varied_deaths" title="Varied deaths" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="death_falls" title="Procedural falls" category="Destruction" kind="choice" choices="0=Off|1=By the hit|2=Legs swept|3=Chest blast|4=Head shot" />
   <option key="ragdoll_deaths" title="Ragdoll deaths" category="Destruction" kind="check" choices="0=Off|1=On" />

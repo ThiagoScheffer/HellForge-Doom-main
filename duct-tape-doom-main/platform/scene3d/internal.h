@@ -747,6 +747,11 @@ void woundsShutdown();
 struct WoundSpot { float height,across,yaw,radius;int tic;bool critical=false; };
 int woundSpots(const mobj_t *thing,WoundSpot *out,int most,bool includeCritical=false);
 bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,float ry,std::vector<byte> &mask);
+enum WoundPaint : byte {
+    WOUND_ORIGINAL, WOUND_OPENING, WOUND_EDGE, WOUND_SURFACE, WOUND_LIP,
+    WOUND_STAIN, WOUND_RECESSED, WOUND_PAINT_COUNT
+};
+bool recessedWoundIndex(byte &index);
 bool hasGoreCorpseAppearance(const mobj_t &thing);
 void spriteFilteringShutdown();
 void woundVertex(Vertex &vertex,byte state);

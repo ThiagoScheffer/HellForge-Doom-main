@@ -35,12 +35,13 @@ static void impact(void *context,const Impact &hit) {
     ++f.impacts;f.last=hit;
 }
 struct Draw {
-    unsigned count=0,settled=0;
+    unsigned count=0,settled=0,featured=0;
     float sum=0;
 };
 static void draw(void *context,const Visual &v) {
     auto &result=*static_cast<Draw*>(context);
     ++result.count;
+    result.featured+=v.artwork!=Artwork::Automatic;
     result.sum+=v.center.x+v.center.y+v.center.z+v.rotation;
     if(v.resting) {
         ++result.settled;
@@ -166,7 +167,32 @@ static void wallAttachmentTests() {
     check(fixture.impacts<=System::MaxImpactEventsPerAdvance,"Wall contacts preserve the per-advance impact budget");
 }
 
+static void featuredArtwork() {
+    System sim,legacy;
+    Burst burst;
+    burst.origin.z=12;
+    burst.kind=Kind::Bone;burst.featuredArtwork=Artwork::Skull;burst.pieces=3;
+    burst.eligible=true;burst.eventId=71;
+    check(sim.emit(burst)==3&&sim.emit(burst)==0,"Featured art uses the existing admitted burst");
+    burst.featuredArtwork=Artwork::Automatic;
+    check(legacy.emit(burst)==3,"Legacy burst admits the same number of pieces");
+    Draw one,two;
+    sim.forEachVisual(draw,&one);legacy.forEachVisual(draw,&two);
+    check(one.featured==1&&two.featured==0&&one.sum==two.sum,
+          "One artwork substitution must leave the fragment motion and seed unchanged");
+    sim.clear();
+    burst.featuredArtwork=Artwork::HeavyOrganic;
+    check(sim.emit(burst)==3,"Incompatible artwork falls back without rejecting pieces");
+    one={};sim.forEachVisual(draw,&one);
+    check(one.featured==0,"Reused slots do not retain artwork from earlier bursts");
+    sim.clear();burst.featuredArtwork=static_cast<Artwork>(255);
+    check(sim.emit(burst)==3,"Unknown artwork retains ordinary admission");
+    one={};sim.forEachVisual(draw,&one);
+    check(one.featured==0,"Unknown artwork uses the original material sprites");
+}
+
 int main() {
+    featuredArtwork();
     wallAttachmentTests();
     Burst burst;
     burst.origin={0,0,30};burst.eligible=true;burst.eventId=73;

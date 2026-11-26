@@ -14,6 +14,19 @@ namespace hellforge::giblets {
 struct Vec3 { float x = 0, y = 0, z = 0; };
 
 enum class Kind : std::uint8_t { Flesh, HeavyTissue, Viscera, Bone, BrainLike };
+enum class Artwork : std::uint8_t {
+    Automatic, HumanPiece, DemonPiece, Skull, BoneDetail, Head, SoftOrganic, HeavyOrganic, Count
+};
+constexpr bool compatibleArtwork(Artwork artwork,Kind kind) {
+    switch(artwork) {
+    case Artwork::HumanPiece:case Artwork::DemonPiece:return kind==Kind::Flesh;
+    case Artwork::Skull:case Artwork::BoneDetail:return kind==Kind::Bone;
+    case Artwork::Head:return kind==Kind::BrainLike;
+    case Artwork::SoftOrganic:return kind==Kind::Viscera;
+    case Artwork::HeavyOrganic:return kind==Kind::HeavyTissue||kind==Kind::Viscera;
+    default:return false;
+    }
+}
 enum class Tint : std::uint8_t { Red, Blue, Green, PaleBone };
 enum class Attachment : std::uint8_t { None, Wall };
 enum class Surface : std::uint8_t { Wall, Floor, Ceiling, Liquid, Sky, Void };
@@ -87,6 +100,7 @@ struct Burst {
     std::uint8_t maxActive = 64; // reserves slots occupied by the procedural fallback
     bool sticky=false,softDeformation=false;
     float presentation=0.f;
+    Artwork featuredArtwork=Artwork::Automatic;
 };
 
 struct Visual {
@@ -104,6 +118,7 @@ struct Visual {
     Attachment attachment=Attachment::None;
     float attachedAge=0,squash=0,sag=0;
     WallAnchor anchor{};
+    Artwork artwork=Artwork::Automatic;
 };
 
 using VisualFn = void (*)(void *context, const Visual &visual);
@@ -167,6 +182,7 @@ private:
         WallAnchor anchor{};
         bool sticky=false,softDeformation=false,attachedOnce=false;
         float attachedAt=0,attachedUntil=0,squash=0,sag=0;
+        Artwork artwork=Artwork::Automatic;
     };
     std::array<Piece, MaxPieces> pieces_{};
     std::array<std::uint64_t, 32> recentEvents_{};

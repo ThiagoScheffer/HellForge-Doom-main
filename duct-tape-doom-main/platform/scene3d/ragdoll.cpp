@@ -1337,10 +1337,12 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
         std::vector<float> depth((size_t)size*size,1e9f);
         std::vector<byte> pixels((size_t)size*size*2,0);
         float half=size/2.0f;
+        byte recessed=0;
+        const bool hasRecessed=holes&&recessedWoundIndex(recessed);
         for(const ReliefFace &face:body.faces) {
             size_t texel=(size_t)face.r*body.width+face.c;
             byte wound=holes&&texel<holes->size()?(*holes)[texel]:0;
-            if(wound==1)continue;                    // shot through
+            if(wound==WOUND_OPENING)continue;         // shot through
             V3 q[4];
             for(int k=0;k<4;++k) {V3 b=posed[face.corner[k]];q[k]={side*b.x-o.x,b.y-o.y,b.z-o.z};}
             // Faces turned away from the camera are drawn too, darker and a unit behind (a face toward it
@@ -1349,7 +1351,10 @@ bool ragdollCard(const Ragdoll &doll,float fraction,float sink,const float *eye,
             // three monsters, five shots, front and back), at the chest and hips most.
             bool away=dot(cross(q[3]-q[1],q[2]-q[0])*side,f)>=0;
             byte colour=face.kind==FACE_BACK?body.backColour[texel]:body.colour[texel];
-            if(wound>=2&&face.kind==FACE_FRONT)colour=rims[std::min(3,wound-2)];
+            if(face.kind==FACE_FRONT) {
+                if(wound==WOUND_RECESSED&&hasRecessed)colour=recessed;
+                else if(wound>=WOUND_EDGE&&wound<=WOUND_STAIN)colour=rims[wound-WOUND_EDGE];
+            }
             int level=std::clamp((int)std::lround((1-face.dim)*24)+(away?6:0),0,31);
             colour=colormap[level*256+colour];
             float px[4],py[4],pd[4];

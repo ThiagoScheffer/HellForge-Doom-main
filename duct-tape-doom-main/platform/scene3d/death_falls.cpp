@@ -157,7 +157,7 @@ void fallQuads(std::vector<Vertex> &out,const Vertex &base,const FallPose &pose,
     int width=pose.rig->width;
     posedTexels(*pose.rig,pose,[&](int c,int r,const std::array<Pt,4> &q) {
         byte wound=holes?(*holes)[(size_t)r*width+c]:0;    // shot through (wounds.cpp): skipped, or blood paint
-        if(wound==1)return;
+        if(wound==WOUND_OPENING)return;
         auto corner=[&](const Pt &p,float u,float v) {
             Vertex vertex=base;vertex.x=x+rx*p.x*side;vertex.y=y+ry*p.x*side;vertex.z=feet+p.y;vertex.u=u;vertex.v=v;
             if(wound>=2)woundVertex(vertex,wound);

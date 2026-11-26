@@ -1,39 +1,201 @@
 # DOOM: HELLFORGE by Thiago Scheffer
 
-**Documented source baseline: 2026.11.15.6** | [DOOM2 startup crash fix](docs/changes/DOOM2-STARTUP-LIGHT-CACHE-CRASH.md) · [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+**Classic DOOM. A more physical world. Your rules.**
 
-DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built
-from the DERP/Duct-Tape renderer and the Tuin-Doom-Enhanced source fork. It
-extends that foundation with sprite-aware combat, monster survival behavior,
-larger-map support, atmospheric sky rendering, cosmetic monster damage,
-corpse ambience and decomposition, persistent settings, and faster recovery after death.
-Recent additions include a semantic Speedrun HUD, recoverable medical supplies,
-shared acid liquid effects, flashlight-triggered monster awareness and an
-optional Imp fireball avoidance policy.
-The renderer, destruction systems, and bundled-mod integrations are described
-below with their upstream credits.
+**Windows x64 · C / C++ / C# · SDL3 · Vulkan · GPLv3**
 
-Why? cos we love Doom. I wanted something personal as my taste.
-
-**Windows x64 · C / C++ / C# · SDL3 · Vulkan**
-
-[Build instructions](BUILDING.md) · [Documentation](docs/README.md) · [Change history](docs/changes)
+[Play and configure](#download-and-play) · [Latest features](#whats-new-in-hellforge) · [Combat immersion](#kinetic-horror-and-physical-bodies) · [Feature catalog](#feature-catalog) · [Build from source](#building) · [Developer resources](#developer-resources) · [Credits](#source-and-credits)
 
 ![HELLFORGE launcher artwork](launcher/hero.png)
 
-**Latest development update — 26 November 2026:** recent source changes include
-Speedrun HUD 2.0, Medical Supply Recovery, shared acid liquid effects, Flashlight
-Monster Awareness and Imp Fireball Avoidance. See [recent gameplay, HUD,
-environment and AI updates](#recent-gameplay-hud-environment-and-ai-updates)
-for their settings and validation limits. The existing rain washout behavior is
-also described there. No new build identifier is assigned by this README update.
+DOOM: HELLFORGE is a personal Windows fork of the classic DOOM source, built on
+Tuin-Doom-Enhanced and the DERP / Duct-Tape DOOM renderer. It preserves the
+recognizable pixel-art identity of DOOM while expanding its combat presentation,
+lighting, destructible environments, monster behavior and the atmosphere of
+rooms left behind after a firefight.
+
+Play close to the original game or tune an immersive horror experience through
+**F4**. Cosmetic enhancements are separate from optional gameplay-changing rules,
+so players can choose the experience they want. The source, native tests and
+feature reports are available for developers interested in how the engine works.
+
+> Why? Because we love DOOM. I wanted to build something personal, shaped by
+> my own taste. — Thiago Scheffer
+
+**Development update — 27 November 2026:** Kinetic Horror, Physical Bodies M1/M2
+and the latest Deep Wounds / visceral giblet development batch have received
+successful developer-reported testing. See the [combat immersion update](#kinetic-horror-and-physical-bodies)
+for verified features and remaining source-verification limits. This is a source
+update, not an announcement of a new packaged release.
+
+**Documented source baseline: `2026.11.15.6`** · [Build instructions](BUILDING.md) ·
+[Documentation](docs/README.md) · [Change history](docs/changes) · [Bug and debugging log](Log-Status.md)
+
+## Download and play
+
+1. Build or obtain `DOOM-Hellforge.exe`.
+2. Launch it and select a compatible Doom, Doom II, Final Doom, or Freedoom IWAD.
+3. Add WAD/PK3 add-ons in **ADD-ON LOADOUT** and choose the active level WAD in **MAP WADS**. The selected map launches first, followed by the add-ons in load order. Use **PLAY GAME** to start.
+4. Use **GAME SETTINGS / TABS** before launching, or **F4** in-game, for graphics, lighting, combat and other preferences. Apply your changes to save them. Use F4 Find to locate an option by name or key.
+
+Launcher quick tools open the last log and graphics config. **CLEAR ALL / FRESH
+START** backs up and resets preferences/add-ons while keeping saves and IWADs.
+
+Commercial IWADs are not included. Windows x64, a Vulkan-capable graphics
+driver, and .NET Framework 4.5+ are required for the supplied launcher.
+
+The launcher stores extracted resources, backups, crash logs, and its lighting
+cache under `%LOCALAPPDATA%\DOOM-HellforgeLauncher`. Game settings and saves
+use `%APPDATA%\Local Games\DOOM Hellforge`; screenshots are saved beside the
+launcher in `Screenshots`.
 
 ## What's new in HELLFORGE
 
-From pixel-level hit detection to atmospheric rendering and corpse decomposition,
-these are the gameplay and engine improvements highlighted in this fork. Existing
-feature reports are linked below; newer source-patch additions are described in
-the sections that follow.
+The latest work brings together three layers of combat immersion: visible hit
+feedback, physical body movement and environmental aftermath. The goal is stronger
+presentation using original-style sprites, not a new damage model or a replacement
+physics engine.
+
+| Highlight | What changes in the game |
+| :--- | :--- |
+| **[Kinetic Horror](#kinetic-horror-and-physical-bodies)** | More expressive impacts, physical fragments, temporary wall adhesion, soft material movement, wet deposits and positional impact audio. |
+| **[Physical Bodies](#physical-bodies-10--environmental-contacts-and-stable-ragdolls)** | Supported monster sprites become physically posed bodies that react to walls and floors, settle and retain their generated pixel-art appearance. |
+| **[Deep Wounds & Visceral Giblets](#deep-wounds-and-visceral-giblets)** | Latest developer-tested cosmetic batch: shaded wound presentation and more recognizable fragment artwork, without new gameplay injury rules. |
+| **[Living liquid surfaces](#living-liquid-surfaces--acid-and-lava-bubbles)** | Optional bubbles form and pop on selected animated acid and lava floors, with subtle ripples. |
+| **[A living environment](#recent-atmospheric-rendering-and-cosmetic-fx-updates)** | Moving skies, soft sun shafts, animated textures, corpse scavengers and organic decay. |
+| **[Survival and encounter AI](#latest-survival-and-encounter-updates)** | Optional feeding, retreat, pursuit, infighting and encounter controls, independent of cosmetic gore. |
+| **[Modern HUD and launcher](#recent-gameplay-hud-environment-and-ai-updates)** | Configurable run statistics, reusable add-on loadouts, persistent settings and medical recovery options. |
+
+## Kinetic Horror and Physical Bodies
+
+HELLFORGE's combat presentation combines palette-aware sprite artwork, cosmetic
+physical simulation, lighting and sound. These systems retain the game's own
+damage, monster states and gameplay movement. Existing optional combat rules such
+as critical parts and monster weak points remain separate.
+
+### Kinetic Horror 2.0 — physical gore and impact feedback
+
+**Advanced Gore** offers Classic, Enhanced and Horror modes. Enhanced remains the
+established default; Horror is an opt-in presentation profile.
+
+- More expressive body reactions and coordinated cosmetic impact feedback.
+- Physical giblets that scatter, collide with surfaces and settle. Selected soft
+  fragments can temporarily cling to solid walls, flatten, sag and detach.
+- Thick surface deposits, existing wall runoff and temporary wet highlights that
+  respond to scene lighting before drying.
+- Material-specific movement and positional impact sound using the existing
+  procedural sound bank.
+
+Use **F4 → Combat** (or Find) to select **Advanced Gore → Horror**. Enable Blood,
+Flying flesh fragments and the relevant wall-blood options. Heavy impact reactions,
+Sticky wall fragments, Soft fragment deformation, Wet gore deposits and Heavy
+impact sounds can be controlled independently; Impact strength ranges from
+0.5 to 1.5. Existing prerequisites still apply, including Wet blood shine for wet
+deposits and hit/death reactions for heavy body motion.
+
+**Under the hood:** a bounded, fixed-step cosmetic fragment system uses the
+existing palette-aware atlas, collision queries and decal manager. Wall anchors
+are validated against their supporting geometry. The 64-piece total, 24 combined
+stationary pieces, eight attached-piece subcap and 12-piece burst limit are
+retained. Advanced Gore is restricted to eligible maps with fewer than 200
+kill-count monsters. The limits are resource policies, not measured FPS gains.
+
+[Settings registry](duct-tape-doom-main/platform/settings_panel.cpp) ·
+[Fragment simulation interface](duct-tape-doom-main/platform/gore_giblets.h)
+
+### Physical Bodies 1.0 — environmental contacts and stable ragdolls
+
+Ragdoll deaths bring the original supported monster sprites into an articulated
+relief representation without requiring replacement 3D models. Natural and
+Cinematic modes build on that foundation with more coordinated settling after
+supported wall contacts and steadier generated pixel-art images.
+
+| F4 → Combat → Deaths | Purpose |
+| :--- | :--- |
+| **Ragdoll deaths** | Opt in to rigged sprite physics for supported monsters (off by default). |
+| **Flying ragdolls** | Allow the existing cinematic blast movement and wall rebounds (off by default). |
+| **Physical Bodies: Legacy** | Retain the established ragdoll presentation (default). |
+| **Physical Bodies: Natural** | Enable restrained contact assistance and stable sprite reconstruction. |
+| **Physical Bodies: Cinematic** | Stronger contact damping; Flying ragdolls remains a separate option. |
+| **Environmental body contacts / Stable ragdoll sprites** | Independently control the two new improvements. |
+
+**M1 — Environmental contacts:** horizontal hip motion is damped briefly after a
+validated torso contact with a fixed wall. Open-floor falls and blast rebounds
+bypass this additional assistance. The original 11-point solver, four substeps
+and six constraint passes remain unchanged.
+
+**M2 — Stable reconstruction:** projected pixel alignment is anchored to the
+initial spine reference. Expensive sprite reconstruction is budgeted separately
+from physics, allowing three ordinary and two reserved urgent builds per game tic.
+Deferred bodies reuse a valid cached image with matching placement, or an ordinary
+death sprite while waiting for their first card. Settled images are cached after
+successful final reconstruction.
+
+**Acceptance:** the developer reported that M1/M2 gameplay testing passed, with
+a substantial improvement in immersion, and committed the source. No new frame-time
+benchmark is claimed. The visual corpse can settle away from its underlying
+actor; feeding and resurrection still use the gameplay actor. Unsupported artwork,
+floating monsters and matching voxel models may use their existing presentation.
+
+[Validation guide and test commands](docs/physical-bodies-validation.md) ·
+[Ragdoll implementation](duct-tape-doom-main/platform/scene3d/ragdoll.cpp)
+
+### Deep Wounds and Visceral Giblets
+
+The latest Kinetic Horror 3.0 development focuses on a simpler visual extension
+rather than independent skeletal limbs or multiple ragdolls. Deep Wounds is
+intended to give damage artwork an opaque, recessed appearance instead of the
+transparent openings of classic Wound Holes. Recognizable original pixel-art
+fragments add visual variety to the existing material-based giblet system.
+
+The approved design separates cosmetic appearance from simulation: major fatal
+appearance variants are applied only after the game has resolved the death, and
+featured artwork substitutes for existing admitted giblets rather than expanding
+simulation budgets. The existing animations, gameplay damage and physics rules
+remain the authority. No additional skeleton is required.
+
+**Development status:** the developer reported that testing of this latest batch
+passed. Exact final option keys, asset inventory, supported species and the scope
+of the ragdoll appearance bridge have not yet been confirmed in the public source
+snapshot used for this README update. In particular, the optional Lost Soul skull
+and smoke effect is not listed as a confirmed feature here. The latest local test
+acceptance is not a claim of exhaustive compatibility or performance certification.
+
+### Recommended immersion setup
+
+Start with accelerated sprite rendering and enable **Blood splats and pools**,
+**Blood spray and trails** and **Wet blood shine**. Choose **Advanced Gore → Horror**
+and leave its relevant child effects enabled. Under **Combat → Deaths**, turn on
+**Ragdoll deaths** and select **Natural** first. Try **Cinematic** and separately
+**Flying ragdolls** to compare more expressive presentation. Keep **Stable ragdoll
+sprites** enabled. Use the latest wound presentation options when available in your
+build. These are suggested preferences, not changed defaults.
+
+For atmosphere, try the existing Immersive Sky Environment, Living Surfaces,
+Decoration Immersion and Corpse Decomposition individually. On very large maps,
+start with lighter visual settings and add effects gradually; expensive lighting,
+reflections and destruction can still dominate frame time.
+
+### Living liquid surfaces — acid and lava bubbles
+
+Under the existing **Living Surfaces / Texture Immersion** controls, **Acid bubbles**
+and **Lava bubbles** add procedural surface activity to nearby animated nukage and
+lava floors. Acid uses small forming and popping bubbles; lava has slower molten
+bubble motion and subtle glowing rims. Both add ripples using the existing surface
+presentation. The options are subordinate to Living Surfaces and are cosmetic;
+existing hazardous-floor rules remain unchanged. These settings are present in the
+public settings registry. No separate performance benchmark is available.
+
+**Lighting tip:** if Sky light produces uneven indoor transitions, try enabling
+Window light alongside it (with Baked static lights where required). This resolved
+the developer's observed configuration issue; it is not a claim that every baked
+lighting artifact has been eliminated. The current Sky light tooltip also recommends
+this combination.
+
+## Feature catalog
+
+The broader feature set includes both recent changes and earlier implementation
+reports. Historical validation results below retain their original test scope.
 
 | Feature | What players get | Engineering highlights |
 | :--- | :--- | :--- |
@@ -91,7 +253,9 @@ their documented exclusions. Speedrun HUD 2.0 defaults to Classic colors;
 Medical Supply Recovery, Flashlight Monster Awareness and Imp Fireball Avoidance
 are opt-in. Corrosive Barrels 2.0 adds subordinate visual
 preferences under the existing Corrosive Barrels feature. The recent updates
-focus on sprite-based rendering; no new voxel work is included.
+focus on sprite-based rendering; no new voxel work is included. Horror and
+Physical Bodies are optional; enable Ragdoll deaths separately. See the
+[recommended immersion setup](#recommended-immersion-setup).
 
 > **Current behavior:** the survival-AI update supersedes the original flat
 > bleeding and amber world-impact effects. It adds progressive bleeding,
@@ -187,7 +351,7 @@ state. [Implementation and verification](docs/changes/EYE-INJURIES.md).
 - The new splashes and drips are cosmetic: existing acid damage, hazardous
   pools, radiation-suit protection and explosion rules remain authoritative.
   Visual drips do not create additional damaging acid pools. Temporary effect
-  records have bounded lifetimes and budgets; cosmetic persistence in saves is
+  records have bounded lifetimes and budgets; these cosmetic records are
   not retained in saves. [Implementation notes](docs/changes/CORROSIVE-BARRELS-SHARED-LIQUID.md).
 - **Verification:** the developer reported the feature implemented. A separate
   feature-specific test result and performance capture were not supplied in
@@ -280,7 +444,7 @@ state. [Implementation and verification](docs/changes/EYE-INJURIES.md).
   and population staging controls deferred originals separately.
 
 [Survival behavior, tuning and focused checks](docs/changes/SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md)
-? [Director controls and progression guards](docs/changes/ENCOUNTER-DIRECTOR.md)
+· [Director controls and progression guards](docs/changes/ENCOUNTER-DIRECTOR.md)
 
 ### Recent atmospheric rendering and cosmetic FX updates
 
@@ -479,34 +643,17 @@ restoring saved player state**. These results belong to the builds and test
 conditions recorded in their linked reports; loading coverage does not imply
 full campaign or performance certification.
 
-The six later features summarized above have developer-reported implementation
-status; five have an explicit passing-test or approval report. Those reports
-are not independently reproduced here, and no new aggregate test count or
-benchmark is inferred from them.
+The 26 November feature batch retains the individual verification notes above.
+For 27 November, Kinetic Horror and Physical Bodies M1/M2 have developer-reported
+runtime acceptance; the latest Deep Wounds / giblet batch has developer-reported
+passing tests. These newer results are not independently reproduced here, and no
+aggregate test count, frame-rate improvement or new packaged build is inferred.
 
 **Explore:** [Combat matrix](docs/changes/ENHANCED-MONSTER-COMBAT.md#implemented-matrix)
 · [Survival AI](docs/changes/MONSTER-SURVIVAL-AI.md)
 · [Build and test instructions](BUILDING.md)
 · [Documentation index](docs/README.md)
 · [Bug and debugging log](Log-Status.md)
-
-## Download and play
-
-1. Build or obtain `DOOM-Hellforge.exe`.
-2. Launch it and select a compatible Doom, Doom II, Final Doom, or Freedoom IWAD.
-3. Add WAD/PK3 add-ons in **ADD-ON LOADOUT** and choose the active level WAD in **MAP WADS**. The selected map launches first, followed by the add-ons in load order. Use **PLAY GAME** to start.
-4. Use **GAME SETTINGS / TABS** before launching, or **F4** in-game, for graphics, lighting, combat and other preferences.
-
-Launcher quick tools open the last log and graphics config. **CLEAR ALL / FRESH
-START** backs up and resets preferences/add-ons while keeping saves and IWADs.
-
-Commercial IWADs are not included. Windows x64, a Vulkan-capable graphics
-driver, and .NET Framework 4.5+ are required for the supplied launcher.
-
-The launcher stores extracted resources, backups, crash logs, and its lighting
-cache under `%LOCALAPPDATA%\DOOM-HellforgeLauncher`. Game settings and saves
-use `%APPDATA%\Local Games\DOOM Hellforge`; screenshots are saved beside the
-launcher in `Screenshots`.
 
 ## Renderer, bundled content, and additional features
 
@@ -533,6 +680,8 @@ the extensions highlighted above.
   crash logs, retained PDB symbols, and Windows minidumps.
 - Large-texture and large-WAD compatibility improvements, including expanded
   texture column offsets and configurable native zone memory.
+- Procedural acid and lava bubbles under Living Surfaces; see
+  [living liquid surfaces](#living-liquid-surfaces--acid-and-lava-bubbles).
 - Shared acid liquid effects for corrosive barrel explosions, with wall
   adhesion, runoff and cosmetic sprite contamination.
 - Rain lightens and spreads exposed blood using the existing age-based
@@ -550,6 +699,12 @@ the extensions highlighted above.
 
 ### Monsters and combat
 
+- **Kinetic Horror**: stronger cosmetic impact reactions, textured physical
+  giblets, wall adhesion, soft deformation, wet deposits and impact sounds.
+- **Physical Bodies**: opt-in sprite ragdolls, environmental contact assistance,
+  stable generated sprites and bounded reconstruction scheduling.
+- **Deep Wounds & Visceral Giblets**: latest developer-tested visual update;
+  see [development status](#deep-wounds-and-visceral-giblets) for verification limits.
 - Optional health-driven **Monster Skin Damage**, using shared cached sprite
   variants for ten stock monster types and independent of gameplay bleeding.
 - Optional **Corpse & Decoration Immersion**: delayed flies, pale worms,
@@ -621,8 +776,13 @@ Existing upstream renderer capabilities and historical compatibility notes are
 retained. The new medical, flashlight and Imp AI options can change gameplay
 balance and timing when enabled; these settings default to classic/off
 behavior and restrict gameplay-changing features in unsupported sessions.
-Shared acid and rain effects are cosmetic. No new performance figures or full
-cross-WAD certification are asserted for these six additions.
+Shared acid, rain and living-liquid effects are cosmetic. Kinetic Horror and
+Physical Bodies are also presentation systems; they do not replace gameplay damage
+or actor movement. Advanced Gore uses its existing below-200-monster gate. Sprite
+profiles and ragdoll artwork may fall back on unsupported frames or voxel models.
+The displayed ragdoll position can differ from its underlying gameplay actor;
+corpse decomposition retains its documented ordinary-sprite restrictions.
+No new performance figures or full cross-WAD certification are asserted.
 
 See the [large-WAD compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md)
 and [reload/cache report](docs/changes/RELOAD-LIGHTING-CACHE.md) for measured
@@ -659,6 +819,30 @@ ensure the changed files are rebuilt, embedded shaders are regenerated when
 needed, and the launcher runs the newly built executable. A newer source
 file alone does not prove its changes are present in a running binary.
 
+## Developer resources
+
+| Area | Entry point |
+| :--- | :--- |
+| Native engine / renderer | [`duct-tape-doom-main/`](duct-tape-doom-main) |
+| F4 settings and feature gates | [`settings_panel.cpp`](duct-tape-doom-main/platform/settings_panel.cpp) |
+| Sprite wounds and cosmetic event resolution | [`wounds.cpp`](duct-tape-doom-main/platform/scene3d/wounds.cpp) |
+| Physical fragments and rendering | [`gore_giblets.h`](duct-tape-doom-main/platform/gore_giblets.h) · [`giblet_scene.cpp`](duct-tape-doom-main/platform/scene3d/giblet_scene.cpp) |
+| Ragdoll simulation and sprite reconstruction | [`ragdoll.cpp`](duct-tape-doom-main/platform/scene3d/ragdoll.cpp) · [`ragdoll_body.cpp`](duct-tape-doom-main/platform/scene3d/ragdoll_body.cpp) |
+| Original giblet assets and packer | [`assets/gibs/`](duct-tape-doom-main/assets/gibs) · [`pack_giblets.py`](tools/pack_giblets.py) |
+| Launcher | [`launcher/`](launcher) |
+| Tests and technical reports | [Build and tests](BUILDING.md) · [Physical Bodies validation](docs/physical-bodies-validation.md) · [Documentation](docs/README.md) · [Change reports](docs/changes) |
+
+The Physical Bodies validation guide includes the native F4 and wound test targets,
+seven-map arena generation and a manual validation matrix covering wall contacts,
+mirroring, cached cards, lighting, moving supports and lifecycle behavior. Keep
+Legacy/Enhanced comparisons as regression baselines when changing the cosmetic
+pipeline. If embedded giblet artwork is changed, regenerate it with the existing
+`python tools/pack_giblets.py` workflow and validate with `--check`; do not edit
+the generated atlas by hand. Shader-source changes require shader regeneration
+before packaging. See [Building](#building) for the supported Windows workflow.
+
+Historical reports: [DOOM2 startup crash fix](docs/changes/DOOM2-STARTUP-LIGHT-CACHE-CRASH.md) · [Large platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md) · [E1M8 exit and screen-edge fixes](docs/changes/E1M8-AND-SPEEDRUN-FIXES.md) · [Speedrun position and layout](docs/changes/SPEEDRUN-LAYOUT.md) · [HUD background opacity](docs/changes/HUD-BACKGROUND-OPACITY.md) · [Elemental Damage 2.0 and Speedrun HUD](docs/changes/ELEMENTAL-DAMAGE-2.md) · [Integration notes](docs/changes/MAIN-INTEGRATION-2026-11-14.md)
+
 ## Source and credits
 
 HELLFORGE is based on Tuin-Doom-Enhanced, which incorporates Duct-Tape DOOM /
@@ -667,7 +851,6 @@ DERP engine and renderer contributions. Attribution for those contributions:
 - DERP, the DOOM Engine Remaster Project — https://github.com/robongrui/derp
 - Duct-Tape DOOM — https://github.com/robongrui/duct-tape-doom
 
-- [DERP / original engine project](https://github.com/robongrui/derp)
 - [Tuin-Doom-Enhanced source fork](https://github.com/tuin-boop/Tuin-Doom-Enhanced)
 - DOOM source by id Software; original notices are retained.
 - MR's Fluid Weapons, Fluid Weapons SFX, FluidMonsters, SDL3, Nuked OPL3,
@@ -702,6 +885,12 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
   Notifications independently of the spray toggle.
 
 Recent source updates for this build family:
+
+- **Recent combat immersion batch (27 November 2026):** Kinetic Horror and
+  Physical Bodies M1/M2 received developer-reported gameplay acceptance; the
+  latest Deep Wounds / giblet batch also received a passing-test report. See
+  [combat immersion](#kinetic-horror-and-physical-bodies) for configuration,
+  architecture and the scope of current verification. No new release ID is asserted.
 
 - **Recent development batch (26 November 2026):** see the
   [feature details and verification notes](#recent-gameplay-hud-environment-and-ai-updates)
@@ -808,7 +997,7 @@ there as well.
 
 **README baseline: build 2026.11.15.6.** This identifier is the documented
 source baseline; earlier documented improvements were rebuilt and packaged
-afterward, but no new release identifier is asserted. The six later feature
+afterward, but no new release identifier is asserted. The six 26 November feature
 updates are described from developer-reported implementation and acceptance;
 packaging and exact build identifiers for that batch were not supplied. The sky, soft sun-shaft, HUD bloom,
 monster skin-damage, decoration-ambience and Corpse Decomposition M1/M2 updates
@@ -818,6 +1007,8 @@ M1 after the visual-activation repair, and for M2 after its missing-symbol linke
 repair. These reports establish the acceptance of the tested changes, **not**
 comprehensive PWAD compatibility, per-effect GPU-memory savings or FPS results.
 No new release/build identifier is asserted solely because a patch package exists.
+The 27 November combat immersion update likewise records source development and
+reported acceptance rather than a separately numbered binary release.
 
 The survival and retaliation update has focused rules and real engine checks.
 See the dated report for its original build coverage and remaining in-game

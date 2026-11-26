@@ -1,18 +1,14 @@
-add doc:
-
-I'll retrieve only the files needed for each subsystem.
-No GitHub connection, authorization or commits. We'll work locally with copies of source files and produce a ZIP for you to apply manually.
-
-
+https://github.com/ThiagoScheffer/HellForge-Doom-main
+Brainstorm ideas and fixes, implementations
+first READ the readme to understand the project.
+retrieve only the files needed for each subsystem.
 Inspect their complete relevant implementations and dependencies.
-
-
-
 Develop changes against the actual HELLFORGE source.
+For each idea, I'll also distinguish between what is documented, what we can verify from source code, and what remains a technical hypothesis.
+
+We don't need to produce Codex prompts immediately. We can explore ideas, challenge assumptions, compare alternatives, and refine the design before committing to an implementation.
 
 
-
-Prepare a ZIP containing modified/new files and application instructions.
 
 
 
@@ -405,6 +401,11 @@ sames as commit 9083cb569c926dc271cca3f7fd7d250f6e05c970: Deimos fog now covers 
 Other foggy atmosphere like Burning city or Hell - need same fix.
 
 
+need fix:
+body rotten not working correctly when Ragdoll deaths
+bloodpool after monster die should only appears after Ragdoll finish to correctly display the blood overt the body position
+
+increate light bolts to improve visuals on rain atmosphere
 
 
 

@@ -13,6 +13,18 @@ NAMES = [f"GIB{i}{pose}0" for i in range(10) for pose in "AB"]
 NAMES += [f"CRS{i}A0" for i in range(1, 4)]
 NAMES += [f"SG{side}{i}{pose}0" for side in "CW" for i in (1, 2) for pose in "AB"]
 NAMES += ["SQSHA0"]
+FEATURED_PAIRS = [
+    ("HumanPiece", "HFLEG0A0", "HFLEG0B0", 0),
+    ("DemonPiece", "HFLEG1A0", "HFLEG1B0", 0),
+    ("Skull", "HFSKLA0", "HFSKLB0", 3),
+    ("BoneDetail", "HFBONA0", "HFBONB0", 3),
+    ("Head", "HFHEADA0", "HFHEADB0", 4),
+    ("SoftOrganic", "HFBRNA0", "HFBRNB0", 2),
+    ("HeavyOrganic", "HFORGA0", "HFORGB0", 1),
+]
+FEATURED_FRAMES = {name: (kind, pose) for _, flying, resting, kind in FEATURED_PAIRS
+                   for pose, name in enumerate((flying, resting))}
+NAMES += list(FEATURED_FRAMES)
 MATERIAL = [1, 1, 0, 0, 2, 2, 3, 3, 0, 3]  # Matches giblets::Kind.
 WIDTH = 256
 GUTTER = 2
@@ -136,11 +148,16 @@ def pack():
               f"inline constexpr int width={WIDTH}, height={height};",
               "inline constexpr Frame frames[]={"]
     for i, (name, (x, y, rw, rh), (w, h, _, (left, top, _, _))) in enumerate(zip(NAMES, entries, assets)):
-        kind, pose = (MATERIAL[i // 2], i % 2) if i < 20 else (-1, 2)
+        kind, pose = (MATERIAL[i // 2], i % 2) if i < 20 else FEATURED_FRAMES.get(name, (-1, 2))
         # Pose pairs share a canonical apparent size. Settled art spreads the
         # same piece across the floor, so its footprint is slightly wider.
         scale = 1.15 if pose == 1 else 1.0
         header.append(f'    {{"{name}",{x},{y},{rw},{rh},{w},{h},{left},{top},{kind},{pose},.5f,.5f,{scale:.2f}f}},')
+    header += ["};", "inline constexpr int featuredFirst=" + str(len(NAMES) - len(FEATURED_FRAMES)) + ";",
+               "struct FeaturedPair { int flying,resting; };",
+               "inline constexpr FeaturedPair featuredPairs[]={{-1,-1}, // Automatic"]
+    header += [f"    {{{NAMES.index(flying)},{NAMES.index(resting)}}}, // {identity}"
+               for identity, flying, resting, _ in FEATURED_PAIRS]
     header += ["};", "inline constexpr unsigned char png[]={"]
     header += ["    " + ",".join(str(b) for b in png[i:i + 24]) + "," for i in range(0, len(png), 24)]
     header += ["};", "}", ""]

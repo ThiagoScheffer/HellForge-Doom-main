@@ -35,6 +35,21 @@ static void run(){
   }
  }
  check(seen.size()==registry.size(),"all settings reachable exactly once");
+ Settings kh3;
+ check(kh3.wounds==1,"wounds default to Classic");
+ for(int mode:{0,1,2}) {
+  readOption(kh3,"wounds",mode);
+  check(kh3.wounds==mode,"all three wound presentation values deserialize");
+ }
+ readOption(kh3,"wounds",3);
+ check(kh3.wounds==2,"invalid wound presentation values are ignored");
+ kh3.accelerated=1;kh3.blood=1;kh3.goreFragments=1;kh3.goreHeads=1;kh3.goreLevel=1;
+ for(const char *key:{"gore_recognizable_gibs","gore_fatal_appearance"}) {
+  check(*registry.at(key).flag==1&&!registry.at(key).isEnabled(kh3),"new gore options default on behind Horror");
+  kh3.goreLevel=2;
+  check(registry.at(key).isEnabled(kh3),"new gore options are available in Horror");
+  kh3.goreLevel=1;
+ }
  check(Settings{}.acidSplatters==1&&Settings{}.acidMonsterCoating==1&&!Settings{}.corrosiveBarrels,"acid visual defaults preserve the master default");
  choose("acid_splatters");check(!strcmp(panel.tabs[panel.tab].title,"Combat")&&!strcmp(currentPage().title,"Barrels"),"acid settings appear with barrel controls");
  Settings acidSettings;acidSettings.accelerated=1;check(!selectedOption().isEnabled(acidSettings),"acid visuals require their master");

@@ -46,9 +46,11 @@ LivingShading livingSurface(uint profile,uint flags,vec2 uv,vec2 pixel,float lod
                    (1.0-smoothstep(0.75,1.8,footprint));
     if(strength<=0.0)return result;
     bool eyes=profile==LS_MARBLE_FACES||profile==LS_SKULL_SWITCH;
+    uint variant=uint(cycleMean.g);
     vec2 size=vec2(textureSize(image,0));
     vec4 bounds=vec4(frameMean.rgb,cycleMean.r);
-    vec2 at=mod(uv,size);
+    // Fixed skull sockets are registered in the original texture coordinates.
+    vec2 at=mod(profile==LS_SKULL_SWITCH&&variant!=4u?vUV:uv,size);
     vec2 extent=bounds.zw-bounds.xy;
     vec2 room=mix(min(at-bounds.xy,bounds.zw-at),vec2(9.0),equal(extent,size));
     strength*=eyes?smoothstep(0.0,1.5,min(room.x,room.y)):smoothstep(4.5,8.0,min(room.x,room.y));
@@ -61,7 +63,6 @@ LivingShading livingSurface(uint profile,uint flags,vec2 uv,vec2 pixel,float lod
         return livingHazard(profile,uint(cycleMean.g),flags,uv,tile,extent,pixel,lod,seed,strength,rgb);
     bool pulse=(flags&LS_PULSE)!=0u,wet=(flags&LS_WETNESS)!=0u;
     bool morph=(flags&LS_MORPH)!=0u&&c.style.x==0.0&&blend==0.0;
-    uint variant=uint(cycleMean.g);
     if(eyes) {
         result.glowTransmission=engravedEyes(profile==LS_MARBLE_FACES,variant,tile,morph,pulse,strength,
                                              footprint,normal,dp1,dp2,duv1,duv2,rgb);

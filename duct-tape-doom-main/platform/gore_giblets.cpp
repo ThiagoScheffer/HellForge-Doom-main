@@ -125,6 +125,8 @@ int System::emit(const Burst &request) {
         free->lifespan = request.brief?1.2f:m.lifetime + between(rng,-0.3f,0.5f);
         free->brief=request.brief;
         free->kind = kind;
+        if(added==0&&compatibleArtwork(request.featuredArtwork,kind))
+            free->artwork=request.featuredArtwork;
         free->tint = request.tint;
         free->variant = std::uint8_t(random32(rng)%8);
         free->contacts = 0;
@@ -278,7 +280,7 @@ void System::forEachVisual(VisualFn draw, void *context) const {
         draw(context, {p.p,p.kind,p.tint,p.size,p.rotation,
                        std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting,
                        p.contact,p.normal,p.surface,p.eventId,p.attachment,
-                       p.attachment==Attachment::Wall?p.age-p.attachedAt:0.f,p.squash,p.sag,p.anchor});
+                       p.attachment==Attachment::Wall?p.age-p.attachedAt:0.f,p.squash,p.sag,p.anchor,p.artwork});
     }
 }
 

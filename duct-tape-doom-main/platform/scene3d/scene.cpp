@@ -684,13 +684,13 @@ SurfaceBinding surfaceBinding(int key) {
         binding.cycleMean[0]=(float)image.livingBounds[3];
         binding.cycleMean[1]=(float)image.livingVariant;
     }
-    if(image.wallEyes) {
-        metadata|=LS_WALL_EYE_MAP;
-        if(next==&image&&settings.livingSurfaces&&(settings.textureSkullEyes||settings.textureReactiveEyes)) {
-            const player_t &viewer=players[consoleplayer];
-            if(const mobj_t *player=viewer.mo)
-                binding.wallEyeViewer={units(player->x),units(player->y),units(viewer.viewz),1};
-        }
+    if(image.wallEyes)metadata|=LS_WALL_EYE_MAP;
+    const bool fixedSkull=image.livingProfile==LS_SKULL_SWITCH&&image.livingVariant!=4;
+    if(next==&image&&settings.livingSurfaces&&
+       (fixedSkull||(image.wallEyes&&(settings.textureSkullEyes||settings.textureReactiveEyes)))) {
+        const player_t &viewer=players[consoleplayer];
+        if(const mobj_t *player=viewer.mo)
+            binding.wallEyeViewer={units(player->x),units(player->y),units(viewer.viewz),1};
     }
     if(settings.livingSurfaces&&flat&&speed>0&&floor==1.f) {
         const unsigned kind=liquidBubbleMaterial(pic);

@@ -50,6 +50,8 @@ void bodyForgetHit(const mobj_t*) {++forgottenHits;}
 GoreBurstReport goreBurst(const mobj_t&,float,float,float,float,float,GoreOutcome outcome,uint64_t,GoreEmission emission) {
     goreBursts.push_back(outcome);lastGoreTier=emission.tier;return {};
 }
+int bloodSourceTint=0;
+byte bloodTintIndex(byte index,int tint) {return byte(index+tint);}
 const std::vector<byte> &bloodPalette() {
     static const std::vector<byte> shades={16,32,48,64,80,96,112,128,144};
     return shades;
@@ -168,13 +170,13 @@ static void woundMaterials() {
     base.lampTint=0xff92817au;
     // One row contains every material, including an intact body texel and
     // a hole. These pass through the same run drawing as an animated body.
-    const std::vector<byte> states={0,1,2,3,4,5};
+    const std::vector<byte> states={0,1,2,3,4,5,WOUND_RECESSED};
     std::vector<Vertex> vertices;
     settings.bloodShine=1;
     maskedRow(vertices,states,(int)states.size(),0,false,[&](int edge,bool bottom) {
         Vertex v=base;v.u=(float)edge;v.v=bottom?1.0f:0.0f;return v;
     });
-    check(vertices.size()==30,"Wound drawing must skip holes and preserve the other materials");
+    check(vertices.size()==36,"Wound drawing must skip holes and retain opaque recesses");
     unsigned darkest=255,brightest=0;
     for(size_t i=0;i<vertices.size();++i) {
         const Vertex &v=vertices[i];
@@ -187,12 +189,21 @@ static void woundMaterials() {
         check(std::find(bloodPalette().begin(),bloodPalette().end(),color)!=bloodPalette().end(),
               "Blood colors must come from the game's blood palette");
         if(state==2)darkest=color;if(state==4)brightest=color;
+        if(state==WOUND_RECESSED)
+            check(color==bloodPalette().front(),"A recess uses the darkest blood shade");
         check(((v.mode&MODE_WOUND_STAIN)!=0)==(state==5),
               "Only the outer stain must blend blood into the body paint");
         check(((v.mode&MODE_WET_SPRITE)!=0)==(state==3||state==4),
               "Only the red rim and bright lip must receive wet blood highlights");
     }
     check(brightest>darkest,"The bright blood lip must use a brighter shade than its recessed edge");
+    {
+        const BloodSourceScope source(2);
+        Vertex recess=base;
+        woundVertex(recess,WOUND_RECESSED);
+        check(((recess.mode>>MODE_WOUND_PALETTE_SHIFT)&255u)==bloodTintIndex(bloodPalette().front(),2),
+              "Recessed paint reuses the existing source tint");
+    }
     Vertex repainted=base;
     woundVertex(repainted,5);woundVertex(repainted,3);
     check((repainted.mode&MODE_WOUND_STAIN)==0&&(repainted.mode&MODE_WET_SPRITE)!=0,
@@ -566,12 +577,25 @@ int main(int argc,char **argv) {
         trail=trail||(state>=3&&y-20>2.5f&&std::abs(x-24)<=1);
     }
     check(red&&stain,"A puncture must include red blood and a surrounding stain");
+    settings.wounds=2;
+    const auto deep=mask(monster,spriteImages[0],false,0,-1);
+    for(size_t i=0;i<bloody.size();++i)
+        check(deep[i]==(bloody[i]==WOUND_OPENING?byte(WOUND_RECESSED):bloody[i]),
+              "Deep replaces only the existing opening and leaves source coverage and rim intact");
+    settings.wounds=0;
+    std::vector<byte> off;
+    check(!woundMask(monster,spriteImages[0],false,0,-1,off),"Setting zero hides ordinary wounds");
+    settings.wounds=1;
     check(trail,"A bloody puncture must leave a short downward smear");
     auto mirrored=mask(monster,spriteImages[0],true,0,-1);
     for(int y=0;y<46;++y)for(int x=0;x<36;++x)
         check(bloody[(size_t)y*36+x]==mirrored[(size_t)y*36+35-x],
               "Mirroring the body must mirror the entire blood pattern with it");
     spriteImages[0].pixels[((size_t)22*36+24)*2+1]=0;
+    settings.wounds=2;
+    check(mask(monster,spriteImages[0],false,0,-1)[22*36+24]==WOUND_ORIGINAL,
+          "Deep paint never fills source transparency");
+    settings.wounds=1;
     at(mask(monster,spriteImages[0],false,0,-1),spriteImages[0],24.5f,20.5f,
        "Clipping a blood mark to transparent artwork must preserve the puncture");
     std::vector<byte> closed;

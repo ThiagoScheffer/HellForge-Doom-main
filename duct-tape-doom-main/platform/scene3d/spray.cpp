@@ -279,6 +279,19 @@ static const GoreStyle &goreStyle(int type) {
     default:return humanFlesh;
     }
 }
+static hellforge::giblets::Artwork featuredGoreArtwork(int type,GoreOutcome outcome) {
+    using hellforge::giblets::Artwork;
+    switch(type) {
+    case MT_POSSESSED:case MT_SHOTGUY:
+        return outcome==GoreOutcome::HeadBurst?Artwork::Head:Artwork::HumanPiece;
+    case MT_TROOP:return Artwork::DemonPiece;
+    case MT_UNDEAD:return outcome==GoreOutcome::SkullBurst?Artwork::Skull:Artwork::BoneDetail;
+    case MT_FATSO:return Artwork::HeavyOrganic;
+    case MT_SERGEANT:case MT_HEAD:return Artwork::SoftOrganic;
+    default:return Artwork::Automatic;
+    }
+}
+
 GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,float dy,GoreOutcome outcome,uint64_t discharge,GoreEmission emission) {
     using namespace hellforge::giblets;
     GoreBurstReport report;
@@ -325,6 +338,8 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
         if(horrorGoreEnabled(settings)) {
             burst.sticky=settings.goreStickyFragments;
             burst.softDeformation=settings.goreSoftDeformation;
+            if(settings.goreRecognizableGibs&&!medium&&!routine&&(fatal||outcome!=GoreOutcome::None))
+                burst.featuredArtwork=featuredGoreArtwork(target.type,outcome);
             burst.presentation=horrorPresentation(emission.tier)*std::clamp(settings.goreImpactStrength,.5f,1.5f);
         }
         burst.radial=emission.radial;

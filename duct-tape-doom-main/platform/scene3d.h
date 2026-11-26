@@ -132,6 +132,8 @@ struct Settings {
     float goreImpactStrength=1.f;
     int goreHeads=1; // Burst on concentrated confirmed head pellets; no detached head art.
     int goreFragments=1; // Small directional procedural flesh pieces, capped globally.
+    int goreRecognizableGibs=1; // Featured Horror artwork within existing bursts.
+    int goreFatalAppearance=1; // Deepen compatible Horror corpse artwork.
     int goreWallBlood=1; // Larger collision-driven splashes and drips.
     int goreBodyDamage=1;
     int deathFalls=0; // Optional procedural falls: 0 off, 1 by hit, 2 legs, 3 chest, 4 head.

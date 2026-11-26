@@ -376,6 +376,17 @@ bool loadAtlas(bool uploadTexture) {
             packed[out]=it->second[band];packed[out+1]=rgb[3];
         }
     }
+    for(size_t i=featuredFirst;i<sizeof(frames)/sizeof(frames[0]);++i) {
+        const auto &frame=frames[i];
+        for(int y=frame.y;y<frame.y+frame.h;++y)for(int x=frame.x;x<frame.x+frame.w;++x) {
+            const auto *rgb=(const byte*)rgba->pixels+y*rgba->pitch+x*4;
+            // Recolor organic reds while keeping clothing and bone colors.
+            if(rgb[0]*4>rgb[1]*5&&rgb[0]*4>rgb[2]*5&&frame.kind!=int(Kind::Bone))continue;
+            const size_t base=(size_t(y)*width+x)*2;
+            for(int band=1;band<tintBands;++band)
+                packed[base+size_t(band)*width*height*2]=packed[base];
+        }
+    }
     SDL_DestroySurface(rgba);
     Image image;
     image.width=width;image.height=height*tintBands;image.opaque=false;
@@ -391,6 +402,13 @@ bool loadAtlas(bool uploadTexture) {
 }
 
 const giblet_art::Frame &frameFor(const Visual &v) {
+    using namespace giblet_art;
+    static_assert(sizeof(featuredPairs)/sizeof(featuredPairs[0])==unsigned(Artwork::Count));
+    if(settings.goreRecognizableGibs&&horrorGoreEnabled(settings)&&compatibleArtwork(v.artwork,v.kind)) {
+        const auto pair=featuredPairs[unsigned(v.artwork)];
+        const int index=v.resting?pair.resting:pair.flying;
+        if(index>=featuredFirst&&size_t(index)<sizeof(frames)/sizeof(frames[0]))return frames[index];
+    }
     constexpr int pairs[5][3]={{2,3,8},{0,1,-1},{4,5,-1},{6,7,9},{4,5,-1}};
     constexpr int sizes[]={3,2,2,3,2};
     const unsigned kind=unsigned(v.kind);

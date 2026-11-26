@@ -48,7 +48,11 @@ static std::array<GoreShot,20> goreShots;
 static uint64_t goreDischarge;
 static unsigned goreShotLevel;
 static const mobj_t *goreShooter;
-static std::unordered_map<const mobj_t*,GoreOutcome> goreCorpses;
+struct GoreCorpseAppearance {
+    GoreOutcome outcome;
+    bool recessedRim;
+};
+static std::unordered_map<const mobj_t*,GoreCorpseAppearance> goreCorpses;
 static std::unordered_map<const Image*,const GoreFrame*> verifiedGoreFrames;
 struct GoreLivingState { GoreRegion region=GoreRegion::Unknown; WoundSpot drip{}; };
 static std::unordered_map<const mobj_t*,GoreLivingState> goreLiving;
@@ -478,7 +482,9 @@ static void goreResolve(const mobj_t &target,GoreShot &shot,uint64_t discharge,b
         const bool keepStockCorpse=d.type==MT_POSSESSED||d.type==MT_TROOP;
         if((keepStockCorpse||goreCorpses.size()<199)&&goreVerifySequence(target)) {
             if(!keepStockCorpse) {
-                goreCorpses[&target]=outcome;
+                const bool recessedRim=outcome==GoreOutcome::HeadBurst&&horrorGoreEnabled(settings)&&
+                    settings.goreFatalAppearance;
+                goreCorpses[&target]={outcome,recessedRim};
                 art="stock_death";
                 maskApplied=true;
             }
@@ -866,9 +872,9 @@ static const Lying &lyingOf(const Image &image) {
 // Wound-local marks, held for the wound's lifetime: a narrow dark torn
 // edge, ragged red flesh, a few brighter lip texels, and a mottled stain.
 // The short trail runs down the source drawing and bends with the body.
-static byte woundMark(float x,float y,float radius,uint32_t seed) {
+static byte woundMark(float x,float y,float radius,uint32_t seed,bool deep) {
     float d=std::hypot(x,y);
-    if(d<=radius)return 1;
+    if(d<=radius)return deep?WOUND_RECESSED:WOUND_OPENING;
     if(d<=radius+0.55f)return 2;
     float angle=std::atan2(y,x),phase=(seed&1023u)*(2*doomPi/1024);
     float edge=radius+1.15f+0.35f*std::sin(3*angle+phase)+0.2f*std::sin(7*angle-phase);
@@ -911,7 +917,8 @@ static bool goreCorpseMask(const mobj_t &actor,const Image &image,std::vector<by
     if(corpse==goreCorpses.end())return false;
     const auto verified=verifiedGoreFrames.find(&image);
     if(verified==verifiedGoreFrames.end()||!verified->second||verified->second->type!=actor.type)return false;
-    const auto outcome=corpse->second;
+    const auto outcome=corpse->second.outcome;
+    const bool recessedRim=corpse->second.recessedRim&&horrorGoreEnabled(settings)&&settings.goreFatalAppearance;
     if(!settings.goreHeads)return false;
     const auto &art=*verified->second;
     const int w=image.width,h=image.height;
@@ -982,8 +989,9 @@ static bool goreCorpseMask(const mobj_t &actor,const Image &image,std::vector<by
     for(size_t i=0;i<cut.size();++i) {
         if(!cut[i])continue;
         any=true;
-        if(cut[i]==1)mask[i]=1;
-        else if(mask[i]!=1)mask[i]=cut[i];
+        if(cut[i]==WOUND_OPENING)mask[i]=WOUND_OPENING;
+        else if(mask[i]!=WOUND_OPENING)
+            mask[i]=recessedRim&&cut[i]==WOUND_SURFACE?byte(WOUND_RECESSED):cut[i];
     }
     return any;
 }
@@ -1082,31 +1090,43 @@ bool woundMask(const mobj_t &thing,const Image &image,bool flipped,float rx,floa
         for(int r=std::max(0,r0-up);r<=std::min(h-1,r0+down);++r)
             for(int c=std::max(0,c0-reach);c<=std::min(w-1,c0+reach);++c) {
                 size_t i=(size_t)r*w+c;
-                if(!image.pixels[i*2+1]||mask[i]==1)continue;
+                if(!image.pixels[i*2+1]||mask[i]==WOUND_OPENING)continue;
                 if(sawAnatomy&&(sawAnatomy->pixels[i]!=WP_BODY||c<w/5||c>w*4/5||r<h/10||r>h*5/6))continue;
                 byte mark=saw?
                     sawMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.stage,wound.seed):
-                    woundMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.radius,wound.seed);
+                    woundMark((c+0.5f-cu)*direction,r+0.5f-cv,wound.radius,wound.seed,settings.wounds==2);
                 // Nearby stains combine, but never paint over a hole or its
                 // recessed edge. Highlights win over the red lip and stain.
-                static const byte priority[6]={0,5,4,2,3,1};
-                if(priority[mark]>priority[mask[i]])mask[i]=mark;
+                static constexpr byte priority[WOUND_PAINT_COUNT]={0,5,4,2,3,1,5};
+                if(mark<WOUND_PAINT_COUNT&&mask[i]<WOUND_PAINT_COUNT&&priority[mark]>priority[mask[i]])mask[i]=mark;
                 any=any||mark!=0;
             }
     }
     return goreMask(thing,image,mask)||any;
 }
 
-void woundVertex(Vertex &vertex,byte state) {
-    if(state<2||state>5)return;
+bool recessedWoundIndex(byte &index) {
     const auto &shades=bloodPalette();
-    if(shades.empty())return;
-    static const float shade[6]={0,0,0.02f,0.45f,0.82f,0.22f};
-    byte color=shades[(size_t)std::lround(shade[state]*(shades.size()-1))];
+    if(shades.empty())return false;
+    index=bloodTintIndex(shades.front(),bloodSourceTint);
+    return true;
+}
+
+void woundVertex(Vertex &vertex,byte state) {
+    if(state<WOUND_EDGE||state>=WOUND_PAINT_COUNT)return;
+    byte color=0;
+    if(state==WOUND_RECESSED) {
+        if(!recessedWoundIndex(color))return;
+    } else {
+        const auto &shades=bloodPalette();
+        if(shades.empty())return;
+        static constexpr float shade[]={0,0,0.02f,0.45f,0.82f,0.22f};
+        color=shades[(size_t)std::lround(shade[state]*(shades.size()-1))];
+    }
     vertex.mode&=((1u<<MODE_WOUND_PALETTE_SHIFT)-1u)&~(MODE_GLOWING_EYES|MODE_WET_SPRITE);
     vertex.mode|=MODE_WOUND|((unsigned)color<<MODE_WOUND_PALETTE_SHIFT);
-    if(state==5)vertex.mode|=MODE_WOUND_STAIN;
-    else if(settings.bloodShine&&(state==3||state==4))vertex.mode|=MODE_WET_SPRITE;
+    if(state==WOUND_STAIN)vertex.mode|=MODE_WOUND_STAIN;
+    else if(settings.bloodShine&&(state==WOUND_SURFACE||state==WOUND_LIP))vertex.mode|=MODE_WET_SPRITE;
 }
 
 // One texel row cut by the mask: runs of body texels, holes skipped, rim runs
@@ -1120,10 +1140,10 @@ void maskedRow(std::vector<Vertex> &out,const std::vector<byte> &mask,int width,
         byte state=mask[(size_t)r*width+c];
         int end=c+1;
         while(end<width&&mask[(size_t)r*width+end]==state)++end;
-        if(state!=1) {
+        if(state!=WOUND_OPENING) {
             int a=flip?end:c,b=flip?c:end;    // left to right on screen
             Vertex v[4]={corner(a,false),corner(b,false),corner(b,true),corner(a,true)};
-            if(state>=2)for(Vertex &vertex:v)woundVertex(vertex,state);
+            if(state>=WOUND_EDGE)for(Vertex &vertex:v)woundVertex(vertex,state);
             quad(out,v[0],v[1],v[2],v[3]);
         }
         c=end;

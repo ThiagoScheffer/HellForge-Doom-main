@@ -322,10 +322,15 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 slider("gore_impact_strength","Impact strength",&s.goreImpactStrength,.5,1.5,.1,
                     "Scales Horror cosmetic feedback.",
                     [](const Settings &d){return horrorGoreMode(d)&&d.blood;}),
-                check("wounds","Wound holes",&s.wounds,
-                    "Bullets and pellets leave holes with ragged bloody edges, dark torn rims and short blood smears. "
-                    "The marks follow the monster's animation. Close hits widen a hole; seen from the side it closes. "
-                    "Drawing only: the monster is hit as always."),
+                check("gore_recognizable_gibs","Recognizable giblets",&s.goreRecognizableGibs,
+                    "Use one featured sprite in compatible Horror fragment bursts.",
+                    [](const Settings &d){return horrorGoreMode(d)&&d.blood&&d.goreFragments;}),
+                check("gore_fatal_appearance","Fatal corpse appearance",&s.goreFatalAppearance,
+                    "Deepens compatible verified Horror corpse artwork.",
+                    [](const Settings &d){return horrorGoreMode(d)&&d.blood&&d.goreHeads;}),
+                choice("wounds","Wound presentation",&s.wounds,{"Off","Classic","Deep"},{0,1,2},
+                    "Classic leaves transparent wound openings. Deep paints shaded, opaque recesses. "
+                    "Both follow the monster's animation and are cosmetic."),
                 check("varied_deaths","Varied deaths",&s.deathDirector,
                     "No two monsters die alike: the death frames keep their order but take new timing each kill (a snap, a "
                     "hesitation then a drop, a slump), monsters dropped by one blast differ on purpose, and the body settles "

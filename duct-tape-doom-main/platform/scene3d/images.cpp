@@ -598,6 +598,8 @@ static LivingMaterial livingSurfaceProfile(const char *name) {
         {"RP2_1",{LS_BLOOD_FLOW}}, {"RP2_2",{LS_BLOOD_FLOW}}, {"RP2_3",{LS_BLOOD_FLOW}}, {"RP2_4",{LS_BLOOD_FLOW}},
         {"WALL58_1",{LS_BLOOD_FLOW,1}}, {"WALL58_2",{LS_BLOOD_FLOW,1}}, {"WALL58_3",{LS_BLOOD_FLOW,1}},
         {"SW2_5",{LS_EYE_SWITCH}}, {"SW2_6",{LS_EYE_SWITCH,1}},
+        {"SW2_7",{LS_SKULL_SWITCH}}, {"SW2_8",{LS_SKULL_SWITCH,1}},
+        {"SW2_1",{LS_SKULL_SWITCH,2}}, {"SW2_2",{LS_SKULL_SWITCH,3}},
         {"SW2_4",{LS_SKULL_SWITCH,4}},
         {"SNAK7_1",{LS_INTESTINES}}, {"SNAK8_1",{LS_INTESTINES,1}},
         {"W65B_1",{LS_FIRE,1}}, {"W65B_2",{LS_FIRE,1}},
@@ -618,13 +620,16 @@ static bool livingArtworkFits(LivingMaterial material,int width,int height) {
     if(material.profile==LS_MARBLE_FACES)return width==128&&height==128;
     if(material.profile==LS_INTESTINES)return width==64&&height==128;
     if(material.profile!=LS_SKULL_SWITCH)return true;
+    if(material.variant<2)return width==36&&height==38;
+    if(material.variant<4)return width==22&&height==26;
     return width==53&&height==41;
 }
 // Adjacent patches with the same material can animate as one wall. Leave
 // unrelated or ambiguous overlapping composites on the normal path.
 static void setLivingWallProfile(Image &image,int index,const char *name) {
     LivingMaterial material=livingSurfaceProfile(name);
-    if(material.profile!=LS_NONE&&livingArtworkFits(material,image.width,image.height)) {
+    const bool fixedSkull=material.profile==LS_SKULL_SWITCH&&material.variant<4;
+    if(!fixedSkull&&material.profile!=LS_NONE&&livingArtworkFits(material,image.width,image.height)) {
         image.livingProfile=material.profile;image.livingVariant=material.variant;
         image.livingBounds={0,0,image.width,image.height};
         return;
@@ -635,11 +640,25 @@ static void setLivingWallProfile(Image &image,int index,const char *name) {
         LivingMaterial candidate=livingSurfaceProfile(patchName);
         if(candidate.profile==LS_NONE||bounds[0]>=bounds[2]||bounds[1]>=bounds[3]||
            !livingArtworkFits(candidate,bounds[2]-bounds[0],bounds[3]-bounds[1]))continue;
+        if(candidate.profile==LS_SKULL_SWITCH&&candidate.variant<4) {
+            int rect[4];
+            int lump=R_TexturePatchPlacement(index,part,patchName,rect);
+            const auto *art=doom_wall_immersion::findArtwork(patchName);
+            uint32_t fingerprint=art?art->fingerprint:candidate.variant==0?0x60c9cdfcu:0x8957fd8au;
+            if(!matchesPatch(lump,fingerprint))continue;
+        }
         if(selected<0) {
             selected=part;material=candidate;image.livingBounds=bounds;
             continue;
         }
         auto &region=image.livingBounds;
+        // WOOD4 stacks a pressed skull above a dormant skull with the same x origin.
+        if(joined<0&&material.profile==LS_SKULL_SWITCH&&material.variant==3&&
+           candidate.profile==LS_SKULL_SWITCH&&candidate.variant==2&&
+           region[0]==bounds[0]&&region[2]==bounds[2]&&bounds[1]-region[1]==58) {
+            joined=part;material.variant=5;region[3]=bounds[3];
+            continue;
+        }
         if(joined>=0||material.profile!=candidate.profile||material.variant!=candidate.variant||
            bounds[1]!=region[1]||bounds[3]!=region[3]||
            (bounds[0]!=region[2]&&bounds[2]!=region[0]))return;
