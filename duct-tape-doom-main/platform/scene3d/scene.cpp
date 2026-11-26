@@ -900,9 +900,16 @@ FrameView prepareFrame(int w,int h) {
         const bool starport=episodeAtmosphereNow==3;
         const bool city=episodeAtmosphereNow==4;
         const bool bloodHell=episodeAtmosphereNow==5;
-        camera.weather[3]=(settings.weather||inferno||deimos||bloodHell)&&camera.effects[2]==0?
-            stormFlashNow:0;
-        if(camera.weather[3]>0) {
+        // Preserve existing weather/profile and fixed-colormap
+        // restrictions for both diffuse flashes and visible bolts.
+        const bool stormVisualsAllowed =
+            (settings.weather || inferno || deimos || bloodHell) &&
+            camera.effects[2] == 0;
+        camera.weather[3] = stormVisualsAllowed ? stormFlashNow : 0.f;
+        // The distant bolt may remain visible after the diffuse
+        // environmental flash has ended.
+        if (stormVisualsAllowed &&
+            (camera.weather[3] > 0.f || stormBoltNow > 0.f)) {
             camera.style[1]=stormBoltAzimuthNow;
             camera.style[2]=stormBoltNow;
             camera.style[3]=stormBoltSeedNow;

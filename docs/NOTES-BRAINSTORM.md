@@ -409,8 +409,17 @@ increate light bolts to improve visuals on rain atmosphere
 
 
 
+notes to ideas:
 
 
+check if how and if possible to add every light source to casts light.
+so textures of lights become real light sources, if no light them no render waste, and room will be dark.
+skies are source of light also, but will cast only when player is near a openspace or it have a celing window.
+
+can we add items a small grounded shadow? avoiding it shadow to look weird or floating?
+
+
+Logical lights only?
 
 https://doom.fandom.com/wiki/Thing_types
 https://www.doomwiki.org/wiki/DeHackEd#Code_pointers

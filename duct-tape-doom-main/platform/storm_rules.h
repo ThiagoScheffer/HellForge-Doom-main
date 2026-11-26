@@ -52,6 +52,27 @@ inline float pulse(int age) {
     default:return 0;
     }
 }
+inline constexpr int boltLifetimeTics = 10;
+
+// Keep the original two bright pulses, improve the visible
+// connection between them, and finish with a short fading tail.
+// Independent of the diffuse environmental flash envelope.
+inline float boltPulse(int age) {
+    switch (age) {
+    case 0: return .26f;
+    case 1: return 1.f;
+    case 2: return .55f;
+    case 3: return .26f;
+    case 4: return .20f;
+    case 5: return .72f;
+    case 6: return .42f;
+    case 7: return .24f;
+    case 8: return .13f;
+    case 9: return .06f;
+    default: return 0.f;
+    }
+}
+
 inline Frame advance(State &s,int tic,int rate,int mode,bool rainActive,bool strongFlashes,
                      std::uint32_t seed,bool visibleBolts=true) {
     Frame f{};
@@ -90,9 +111,12 @@ inline Frame advance(State &s,int tic,int rate,int mode,bool rainActive,bool str
         float strength=s.kind==Kind::Close?.70f:s.kind==Kind::Medium?.53f:.32f;
         if(!strongFlashes)strength=std::min(strength,.19f);
         f.flash=pulse(age)*strength;
-        // A branch lives only during the visible pulses, with a controlled
-        // gain. Restrict it to the first seven tics; weak afterglow has no bolt.
-        f.bolt=visibleBolts&&s.hasBolt&&age>=0&&age<=6?f.flash:0.f;
+        // The visible branch has its own short envelope while
+        // retaining the existing distance and reduced-flash limits.
+        f.bolt = visibleBolts && s.hasBolt &&
+                 age >= 0 && age < boltLifetimeTics
+            ? boltPulse(age) * strength
+            : 0.f;
         f.azimuth=s.boltAzimuth;
         f.boltSeed=s.boltSeed;
     }
