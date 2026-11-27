@@ -346,10 +346,14 @@ void applySettings() {
     if(!settings.accelerated||!settings.blood||!advancedGoreMode(settings)||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
     if(!settings.accelerated||!settings.fireballWallMelt||settings.fireballWallMeltIntensity<=0.f)clearThermalWallMelts();
-    R_BeforeLevelReset=+[]{resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();};
+    R_BeforeLevelReset=+[]{resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();resetFootprints();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
+    applyFootprintSettings();
+#ifdef DOOM_BOOM_SECTORS
+    R_PlayerTeleported=settings.accelerated&&settings.environmentalFootprints?cancelEnvironmentalFootstep:nullptr;
+#endif
     if(!ragdollDeathsEnabled(settings))ragdollsShutdown();
     ED_ValidateConfig(&settings.encounter);ED_Configure(&settings.encounter);
     P_AcidConfigure(settings.corrosiveBarrels);
@@ -531,6 +535,9 @@ void sceneShutdown() {
     cancelRelight();
     P_AcidVisualBurst=nullptr;P_AcidVisualCoat=nullptr;P_AcidVisualForget=nullptr;P_AcidVisualClear=nullptr;
     awarenessBeam={};R_UpdateFlashlightAwareness=nullptr;R_FlashlightIlluminates=nullptr;
+#ifdef DOOM_BOOM_SECTORS
+    R_PlayerTeleported=nullptr;
+#endif
     R_BeforeLevelReset=nullptr;R_AcceleratedView=nullptr;R_BeforeTic=nullptr;R_MuzzleFlash=nullptr;R_WallImpact=nullptr;R_RocketImpact=nullptr;R_DoorRocketImpact=nullptr;R_BFGHit=nullptr;R_DoorMotion=nullptr;R_DoorDamage=nullptr;R_CraterCrumble=nullptr;R_SurfaceChip=nullptr;R_SolidBulletImpact=nullptr;R_RubbleImpact=nullptr;R_DamageHit=nullptr;R_BloodHit=nullptr;R_GoreHit=nullptr;R_GoreShotEnd=nullptr;R_GoreForget=nullptr;R_PlaneImpact=nullptr;R_ShotPassed=nullptr;r_uncapped=0;v_overlayactive=0;
     lightBlockers.clear();flashes={};oldThings.clear();oldHeights.clear();
     clearLevelGeometry();

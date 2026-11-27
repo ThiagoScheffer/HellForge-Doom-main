@@ -35,6 +35,26 @@ static void run(){
   }
  }
  check(seen.size()==registry.size(),"all settings reachable exactly once");
+ Settings footprintDefaults;
+ check(!footprintDefaults.environmentalFootprints&&footprintDefaults.footprintWater&&
+       footprintDefaults.footprintBlood&&footprintDefaults.footprintMud&&footprintDefaults.footprintPersistence==1,
+       "Footprints default off with all materials and Normal persistence selected");
+ const auto &master=registry.at("environmental_footprints");
+ const auto &water=registry.at("footprint_water");
+ check(!water.isEnabled(footprintDefaults),"Footprint children depend on the master");
+ readOption(footprintDefaults,"environmental_footprints",1);
+ footprintDefaults.accelerated=1;footprintDefaults.blood=0;
+ check(master.isEnabled(footprintDefaults)&&water.isEnabled(footprintDefaults),"Footprints are independent of global blood");
+ footprintDefaults.accelerated=0;
+ check(!master.isEnabled(footprintDefaults)&&!water.isEnabled(footprintDefaults),"Classic disables footprint controls");
+ readOption(footprintDefaults,"footprint_water",0);
+ check(!footprintDefaults.footprintWater&&footprintDefaults.footprintBlood&&footprintDefaults.footprintMud,
+       "Footprint material choices are independent");
+ readOption(footprintDefaults,"footprint_persistence",2);
+ readOption(footprintDefaults,"footprint_persistence",3);
+ check(footprintDefaults.footprintPersistence==2,"Invalid footprint persistence leaves the previous valid choice");
+ choose("environmental_footprints");
+ check(!strcmp(panel.tabs[panel.tab].title,"Atmosphere"),"Footprints appear in Atmosphere");
  Settings illumination;
  check(illumination.lightingModel==doom_lighting_model::Enhanced,"older profiles default to Enhanced");
  for(int model:{0,1,2}) {
@@ -147,6 +167,12 @@ static void run(){
  check(settings.skyFireSmoke&&restored.skyFireSmoke&&written.count("sky_fire_smoke"),"sky fire applies and persists");
  check(!settings.goreBodyDamage&&!restored.goreBodyDamage&&written.count("gore_body_damage"),
        "Body damage applies and persists");
+ check(written.count("environmental_footprints")&&written.count("footprint_water")&&written.count("footprint_blood")&&
+       written.count("footprint_mud")&&written.count("footprint_persistence")&&
+       restored.environmentalFootprints==settings.environmentalFootprints&&
+       restored.footprintWater==settings.footprintWater&&restored.footprintBlood==settings.footprintBlood&&
+       restored.footprintMud==settings.footprintMud&&restored.footprintPersistence==settings.footprintPersistence,
+       "All footprint values round-trip through the canonical registry");
  check(!registry.count("gore_limbs")&&!written.count("gore_limbs"),"Unsupported limb control is hidden");
  printf("PASS F4 rework: %d checks, %zu settings, %zu categories\n",checks,registry.size(),panel.tabs.size());fflush(stdout);std::exit(0);
 }

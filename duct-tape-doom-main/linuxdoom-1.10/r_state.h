@@ -107,6 +107,7 @@ extern side_t*		sides;
 /* Optional native renderer hooks. The classic/headless builds leave these null. */
 extern void (*R_AcceleratedView)(player_t *player);
 extern void (*R_BeforeTic)(void);
+extern void (*R_PlayerTeleported)(const mobj_t *actor);
 /* Optional simulation-time flashlight awareness; null in headless builds. */
 extern void (*R_UpdateFlashlightAwareness)(void);
 extern int (*R_FlashlightIlluminates)(const mobj_t *actor);

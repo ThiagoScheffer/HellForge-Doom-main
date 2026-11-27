@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="6a831cf77b8dcb39e21430227a786dd3ea6c05d4e49a376e0f7f34b2562f6ae9">
+<settings source="platform/settings_panel.cpp" source_sha256="70b3e5e25a6663e0367247296a0aa5d69c8869ea172db8f1a04ceb1ea5de2a82">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -209,6 +209,11 @@
   <option key="stippled_shadows" title="Stippled shadow edges" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="flashlight_shadows" title="Flashlight silhouettes" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="player_shadow" title="Player shadow" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="environmental_footprints" title="Environmental Footprints" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="footprint_water" title="Wet water footprints" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="footprint_blood" title="Blood texture footprints" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="footprint_mud" title="Muddy footprints" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="footprint_persistence" title="Footprint persistence" category="Atmosphere" kind="choice" choices="0=Short|1=Normal|2=Long" />
   <option key="fog" title="Atmospheric fog" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_shafts" title="Sunbeams" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_scatter" title="Sunbeam scattering" category="Atmosphere" kind="check" choices="0=Off|1=On" />

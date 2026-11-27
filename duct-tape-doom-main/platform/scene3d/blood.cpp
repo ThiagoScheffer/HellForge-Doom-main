@@ -1,9 +1,14 @@
 /* Blood splats on floors, walls and ceilings from hits, and pools under corpses. */
 #include "internal.h"
+#include "footprint_rules.h"
+#include "../material_light_coverage.h"
+#include "../../../map_world.h"
 extern "C" {
 #include "p_solid.h"
 #include "p_digwall.h"
 }
+
+extern const lab::MapWorld *SV_MapWorld();
 
 namespace doom3d {
 extern "C" int P_IsSawLineAttack(void);
@@ -43,7 +48,9 @@ const std::vector<byte> &bloodPalette() {
     bloodShadesLoaded=true;
     int sprite=Game_Sprite(GAME_SPRITE_BLOOD);
     if(sprite<0||sprite>=numsprites)return bloodShades;
-    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    const int paletteLump=W_CheckNumForName("PLAYPAL");
+    if(paletteLump<0||W_LumpLength(paletteLump)<768)return bloodShades;
+    const auto *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
     std::vector<std::pair<float,byte>> pixels;
     const auto &blood=sprites[sprite];
     for(int frame=0;frame<blood.numframes;++frame) {
@@ -87,6 +94,24 @@ Image &bloodSpriteImage(int lump,int tint,int &key) {
     for(size_t i=0;i<pixels.size();i+=2)pixels[i]=bloodTintIndex(pixels[i],tint);
     return images.emplace(key,upload(source.width,source.height,pixels.data(),source.left,source.top)).first->second;
 }
+template<class PutPixel>
+static void paintFootprintMask(int depletion,PutPixel put) {
+    // Toe at the top, heel at the bottom. The asymmetric tread is mirrored by geometry.
+    constexpr int width=16,height=32;
+    const uint32_t seed=hash32(bloodFootHeavy*7919u+17u);
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+        float px=(x+0.5f-8.f)/7.f,py=(y+0.5f)/32.f;
+        float toe=std::pow(px,2.f)+std::pow((py-.23f)/.22f,2.f);
+        float heel=std::pow((px+.08f)/.72f,2.f)+std::pow((py-.82f)/.16f,2.f);
+        bool sole=toe<1.f||(py>.31f&&py<.63f&&px>-.72f&&px<.48f-(py-.31f)*.35f)||heel<1.f;
+        if(!sole)continue;
+        float noise=hashUnit(x,y,seed^0x41a7u);
+        bool tread=(y>=8&&y<=19&&y%5==0&&x>3)||(y>=23&&y%4==0&&x<11);
+        float threshold=depletion==0?.08f:depletion==1?.33f:.64f;
+        if(noise<threshold||(tread&&noise<.75f))continue;
+        put(x,y,.18f+.30f*hashUnit(x,y,seed^0xc317u));
+    }
+}
 static Image &bloodImage(int variant) {
     int key=bloodKeyBase+variant;
     auto found=images.find(key);if(found!=images.end())return found->second;
@@ -120,21 +145,7 @@ static Image &bloodImage(int variant) {
             put(x,y,0.12f+0.35f*streak*(1-0.5f*along));
         }
     } else if(footprint) {
-        // Toe at the top, heel at the bottom. An asymmetric arch and tread
-        // make the mirrored masks distinct; later variants lose coverage.
-        int depletion=variant-bloodFootHeavy;
-        for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
-            float px=(x+0.5f-8.f)/7.f,py=(y+0.5f)/32.f;
-            float toe=std::pow(px,2.f)+std::pow((py-.23f)/.22f,2.f);
-            float heel=std::pow((px+.08f)/.72f,2.f)+std::pow((py-.82f)/.16f,2.f);
-            bool sole=toe<1.f||(py>.31f&&py<.63f&&px>-.72f&&px<.48f-(py-.31f)*.35f)||heel<1.f;
-            if(!sole)continue;
-            float noise=hashUnit(x,y,seed^0x41a7u);
-            bool tread=(y>=8&&y<=19&&y%5==0&&x>3)||(y>=23&&y%4==0&&x<11);
-            float threshold=depletion==0?.08f:depletion==1?.33f:.64f;
-            if(noise<threshold||(tread&&noise<.75f))continue;
-            put(x,y,.18f+.30f*hashUnit(x,y,seed^0xc317u));
-        }
+        paintFootprintMask(variant-bloodFootHeavy,put);
     } else if(variant>=bloodSpeckFirst) {
         // A drop's splat at one texel a unit: a blob and a stray texel or two.
         float center=width*0.5f,radius=1.6f+0.6f*(variant-bloodSpeckFirst)+0.4f*hashUnit(0,0,seed);
@@ -230,19 +241,44 @@ static std::vector<BloodPool> severePools;
 struct PooledCorpse { CorpseLifetime lifetime=0;bool seen=false,dry=false; };
 static std::unordered_map<const mobj_t*,PooledCorpse> pooledCorpses;
 static unsigned bloodLevelSerial;
-constexpr int bloodTransferTics=2*TICRATE,maxPrintsPerTrail=20;
-constexpr float footprintStride=20.f,footprintLength=17.f,bootOffset=4.5f;
-constexpr float poolFreshSeconds=8.f,footprintLifetime=45.f;
-constexpr size_t maxFootprints=96;
-struct BloodFootprint {float x,y,born,angle;int sector,variant;bool flip;};
-struct BloodFootstepState {
-    bool initialized=false,inside=false,left=true;
-    const mobj_t *actor=nullptr; // Identity only; never dereferenced after the current tic.
-    int player=-1,trailStart=-1,prints=0,tint=0,lastTic=-1;
-    float x=0,y=0,stride=0;
+using footprint::Contact;
+using footprint::Material;
+using footprint::Origin;
+constexpr float footprintLength=17.f,bootOffset=4.5f,poolFreshSeconds=8.f;
+struct Footprint {
+    float x,y,born,angle;
+    int sector,flat,stage;
+    Contact source;
+    float lifetime;
+    bool flip;
+    fixed_t supportHeight;
+    unsigned supportRevision;
 };
-static BloodFootstepState footsteps;
-static std::vector<BloodFootprint> bloodFootprints;
+static footprint::Tracker footsteps;
+static std::vector<Footprint> footprints;
+
+void resetFootprints() {
+    footsteps={};
+    footprints.clear();
+}
+static bool environmentalEnabled() {
+    return settings.accelerated&&settings.environmentalFootprints&&Game_HasEffect(GAME_EFFECT_ENVIRONMENTAL_FOOTPRINTS);
+}
+static bool materialEnabled(Material material) {
+    switch(material) {
+    case Material::Water: return settings.footprintWater!=0;
+    case Material::Blood: return settings.footprintBlood!=0;
+    case Material::Mud: return settings.footprintMud!=0;
+    default: return false;
+    }
+}
+void applyFootprintSettings() {
+    const bool enabled=environmentalEnabled();
+    auto disabled=[enabled](Contact c){return c.origin==Origin::Flat&&(!enabled||!materialEnabled(c.material));};
+    if(disabled(footsteps.trail.carry))footsteps.trail={};
+    footprints.erase(std::remove_if(footprints.begin(),footprints.end(),
+        [&](const Footprint &p){return disabled(p.source);}),footprints.end());
+}
 namespace {
 // A critical injury is a compact impact, not a pressurized fountain.
 // Five bounded effects can coexist, each with just six tiny ballistic drops.
@@ -493,7 +529,7 @@ static void checkBloodLevel() {
     if(bloodLevelSerial==r_levelserial)return;
     bloodFloors.clear();bloodWalls.clear();acidFloors.clear();acidWalls.clear();bloodPools.clear();pooledCorpses.clear();
     clearWallAmbienceBlood();
-    bloodFootprints.clear();footsteps={};bloodLevelSerial=r_levelserial;
+    resetFootprints();bloodLevelSerial=r_levelserial;
 }
 void dryCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime) {
     if(!lifetime||corpseLifetime(thing)!=lifetime)return;
@@ -621,18 +657,17 @@ void bloodHit(mobj_t *target,mobj_t *shooter,fixed_t fx,fixed_t fy,fixed_t fz,fi
 }
 // A rotated rectangle of blood clipped to its sector's floor (or ceiling)
 // polygons: size across, stretched along angle.
-static void flatBlood(int variant,int sectorIndex,float cx,float cy,float size,float angle,float stretch,bool flip,bool ceiling,
-                      float wet,float dark,float wash,const Uniforms &camera) {
+static void emitFloorDecal(const Image &image,std::vector<Vertex> &out,int sectorIndex,
+                           float cx,float cy,float size,float angle,float stretch,bool flip,bool ceiling,
+                           float wet,float dark,float wash,const Uniforms &camera) {
+    if(sectorIndex<0||sectorIndex>=numsectors||size_t(sectorIndex)>=sectorFloors.size())return;
     const sector_t &sector=sectors[sectorIndex];
-    if((ceiling?sector.ceilingpic:sector.floorpic)==skyflatnum)return;
-    const Image &image=bloodImage(variant);
     float h=size*0.5f,w=h*stretch*image.width/std::max(1,image.height),c=std::cos(angle),s=std::sin(angle),reach=std::hypot(w,h);
     Point across={c,s},up={-s,c};
     auto corner=[&](float u,float v){return Point{cx+across.x*u+up.x*v,cy+across.y*u+up.y*v};};
     std::vector<Point> square={corner(-w,-h),corner(w,-h),corner(w,h),corner(-w,h)};
     float lift=decalLift(cx,cy,camera),z=ceiling?ceilZ(&sector)-lift:floorZ(&sector)+lift,light=lighting(&sector);
     unsigned mode=MODE_BLOOD|sectorMode(&sector);
-    auto &out=batches[bloodKeyBase+variant];
     for(int leaf:sectorFloors[sectorIndex]) {
         const auto &b=floorBounds[leaf];
         if(b[2]<cx-reach||b[0]>cx+reach||b[3]<cy-reach||b[1]>cy+reach)continue;
@@ -648,6 +683,15 @@ static void flatBlood(int variant,int sectorIndex,float cx,float cy,float size,f
         for(size_t n=1;n+1<polygon.size();++n)
             for(Point p:{polygon[0],polygon[n],polygon[n+1]})out.push_back(vertex(p));
     }
+}
+static void flatBlood(int variant,int sectorIndex,float cx,float cy,float size,float angle,float stretch,bool flip,bool ceiling,
+                      float wet,float dark,float wash,const Uniforms &camera) {
+    if(sectorIndex<0||sectorIndex>=numsectors)return;
+    const sector_t &sector=sectors[sectorIndex];
+    if((ceiling?sector.ceilingpic:sector.floorpic)==skyflatnum)return;
+    const Image &image=bloodImage(variant);
+    emitFloorDecal(image,batches[bloodKeyBase+variant],sectorIndex,cx,cy,size,angle,stretch,
+                   flip,ceiling,wet,dark,wash,camera);
 }
 // Wet blood steps from glossy to matte, darkening as it dries; values move
 // in quarters and eighths at tic-rate ages, never smoothly.
@@ -676,30 +720,69 @@ static float rainWash(bool rained,float age,float &dark,float &spread) {
     float wash=std::clamp(std::floor((age-6)/15*8)/8,0.0f,1.0f);
     return wash>=1?-1:pale*2+wash;
 }
-// Track only the displayed player. Pool owners are identity tokens and are
-// deliberately never dereferenced here.
-void tickBloodFootsteps() {
-    checkBloodLevel();
-    if(!settings.accelerated||totalkills>=200||levelSerial!=r_levelserial||!bloodOn()||
-       displayplayer<0||displayplayer>=MAXPLAYERS) {footsteps={};return;}
-    const player_t &player=players[displayplayer];const mobj_t *mo=player.mo;
-    if(!mo||player.health<=0||mo->health<=0||!mo->subsector) {footsteps={};return;}
-    float x=units(mo->x),y=units(mo->y),z=units(mo->z),now=gameSeconds();
-    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)) {footsteps={};return;}
-    if(!footsteps.initialized||footsteps.player!=displayplayer||footsteps.actor!=mo||leveltime<footsteps.lastTic||
-       leveltime-footsteps.lastTic>1) {
-        footsteps={};footsteps.initialized=true;footsteps.player=displayplayer;footsteps.actor=mo;footsteps.x=x;footsteps.y=y;
+// Test the live base flat. Animation frame translation is a rendering detail.
+struct FootprintFloor {
+    int flat=-1;
+    Material material=Material::None;
+    bool blocked=true;
+};
+static FootprintFloor footprintFloor(int index) {
+    const sector_t &sector=sectors[index];
+    const int pic=sector.floorpic;
+    if(pic<0||pic>=numflats||pic==skyflatnum||firstflat<0||firstflat>=numlumps||
+       pic>=numlumps-firstflat)return {};
+#ifdef DOOM_BOOM_SECTORS
+    if(sector.heightsec>=0)return {};
+#endif
+    char name[9]={};
+    std::memcpy(name,lumpinfo[firstflat+pic].name,8);
+    for(char &c:name)if(c>='a'&&c<='z')c=char(c-'a'+'A');
+    if(!name[0]||Game_HotFlat(name)||P_HazardSectorDamage(&sector)>0||suppressHazardFloorBlood(index))return {};
+    auto material=footprint::doomFlatMaterial(name);
+    if(material!=Material::None)return {pic,material,false};
+    int next;
+    const bool animatedLiquid=Game_LiquidFlat(name)!=GAME_LIQUID_NONE&&P_PicAnimationNext(false,pic,&next)>0;
+    const bool sludge=!std::strncmp(name,"SLIME",5)&&
+        std::strcmp(name,"SLIME13")&&std::strcmp(name,"SLIME14")&&
+        std::strcmp(name,"SLIME15")&&std::strcmp(name,"SLIME16");
+    return {pic,Material::None,animatedLiquid||sludge||Game_FlatSurface(name)==GAME_SURFACE_LIQUID};
+}
+static const subsector_t *footprintSubsector(float x,float y) {
+    constexpr double min=INT32_MIN/double(FRACUNIT),max=INT32_MAX/double(FRACUNIT);
+    if(!(x>=min&&x<=max&&y>=min&&y<=max))return nullptr;
+    return R_PointInSubsector(fixed_t(double(x)*FRACUNIT),fixed_t(double(y)*FRACUNIT));
+}
+static bool editedSupport(float x,float y,float z) {
+    return SV_Active()&&(SV_Edited(x,y,z)||SV_Edited(x,y,z-2.f)||
+                        SV_Trace(x,y,z+2.f,0,0,-4.f,nullptr,nullptr)>=1.f);
+}
+static unsigned footprintSupportRevision() {
+    const auto *world=SV_MapWorld();
+    return world?world->revision():0;
+}
+static bool printSupported(const Footprint &p) {
+    const sector_t *sector=&sectors[p.sector];
+    const float z=units(sector->floorheight);
+    const float c=std::cos(p.angle),s=std::sin(p.angle);
+    const float halfLength=footprintLength*.5f,halfWidth=halfLength*.5f;
+    auto supported=[&](float x,float y){
+        const auto *sub=footprintSubsector(x,y);
+        if(!sub||sub->sector!=sector)return false;
+        const auto leaf=size_t(sub-subsectors);
+        if(leaf>=floors.size()||floors[leaf].size()<3||
+           !doom_material_light::insideConvex(floors[leaf],x,y))return false;
+        return !editedSupport(x,y,z);
+    };
+    if(!supported(p.x,p.y))return false;
+    for(float u:{-halfWidth,0.f,halfWidth})for(float v:{-halfLength,0.f,halfLength}) {
+        if(u==0.f&&v==0.f)continue;
+        if(!supported(p.x+c*u-s*v,p.y+s*u+c*v))return false;
     }
-    footsteps.lastTic=leveltime;
-    float dx=x-footsteps.x,dy=y-footsteps.y,moved=std::hypot(dx,dy);
-    footsteps.x=x;footsteps.y=y;
-    if(moved>96.f) {footsteps={};return;}
-    bool grounded=mo->z<=mo->floorz+2*FRACUNIT;
-    const sector_t *current=mo->subsector->sector;
-    int currentIndex=int(current-sectors);
-    if(currentIndex<0||currentIndex>=numsectors) {footsteps={};return;}
+    return true;
+}
+static Contact corpsePoolContact(float x,float y,float z,float now) {
     const BloodPool *contact=nullptr;float nearest=INFINITY;
-    if(grounded)for(const auto &pool:bloodPools) {
+    for(const auto &pool:bloodPools) {
         float age=now-pool.born;
         if(age<0||age>poolFreshSeconds||pool.sector<0||pool.sector>=numsectors)continue;
         const sector_t *surface=&sectors[pool.sector];
@@ -714,43 +797,86 @@ void tickBloodFootsteps() {
         if(SV_Active()&&distance>.01f&&SV_Trace(x,y,z+2,px,py,0,nullptr,nullptr)<1.f)continue;
         contact=&pool;nearest=distance;
     }
-    if(contact) {
-        footsteps.inside=true;footsteps.tint=contact->tint;footsteps.trailStart=-1;
-        footsteps.stride=0;footsteps.prints=0;footsteps.left=true;return;
+    return contact?Contact{Material::Blood,Origin::Pool,contact->tint}:Contact{};
+}
+
+void cancelEnvironmentalFootstep(const mobj_t *actor) {
+    if(environmentalEnabled())footsteps.teleported(actor);
+}
+
+void tickBloodFootsteps() {
+    checkBloodLevel();
+    const bool environmental=environmentalEnabled();
+    const bool legacy=settings.accelerated&&totalkills<200&&bloodOn();
+    if((!environmental&&!legacy)||gamestate!=GS_LEVEL||floors.empty()||levelSerial!=r_levelserial||
+       displayplayer<0||displayplayer>=MAXPLAYERS) {footsteps={};return;}
+    const player_t &player=players[displayplayer];
+    const mobj_t *mo=player.mo;
+    if(!mo||player.health<=0||mo->health<=0||!mo->subsector||!mo->subsector->sector) {
+        footsteps={};return;
     }
-    if(footsteps.inside) {
-        footsteps.inside=false;footsteps.trailStart=leveltime;footsteps.stride=0;
-        // The exit sample marks the start, not a stride across the pool.
-        return;
+    if(environmental&&!footprints.empty()&&leveltime!=footsteps.lastTic) {
+        const bool rewound=leveltime<footsteps.lastTic;
+        const float ticTime=leveltime/float(TICRATE);
+        footprints.erase(std::remove_if(footprints.begin(),footprints.end(),
+            [&](const Footprint &p){return p.source.origin==Origin::Flat&&
+                (rewound||footprint::expired(p.source,ticTime-p.born,p.lifetime));}),footprints.end());
     }
-    if(!grounded) {footsteps.stride=0;return;}
-    int age=leveltime-footsteps.trailStart;
-    if(footsteps.trailStart<0||age<0||age>=bloodTransferTics||footsteps.prints>=maxPrintsPerTrail)return;
-    footsteps.stride+=moved;
-    if(footsteps.stride<footprintStride||moved<.001f)return;
-    footsteps.stride=std::fmod(footsteps.stride,footprintStride);
+    const float x=units(mo->x),y=units(mo->y),z=units(mo->z),now=gameSeconds();
+    float dx,dy;
+    if(!footsteps.sample(mo,displayplayer,leveltime,x,y,dx,dy))return;
+    const float moved=std::hypot(dx,dy);
+    const bool grounded=mo->z<=mo->floorz+2*FRACUNIT;
+    const int currentIndex=int(mo->subsector->sector-sectors);
+    if(currentIndex<0||currentIndex>=numsectors) {footsteps={};return;}
+    auto &trail=footsteps.trail;
+    if((footprint::legacy(trail.carry)&&!legacy)||
+       (trail.carry.origin==Origin::Flat&&(!environmental||!materialEnabled(trail.carry.material))))trail={};
+
+    Contact source;
+    bool blocked=false;
+    if(environmental&&grounded) {
+        const auto floor=footprintFloor(currentIndex);
+        const float base=units(sectors[currentIndex].floorheight);
+        blocked=floor.blocked||std::abs(z-base)>2.f||std::abs(units(mo->floorz)-base)>2.f||
+                editedSupport(x,y,base);
+        if(!blocked&&floor.material!=Material::None) {
+            if(materialEnabled(floor.material))source={floor.material,Origin::Flat,0};
+            else blocked=true;
+        }
+    }
+    if(legacy&&grounded&&!blocked&&source.origin==Origin::None)source=corpsePoolContact(x,y,z,now);
+    if(!trail.advance(source,blocked,grounded,leveltime,TICRATE,moved))return;
     float direction=std::atan2(dy,dx);
-    float facing=float(mo->angle*(2.0*doomPi/4294967296.0));
-    // When moving backwards, the toes and left/right offsets still follow
-    // the player's facing, while the trail continues along actual movement.
+    const float facing=float(mo->angle*(2.0*doomPi/4294967296.0));
     if(dx*std::cos(facing)+dy*std::sin(facing)<-.1f*moved)direction+=float(doomPi);
-    float side=footsteps.left?-bootOffset:bootOffset;
-    float fx=x-std::sin(direction)*side,fy=y+std::cos(direction)*side;
-    const subsector_t *sub=R_PointInSubsector(fixed_t(fx*FRACUNIT),fixed_t(fy*FRACUNIT));
+    const float side=trail.left?-bootOffset:bootOffset;
+    const float fx=x-std::sin(direction)*side,fy=y+std::cos(direction)*side;
+    const auto *sub=footprintSubsector(fx,fy);
     if(!sub||!sub->sector)return;
-    int sector=int(sub->sector-sectors);
-    if(sector<0||sector>=numsectors||suppressHazardFloorBlood(sector)||sub->sector->floorpic==skyflatnum||
-       std::abs(floorZ(sub->sector)-z)>2.f||
-       (size_t(sector)<sectorMist.size()&&sectorMist[sector].liquid))return;
+    const int sector=int(sub->sector-sectors);
+    if(sector<0||sector>=numsectors)return;
+    int flat=-1;
+    if(environmental) {
+        const auto floor=footprintFloor(sector);
+        if(floor.blocked||floor.material!=Material::None||
+           std::abs(units(sub->sector->floorheight)-z)>2.f)return;
+        flat=floor.flat;
+    } else if(suppressHazardFloorBlood(sector)||sub->sector->floorpic==skyflatnum||
+              std::abs(floorZ(sub->sector)-z)>2.f||
+              (size_t(sector)<sectorMist.size()&&sectorMist[sector].liquid))return;
     WallHit wall;
     if(firstSolidWall(x,y,z+2,-std::sin(direction)*(side<0?-1.f:1.f),
                       std::cos(direction)*(side<0?-1.f:1.f),0,std::abs(side),wall))return;
     if(SV_Active()&&SV_Trace(x,y,z+2,fx-x,fy-y,0,nullptr,nullptr)<1.f)return;
-    int variant=age*3/bloodTransferTics;
-    if(bloodFootprints.size()>=maxFootprints)bloodFootprints.erase(bloodFootprints.begin());
-    bloodFootprints.push_back({fx,fy,now,direction-float(doomPi)*.5f,sector,
-                               bloodFootHeavy+variant+32*footsteps.tint,footsteps.left});
-    footsteps.left=!footsteps.left;++footsteps.prints;
+    const bool pool=footprint::legacy(trail.carry);
+    const Footprint print{fx,fy,pool?now:leveltime/float(TICRATE),direction-float(doomPi)*.5f,
+                          sector,flat,trail.stage(leveltime,TICRATE),trail.carry,
+                          footprint::lifetime(trail.carry,settings.footprintPersistence),trail.left,
+                          sub->sector->floorheight,pool?0:footprintSupportRevision()};
+    if(!pool&&!printSupported(print))return;
+    if(footprints.capacity()==0)footprints.reserve(footprint::limit);
+    if(footprint::insert(footprints,print))trail.accepted();
 }
 static void updateCorpsePools(float now) {
     // Permanent pools are owned by one death and use the visual body if rigged.
@@ -816,6 +942,99 @@ int testCorpsePools(const mobj_t *owner,CorpseRestLocation *position) {
 }
 #endif
 
+static int footprintImageKey(Contact source,int stage) {
+    if(footprint::legacy(source)||(source.material==Material::Blood&&!bloodPalette().empty()))
+        return bloodKeyBase+bloodFootHeavy+stage+32*source.tint;
+    const int offset=source.material==Material::Water?0:source.material==Material::Mud?3:6;
+    return footprint::imageBase+offset+stage;
+}
+
+static std::array<std::array<byte,4>,2> footprintRamps;
+static bool footprintRampsReady=false;
+
+static const Image *footprintImage(int key,Material material,int stage) {
+    const auto found=images.find(key);
+    if(found!=images.end())return &found->second;
+    if(key>=bloodKeyBase)return &bloodImage(key-bloodKeyBase);
+    if(material!=Material::Water&&!footprintRampsReady) {
+        int lump=W_CheckNumForName("PLAYPAL");
+        if(lump<0||W_LumpLength(lump)<768)return nullptr;
+        const auto *palette=(const byte*)W_CacheLumpNum(lump,PU_CACHE);
+        constexpr int colors[2][4][3]={
+            {{47,32,21},{70,47,29},{94,65,40},{119,84,54}},
+            {{45,8,8},{78,13,13},{116,20,18},{151,32,27}}
+        };
+        for(size_t kind=0;kind<footprintRamps.size();++kind)
+        for(size_t shade=0;shade<footprintRamps[kind].size();++shade) {
+            int best=INT_MAX;
+            for(int i=0;i<256;++i) {
+                int error=0;
+                for(int c=0;c<3;++c) {
+                    int diff=palette[i*3+c]-colors[kind][shade][c];
+                    error+=diff*diff;
+                }
+                if(error<best){best=error;footprintRamps[kind][shade]=byte(i);}
+            }
+        }
+        footprintRampsReady=true;
+    }
+    const auto &ramp=footprintRamps[material==Material::Mud?0:1];
+    std::array<byte,16*32*2> pixels{};
+    paintFootprintMask(stage,[&](int x,int y,float shade){
+        const size_t i=size_t(y*16+x)*2;
+        pixels[i]=material==Material::Water?0:ramp[std::clamp(int(std::lround((shade-.18f)*10.f)),0,3)];
+        pixels[i+1]=255;
+    });
+    return &images.emplace(key,upload(16,32,pixels.data())).first->second;
+}
+
+static void buildFootprints(const Uniforms &camera,float now,bool showBlood) {
+    if(!settings.accelerated||levelSerial!=r_levelserial)return;
+    const bool environmental=environmentalEnabled();
+    const unsigned revision=environmental&&!footprints.empty()?footprintSupportRevision():0;
+    footprints.erase(std::remove_if(footprints.begin(),footprints.end(),[&](Footprint &p){
+        if(footprint::legacy(p.source)&&!showBlood)return false;
+        if(footprint::expired(p.source,now-p.born,p.lifetime))return true;
+        if(footprint::legacy(p.source))return false;
+        if(!environmental||!materialEnabled(p.source.material)||p.sector<0||p.sector>=numsectors)return true;
+        const auto floor=footprintFloor(p.sector);
+        if(floor.blocked||floor.material!=Material::None||floor.flat!=p.flat)return true;
+        const auto height=sectors[p.sector].floorheight;
+        if(height!=p.supportHeight||revision!=p.supportRevision) {
+            if(SV_Active()&&!printSupported(p))return true;
+            p.supportHeight=height;p.supportRevision=revision;
+        }
+        return false;
+    }),footprints.end());
+    for(const auto &p:footprints) {
+        if(p.sector<0||p.sector>=numsectors||camera.eye[2]<floorZ(&sectors[p.sector]))continue;
+        const float age=now-p.born;
+        if(footprint::legacy(p.source)) {
+            if(!showBlood||totalkills>=200)continue;
+            float wet,dark,spread;
+            bloodAge(age,0,3,wet,dark);
+            const float wash=rainWash(rainedOn(p.sector,p.x,p.y),age,dark,spread);
+            if(wash>=0)flatBlood(bloodFootHeavy+p.stage+32*p.source.tint,p.sector,p.x,p.y,
+                footprintLength*spread,p.angle,1,p.flip,false,wet,dark,wash,camera);
+            continue;
+        }
+        const int key=footprintImageKey(p.source,p.stage);
+        const Image *image=footprintImage(key,p.source.material,p.stage);
+        if(!image)continue;
+        float shine=0,dark=1,wash=1-footprint::pigmentCoverage(age,p.lifetime);
+        if(p.source.material==Material::Water) {
+            // Negative drying multiplier tags the wet decal payload in the world shader.
+            shine=footprint::waterShine(p.stage,age,p.lifetime);
+            dark=-footprint::waterOpacity(p.stage,age,p.lifetime);
+            wash=0;
+        } else if(p.source.material==Material::Blood&&settings.bloodShine) {
+            shine=std::max(0.f,1.f-age/3.f);
+        }
+        emitFloorDecal(*image,batches[key],p.sector,p.x,p.y,footprintLength,p.angle,1,
+                       p.flip,false,shine,dark,wash,camera);
+    }
+}
+
 void buildBlood(const Uniforms &camera) {
     buildSevereBlood(camera);
     float now=gameSeconds();
@@ -826,8 +1045,11 @@ void buildBlood(const Uniforms &camera) {
     const bool showBlood=settings.blood&&!bloodPalette().empty();
     const bool showAcid=acidLiquidOn();
     if(!showAcid){acidFloors.clear();acidWalls.clear();}
-    if(!showBlood&&!showAcid)return;
     checkBloodLevel();
+    if(!showBlood&&!showAcid) {
+        buildFootprints(camera,now,false);
+        return;
+    }
     if(showBlood) {
     updateCorpsePools(now);
     for(auto it=bloodPools.begin();it!=bloodPools.end();) {
@@ -868,16 +1090,7 @@ void buildBlood(const Uniforms &camera) {
         if(wash<0)continue;
         flatBlood(d.variant,d.sector,d.x,d.y,d.size*spread,d.angle,d.stretch,d.flip,d.ceiling,d.ceiling?0:wet,dark,wash,camera);
     }
-    if(showBlood) {
-    bloodFootprints.erase(std::remove_if(bloodFootprints.begin(),bloodFootprints.end(),
-        [&](const BloodFootprint &p){return now<p.born||now-p.born>footprintLifetime;}),bloodFootprints.end());
-    if(settings.accelerated&&totalkills<200&&levelSerial==r_levelserial)for(const auto &p:bloodFootprints) {
-        if(p.sector<0||p.sector>=numsectors||camera.eye[2]<floorZ(&sectors[p.sector]))continue;
-        float age=now-p.born,wet,dark,spread;bloodAge(age,0,3,wet,dark);
-        float wash=rainWash(rainedOn(p.sector,p.x,p.y),age,dark,spread);
-        if(wash>=0)flatBlood(p.variant,p.sector,p.x,p.y,footprintLength*spread,p.angle,1,p.flip,false,wet,dark,wash,camera);
-    }
-    }
+    buildFootprints(camera,now,showBlood);
     // Wall splats stay matte; thin spray doesn't glint believably.
     bloodWalls.erase(std::remove_if(bloodWalls.begin(),bloodWalls.end(),[&](const BloodWall &d){return now-d.born>180;}),bloodWalls.end());
     acidWalls.erase(std::remove_if(acidWalls.begin(),acidWalls.end(),[&](const BloodWall &d){return now-d.born>30;}),acidWalls.end());
@@ -957,8 +1170,9 @@ void buildBlood(const Uniforms &camera) {
     buildSpray(camera);
 }
 void bloodShutdown() {
+    footprintRampsReady=false;
     clearWallAmbienceBlood();
-    bloodFootprints.clear();footsteps={};
+    resetFootprints();
     severeBursts={};severeLevel=~0u;
     severeWallMarks.clear();
     severePools.clear();

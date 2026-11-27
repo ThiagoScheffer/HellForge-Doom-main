@@ -80,7 +80,8 @@ typedef enum {
     GAME_EFFECT_WIND,             /* made-up wind under the sky and through openings */
     GAME_EFFECT_NATURAL_FALLOFF,  /* sounds fading with distance as in air, in place of the game's own curve */
     GAME_EFFECT_FREE_AIM,         /* mouselook bullets going where the view points (else the game's own aiming) */
-    GAME_EFFECT_AUTHORED_EPISODES /* hand-picked looks for the game's own episodes (Game_Mood) */
+    GAME_EFFECT_AUTHORED_EPISODES, /* hand-picked looks for the game's own episodes (Game_Mood) */
+    GAME_EFFECT_ENVIRONMENTAL_FOOTPRINTS /* Doom flat names transfer to player boots */
 } game_effect;
 int Game_HasEffect(game_effect effect);
 

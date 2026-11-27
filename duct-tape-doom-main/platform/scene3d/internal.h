@@ -536,6 +536,9 @@ bool addBrokenFlat(std::vector<Vertex> &out,int leaf,int sector,bool ceiling,con
 // blood.cpp
 void bloodShutdown();
 void tickBloodFootsteps();
+void applyFootprintSettings();
+void resetFootprints();
+void cancelEnvironmentalFootstep(const mobj_t *actor);
 // acid.cpp
 void buildAcid(const Uniforms &camera);
 void buildIncendiary(const Uniforms &camera);

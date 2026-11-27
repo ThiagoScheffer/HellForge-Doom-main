@@ -46,6 +46,7 @@ const char *effectCost(const char *key) {
         {"texture_acid_bubbles","GPU COST: procedural detail on nearby animated nukage floors."},
         {"texture_lava_bubbles","GPU COST: procedural detail on nearby animated lava floors."},
         {"immersive_sky","GPU COST: adds cloud texture fetches and procedural horizon shading for sky pixels."},
+        {"environmental_footprints","BOUNDED COST: one player trail, sharing a 96-print limit with corpse-pool tracks."},
         {"decoration_ambience","BOUNDED COST: only maps with fewer than 200 spawned monsters; 12 bodies, 48 flies and 24 worms maximum."},
         {"corpse_decomposition","BOUNDED COST: under 200 map monsters, up to 199 corpse ages and 8 MiB estimated cached sprite variants."},
         {"reflections","HIGH GPU COST: renders the reflected scene again."},
@@ -84,6 +85,8 @@ Option slider(const char *key,const char *title,float *number,double low,double 
     option.number=number;option.low=low;option.high=high;option.step=step;option.enabled=enabled;option.items=labels;
     return option;
 }
+bool canUseFootprints(const Settings &s) {return s.accelerated&&Game_HasEffect(GAME_EFFECT_ENVIRONMENTAL_FOOTPRINTS);}
+bool hasFootprints(const Settings &s) {return s.environmentalFootprints&&canUseFootprints(s);}
 bool hasGlass(const Settings&) {return Game_HasEffect(GAME_EFFECT_WINDOW_GLASS)!=0;}
 bool hasFlashlight(const Settings&) {return Game_HasEffect(GAME_EFFECT_FLASHLIGHT)!=0;}
 bool hasFalloff(const Settings&) {return Game_HasEffect(GAME_EFFECT_NATURAL_FALLOFF)!=0;}
@@ -589,6 +592,23 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("flashlight_shadows","Flashlight silhouettes",&s.flashlightShadows,"Things caught in the flashlight throw their sprite outline onto the wall behind them.",hasFlashlight),
                 check("player_shadow","Player shadow",&s.playerShadow,"Your own sprite's shadow from the sun or the strongest light above you.")}}}},
         {"Atmosphere",{
+            {"Footprints",{
+                check("environmental_footprints","Environmental Footprints",&s.environmentalFootprints,
+                    "Walking through water, blood or mud leaves a short trail on solid floors.",
+                    canUseFootprints),
+                check("footprint_water","Wet water footprints",&s.footprintWater,
+                    "Damp bootprints darken the floor and evaporate.",
+                    hasFootprints),
+                check("footprint_blood","Blood texture footprints",&s.footprintBlood,
+                    "Map-authored blood flats leave temporary pigment. Corpse pools use their own blood settings.",
+                    hasFootprints),
+                check("footprint_mud","Muddy footprints",&s.footprintMud,
+                    "Explicitly named mud flats leave temporary earth-colored tread marks.",
+                    hasFootprints),
+                choice("footprint_persistence","Footprint persistence",&s.footprintPersistence,
+                    {"Short","Normal","Long"},{0,1,2},
+                    "Sets the lifetime of newly deposited environmental prints.",
+                    hasFootprints)}},
             {"Air",{
                 check("fog","Atmospheric fog",&s.fog,"Height fog and soft cloud layers derived from pits, liquids and damaging floors."),
                 check("sun_shafts","Sunbeams",&s.sunShafts,

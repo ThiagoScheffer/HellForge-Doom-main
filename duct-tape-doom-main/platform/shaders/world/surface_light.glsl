@@ -67,7 +67,7 @@ void surfaceLight(SectorLit lit,bool mapped,vec3 normal,vec3 screenNormal,bool g
     // color of its own red rather than white: a small, sharp highlight
     // in two hard steps, so a flat splat never lights up as a whole.
     bool wet=blood&&vTint.r>0.0;
-    vec3 wetColor=wet?texelFetch(paletteLUT,ivec3(round(saturate(color.rgb*1.8+0.04)*31.0)),0).rgb:vec3(0);
+    vec3 wetColor=wet?(vTint.g<0.0?vec3(1):texelFetch(paletteLUT,ivec3(round(saturate(color.rgb*1.8+0.04)*31.0)),0).rgb):vec3(0);
     // Static lights come from the bake; their dynamic copies only add
     // what it lacks: flicker, bump detail and gloss. The bake's flicker
     // groups (bakeFlicker) are already applied to it. With bake-only lights

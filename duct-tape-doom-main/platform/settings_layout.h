@@ -63,6 +63,8 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
         if(settingIs(k,{"sun_shadows","sky_light","bounce_light","bounce_tint","baked_occlusion"}))return {"Lighting","Sun / sky"};
         return {"Lighting",!strcmp(section,"Flashlight and shadows")?"Flashlight":!strcmp(section,"Live light")?"Live":"Baked"};
     }
+    if(settingIs(k,{"environmental_footprints","footprint_water","footprint_blood",
+                    "footprint_mud","footprint_persistence"}))return {"Atmosphere","Footprints"};
     if(!strcmp(tab,"Atmosphere")) {
         if(!strcmp(section,"Liquids"))return {"World detail",!strncmp(k,"caustics_",9)||!strcmp(k,"ceiling_caustics")?"Caustics":"Liquids"};
         if(!strcmp(k,"storm_volume"))return {"Audio","World"};
@@ -90,7 +92,7 @@ inline std::vector<OptionTab> settingsLayout(std::vector<OptionTab> source) {
         {"Destruction",{},{{"Surfaces",{}},{"Doors",{}},{"Collapses",{}},{"Debris",{}},{"Lights",{}},{"Effects",{}}}},
         {"World detail",{},{{"Filtering",{}},{"Surfaces",{}},{"Glass",{}},{"Living",{}},{"Screens",{}},{"Liquids",{}},{"Caustics",{}}}},
         {"Lighting",{},{{"Baked",{}},{"Windows",{}},{"Sun / sky",{}},{"Live",{}},{"Flashlight",{}}}},
-        {"Atmosphere",{},{{"Sky",{}},{"Fog",{}},{"Weather",{}},{"Particles",{}},{"Episodes",{}},{"Decorations",{}}}},
+        {"Atmosphere",{},{{"Sky",{}},{"Fog",{}},{"Weather",{}},{"Particles",{}},{"Episodes",{}},{"Decorations",{}},{"Footprints",{}}}},
         {"Audio",{},{{"Output",{}},{"Weapons",{}},{"World",{}},{"Rooms",{}}}},
         {"Mods",{},{{"Enable",{}},{"Voxels",{}},{"Smoke",{}},{"Weapons",{}},{"Gloves",{}}}},
         {"Performance",{},{{"Lights",{}},{"Monsters",{}},{"Visibility",{}},{"Diagnostics",{}}}}

@@ -17,6 +17,10 @@ This is the project’s running record of bugs, investigations, and fixes. Use t
 | HF-009 | Launcher release output omits upstream notices | Notice copies verified |
 | HF-010 | Burning City smoke has rectangular edges | Fix committed. In-game visual check open |
 
+## Environmental Footprints 1.0
+
+The accelerated Doom renderer can now transfer water, blood, and mud from live floor flats to a short boot trail. The existing corpse-pool trail shares the record budget and retains its separate blood and rain behavior. Release, Vulkan/Metal shader generation, the focused rules test, the stock Doom II MAP01 F4/config test, and scratch launcher packaging passed. GPU visual acceptance and performance measurements remain open. [Implementation, logs, and stock IWAD check locations](docs/changes/ENVIRONMENTAL-FOOTPRINTS-1.0.md).
+
 ## Smart Persistent Lighting Cache 2.0 — M1
 
 Original Doom E1M1 repeated all six static calculations on death restart and produced the same numeric results. The old key included unrelated animation-table state. Doom II MAP01 also showed misleading baking labels on actual cache hits. M1 uses stage-specific numerical inputs and reports lookup, restoration, calculation and GPU staging independently.

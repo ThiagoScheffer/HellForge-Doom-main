@@ -1,6 +1,7 @@
 /* Drawing helpers: the per-frame upload of vertices and light and sector
    data, resource binding, and the world and overlay draws the passes share. */
 #include "internal.h"
+#include "../scene3d/footprint_rules.h"
 #include "../scene3d/sky_atmosphere.h"
 #include "../scene3d/sky_effects.h"
 #include "../shaders/living_surfaces.h"
@@ -246,7 +247,7 @@ void pushWorldUniforms(SDL_GPUCommandBuffer *command,const Uniforms &view) {
     SDL_PushGPUFragmentUniformData(command,3,noBlend,sizeof(noBlend));
 }
 bool opaqueBatch(const std::pair<const int,std::vector<Vertex>> &batch) {
-    return !batch.second.empty()&&!(batch.second.front().mode&MODE_SPRITE)&&images.at(batch.first).opaque;
+    return !batch.second.empty()&&!footprint::blendedBatch(batch.first)&&!(batch.second.front().mode&MODE_SPRITE)&&images.at(batch.first).opaque;
 }
 // The world drawn opaque-first, then sky surfaces into depth and the sky into
 // uncovered pixels, then cutouts and sprites. Shared by the main view and the
@@ -373,13 +374,28 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
     auto cutouts=[&](SDL_GPUGraphicsPipeline *pipeline) {
         SDL_BindGPUGraphicsPipeline(pass,pipeline);bindWorld(pass,reflection);
         for(const auto &batch:batches) {
-            if(batch.second.empty()||(batch.second.front().mode&MODE_SPRITE)||images.at(batch.first).opaque)continue;
+            if(batch.second.empty()||footprint::blendedBatch(batch.first)||(batch.second.front().mode&MODE_SPRITE)||images.at(batch.first).opaque)continue;
             bindSurface(command,pass,batch.first,3);drawVertices(pass,batch.second);
         }
     };
     if(coverage&&cutout) {cutouts(coverage);cutouts(cutout);}
     else cutouts(world);
-    if(sprites) {SDL_BindGPUGraphicsPipeline(pass,world);bindWorld(pass,reflection);}
+    if(sprites) {
+        // Wet floor masks blend against the already shaded floor without writing depth.
+        bool wetPipelineBound=false;
+        for(int stage=0;stage<3;++stage) {
+            const auto batch=batches.find(footprint::imageBase+stage);
+            if(batch==batches.end()||batch->second.empty())continue;
+            if(!wetPipelineBound) {
+                SDL_BindGPUGraphicsPipeline(pass,world==reflectWorldPipeline?reflectTranslucentPipeline:translucentPipeline);
+                bindWorld(pass,reflection);
+                wetPipelineBound=true;
+            }
+            bindSurface(command,pass,batch->first,3);
+            drawVertices(pass,batch->second);
+        }
+        SDL_BindGPUGraphicsPipeline(pass,world);bindWorld(pass,reflection);
+    }
     for(const auto &batch:batches) {
         if(!sprites||batch.second.empty()||!(batch.second.front().mode&MODE_SPRITE))continue;
         bindSurface(command,pass,batch.first,3);drawVertices(pass,batch.second);

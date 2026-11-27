@@ -134,6 +134,8 @@ void main() {
     // color has darkened while drying, and the rain on it (blood.cpp
     // rainWash): its pale step (0-4) times two plus how much is washed away.
     bool blood=(vMode&MODE_BLOOD)!=0u;
+    // Wet floor masks share blood's mapped floor lighting and have their own blend payload.
+    bool wetPrint=blood&&vTint.g<0.0;
     uint surfaceMeta=uint(frameMean.a);
     bool wallEyeMap=(surfaceMeta&LS_WALL_EYE_MAP)!=0u;
     uint bakeFlags=uint(c.flashlightTint.w);
@@ -211,7 +213,11 @@ void main() {
     // Screen overlays do not use the sun atlas. sunU=-2 marks an explicit
     // overlay opacity in sunV, including soft PNG edges and fading flashes.
     bool overlayOpacity=sprite&&(vMode&MODE_SCREEN)!=0u&&vSun.x==-2.0;
-    if(color.a<(overlayOpacity?0.001:0.45)) discard;
+    if(wetPrint) {
+        ivec2 pixel=clamp(ivec2(floor(vUV)),ivec2(0),textureSize(image,0)-1);
+        color.a=texelFetch(image,pixel,0).g*clamp(-vTint.g,0.0,1.0);
+    }
+    if(color.a<((overlayOpacity||wetPrint)?0.001:0.45)) discard;
     // Blood the rain washes away goes texel by texel.
     float bloodStep=blood?floor(vTint.b*0.5+0.001):0.0,bloodPale=bloodStep*0.25,bloodWash=blood?max(vTint.b-bloodStep*2.0,0.0):0.0;
     if(bloodWash>0.0&&float(tileHash(ivec2(floor(vUV)),0x2f6b9d1eu)&255u)/255.0<bloodWash) discard;
@@ -229,7 +235,8 @@ void main() {
     }
     // Rained on, blood pales: its red fades toward a dull grey of its own
     // brightness, never lighter (lighter reds would read pink).
-    if(blood) color.rgb=mix(color.rgb,vec3(dot(color.rgb,vec3(0.299,0.587,0.114)))*vec3(1.0,0.92,0.86),bloodPale*0.6)*vTint.g;
+    if(wetPrint) color.rgb=vec3(0);
+    else if(blood) color.rgb=mix(color.rgb,vec3(dot(color.rgb,vec3(0.299,0.587,0.114)))*vec3(1.0,0.92,0.86),bloodPale*0.6)*vTint.g;
     // The thick rim of the glass shades the picture's edges, in light steps.
     if(glassy) color.rgb*=round((1.0-0.5*smoothstep(0.7,1.0,max(abs(screen.x),abs(screen.y))))*16.0)/16.0;
     // A dead screen shows nothing but the dark tube behind the glass, and its
@@ -397,6 +404,8 @@ void main() {
     }
     if(any(greaterThan(wallEyeLight,vec3(0))))color.rgb=max(color.rgb,wallEyeLight);
     color.rgb+=specular;
+    // The dark overlay receives the same atmospheric veil as its floor.
+    if(wetPrint) color.rgb=clamp(specular,vec3(0),vec3(0.22));
     if(mapped&&(bakeFlags&FEATURE_CAUSTICS)!=0u&&(abs(normal.z)<=0.5||(normal.z<-0.5&&(bakeFlags&FEATURE_CEILING_CAUSTICS)!=0u))) color.rgb+=caustics(vWorld,normal,sector,false);
     // FEATURE_CAUSTICS_SPRITES: things in the world (not the weapon or effect sprites)
     // near liquids catch the caustics too, in their own colors so the painted

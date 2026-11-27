@@ -194,6 +194,8 @@ P_TeleportMove(mobj_t *thing,
 
     P_SetThingPosition(thing);
 
+    if (thing->player && R_PlayerTeleported)
+        R_PlayerTeleported(thing);
     return true;
 }
 

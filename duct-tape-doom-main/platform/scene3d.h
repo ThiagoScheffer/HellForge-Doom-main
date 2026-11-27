@@ -160,6 +160,8 @@ struct Settings {
     int heatHaze=0; // Stepped raster shimmer above lava, hot floors and flames.
     int eyeAdaptation=1; // Brief stepped over/underexposure when the light changes.
     int splashes=1; // Ripple rings where things land or walk in liquids, spouts where shots hit them; bubbles and sinking in thick ones.
+    int environmentalFootprints=0, footprintWater=1, footprintBlood=1, footprintMud=1;
+    int footprintPersistence=1; // Short, Normal, Long
     int environmentEffects=1,pressureWaves=1,settlingDust=1,debrisLiquids=1,liquidRunoff=0,electricalDamage=1,rocketChunks=1;
     int hangingFragments=1,chainCollapses=1,collapseSize=12,effectBudget=128;
     int outdoorWind=1;
