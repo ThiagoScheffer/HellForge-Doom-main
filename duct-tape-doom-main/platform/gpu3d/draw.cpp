@@ -301,7 +301,15 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
             }
         } else if(environment&&gamemode!=commercial&&!doom2Art) {
             atmosphere=skyAtmosphereProfile(skyArt);
-            if(atmosphere) {
+            if(artwork==SkyArtwork::ColdMountains) {
+                const auto &scene=skyDepthScene(skyArt);
+                if(scene.atlas&&scene.atmosphere) {
+                    depthScene=&scene;
+                    depthArt=gpu(scene.atlas);
+                    atmosphere=scene.atmosphere;
+                }
+            }
+            if(atmosphere&&!depthScene) {
                 paintedScenery=skyPaintedScenery(skyArt);
                 if(paintedScenery)depthArt=gpu(paintedScenery->texture);
             }
@@ -332,10 +340,12 @@ void drawWorld(SDL_GPUCommandBuffer *command,SDL_GPURenderPass *pass,SDL_GPUGrap
             uniforms.projection={atmosphere->nearAltitude,atmosphere->nearScale,atmosphere->farScale,atmosphere->paintedSky};
             uniforms.wind={skyAtmosphereHeading[0],skyAtmosphereHeading[1],atmosphere->horizonFade,atmosphere->sceneryHaze};
             if(depthScene)uniforms.scenery={depthScene->farRadius,depthScene->farFirstRow,
-                                           float(depthScene->style),depthScene->backdropOpacity};
+                                           float(depthScene->style),depthScene->style==SkyDepthScene::Style::ShapedTerrain?
+                                               depthScene->terrainExtinction:depthScene->backdropOpacity};
             if(paintedScenery)uniforms.scenery={0,paintedScenery->firstRow,0,1};
         }
-        if(settings.skyFireSmoke&&(deep||atmosphere)) {
+        if(depthScene&&depthScene->mist)uniforms.fireSmoke=*depthScene->mist;
+        else if(settings.skyFireSmoke&&(deep||atmosphere)) {
             if(const auto *effects=skyFireSmokeData(skyArt,uniforms.scenery[0]>0.f)) {
                 uniforms.fireSmoke=*effects;
                 std::copy(skyDepthOrigin.begin(),skyDepthOrigin.end(),legacy+8);

@@ -9,6 +9,8 @@ static std::array<SkyDepthCacheEntry,(size_t)SkyArtwork::Count> skyDepthCache;
 struct SkyAtmosphereCacheEntry {
     SkyAtmosphereProfile profile;
     SkyPaintedScenery scenery;
+    SkyAtmosphereProfile terrainAtmosphere;
+    SkyDepthCacheEntry terrain;
 };
 // Only validated 256x128 composites using stock PLAYPAL enter this cache.
 // Distinct composites of the same sky fit the same tuning without sharing masks.
@@ -222,6 +224,7 @@ static void cachePaintedSky(const Image &sky,const byte *palette,const char *nam
 }
 #include "sky_depth_city.inc"
 #include "sky_depth_mountains.inc"
+#include "sky_depth_terrain.inc"
 
 static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const std::vector<int> &roof,
                                       const std::vector<SkyDepthBuilding> &buildings) {
@@ -325,6 +328,20 @@ static std::vector<byte> buildDeepSky(const Image &sky,const byte *palette,const
 static const SkyDepthCacheEntry &loadSkyDepth(const Image &sky) {
     static const SkyDepthCacheEntry invalid{};
     if(sky.skyPalette!=stockSkyPalette)return invalid;
+    if(const auto *profile=skyTerrainProfile(sky)) {
+        const auto found=skyAtmosphereCache.find(sky.skyFingerprint);
+        if(found==skyAtmosphereCache.end())return invalid;
+        auto &entry=found->second;
+        if(!entry.terrain.attempted) {
+            entry.terrain.attempted=true;
+            const auto *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+            entry.terrain.scene=buildSkyTerrain(sky,palette,*profile,entry.terrainAtmosphere);
+            if(!entry.terrain.scene.atlas&&devparm)
+                fprintf(stderr,"Sky terrain: %016llx rejected; using painted SKY1.\n",
+                        (unsigned long long)sky.skyFingerprint);
+        }
+        return entry.terrain;
+    }
     auto &cached=skyDepthCache[(size_t)sky.skyArtwork];
     if(cached.attempted)return cached;
     cached.attempted=true;

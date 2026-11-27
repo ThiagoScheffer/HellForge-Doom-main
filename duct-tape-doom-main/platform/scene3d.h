@@ -430,15 +430,20 @@ struct SkyPaintedScenery {
     float firstRow=0;
 };
 const SkyPaintedScenery *skyPaintedScenery(const Image &sky);
+struct SkyAtmosphereProfile;
+struct SkyFireSmokeGpuBlock;
 // Atlas and projection data shared by every pass that draws a depth scene.
 struct SkyDepthScene {
     GpuTextureRef atlas;
     std::array<float,4> shells{}; // middle/near radii, then their radial thicknesses
     float firstRow=0;             // normalized source row of the highest solid texel
     float farRadius=0,farFirstRow=0; // optional distant scenery in the same atlas
-    enum class Style : uint8_t { City, Mountains };
+    enum class Style : uint8_t { City, Mountains, ShapedTerrain };
     Style style=Style::City;
     float backdropOpacity=0;
+    float terrainExtinction=0;
+    const SkyAtmosphereProfile *atmosphere=nullptr;
+    std::shared_ptr<const SkyFireSmokeGpuBlock> mist;
 };
 const SkyDepthScene &skyDepthScene(const Image &sky);
 extern std::array<float,3> skyDepthOrigin;

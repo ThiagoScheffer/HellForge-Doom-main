@@ -60,6 +60,8 @@ SkyFireSmokeGpuBlock packProfile(const SkyFireSmokeProfile &profile) {
     block.flameOuter=pack(profile.flameOuter);
     block.flameCore=pack(profile.flameCore);
     float nearest=profile.sources[0].anchor.radius;
+    float lowestRise=profile.sources[0].anchor.rise,highestRise=lowestRise;
+    bool onlyOccludedMist=true;
     for(unsigned i=0;i<profile.count;++i) {
         const auto &source=profile.sources[i];
         const auto &anchor=source.anchor;
@@ -72,16 +74,21 @@ SkyFireSmokeGpuBlock packProfile(const SkyFireSmokeProfile &profile) {
            (smoke.enabled&&!(smoke.width>0.f&&smoke.height>0.f&&smoke.density>0.f))||
            (light.strength>0.f&&!(light.radius>0.f&&light.verticalFalloff>0.f)))return {};
         nearest=std::min(nearest,anchor.radius);
+        onlyOccludedMist &= smoke.enabled&&smoke.valleyMist&&
+            !flame.enabled&&light.strength<=0.f&&source.slot!=SkyEffectDepthSlot::InFrontOfNear;
+        lowestRise=std::min(lowestRise,anchor.rise);
+        highestRise=std::max(highestRise,anchor.rise+smoke.height);
         auto &gpu=block.sources[i];
         gpu.anchor={anchor.azimuth,anchor.rise,anchor.radius,static_cast<float>(source.slot)};
         gpu.flame={flame.width,flame.height,flame.enabled?flame.intensity:0.f,flame.flickerRate};
         gpu.smoke={smoke.width,smoke.height,smoke.enabled?smoke.density:0.f,smoke.riseSpeed};
         const uint32_t phase=(source.seed^(source.seed>>16))*0x7feb352du;
+        const float smokeReach=smoke.valleyMist?1.20f:
+            1.32f+.74f*std::abs(smoke.windResponse)*profile.windSpeed/63.f+.45f*smoke.turbulence;
         const float reach=std::max({flame.enabled?flame.width:0.f,
-            smoke.enabled?smoke.width*(1.32f+.74f*std::abs(smoke.windResponse)*profile.windSpeed/63.f+
-                                       .45f*smoke.turbulence):0.f,
+            smoke.enabled?smoke.width*smokeReach:0.f,
             light.strength>0.f?1.12f*light.radius:0.f});
-        gpu.motion={smoke.windResponse,smoke.turbulence,float(phase>>8)/16777216.f,reach};
+        gpu.motion={smoke.windResponse,smoke.valleyMist?-1.f:smoke.turbulence,float(phase>>8)/16777216.f,reach};
         const float top=std::max({gpu.flame[1],gpu.smoke[1],2.f*light.radius});
         gpu.illumination={light.radius,light.strength,light.verticalFalloff,top};
     }
@@ -89,6 +96,13 @@ SkyFireSmokeGpuBlock packProfile(const SkyFireSmokeProfile &profile) {
     // lists two sources in that slot in a different order.
     std::sort(block.sources.begin(),block.sources.begin()+profile.count,
               [](const auto &a,const auto &b){return a.anchor[2]>b.anchor[2];});
+    if(onlyOccludedMist) {
+        // Include the maximum vertical and horizontal displacement of the
+        // shared bounded eye before rejecting rays outside the mist band.
+        const float pad=.035f+.12f*std::max(std::abs(lowestRise),std::abs(highestRise));
+        block.smokeDark[3]=lowestRise-pad;
+        block.smokeWarm[3]=highestRise+pad;
+    }
     block.header={float(profile.count),nearest,profile.windSpeed,profile.hazeBlend};
     return block;
 }
@@ -117,6 +131,10 @@ const auto &preparedProfiles() {
 }
 
 } // namespace
+
+SkyFireSmokeGpuBlock prepareSkyFireSmoke(const SkyFireSmokeProfile &profile) {
+    return packProfile(profile);
+}
 
 const SkyFireSmokeGpuBlock *skyFireSmokeData(const Image &sky,bool hasScenery) {
     for(std::size_t i=0;i<std::size(profiles);++i) {

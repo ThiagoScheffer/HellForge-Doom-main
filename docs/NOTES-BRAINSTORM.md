@@ -351,6 +351,13 @@ doors to fix: (door9_2 door15_1 door15_2 = can use same idea from door2_4)
 These walls textures are like soft fluorescent light yellow effect emissive - missing
 rw38_1 rw38_2 rw38_3 rw38_4 rw39_1
 
+
+
+
+
+
+
+
 -----------------------------
 
 Cacodemon and painelemental - eye injuries system - if hit eye and get blinded - improve it by making the eye part closed or like a woundblood so player can visually see that the monster Eye is hurt - if it recovery health and can see again, remove the hurt effect on the eye.
@@ -401,11 +408,27 @@ sames as commit 9083cb569c926dc271cca3f7fd7d250f6e05c970: Deimos fog now covers 
 Other foggy atmosphere like Burning city or Hell - need same fix.
 
 
+
+small fix needed: 
+sw2_2: for this texture only make the red eyes emmisive, so it can be seem on dark, so player can see horror.
+sw2_7: this only need to add the same eyes follow player as sw2_8
+
+
+
 need fix:
 body rotten not working correctly when Ragdoll deaths
 bloodpool after monster die should only appears after Ragdoll finish to correctly display the blood overt the body position
 
 increate light bolts to improve visuals on rain atmosphere
+
+
+
+Bodies when drop or die on Acid or lava, should dissolve,no blood or burn if lava.
+
+
+current gibs assets all dark no light, some assets looks like have a dark stroke around it,not looking good as meat or gore flesh.
+
+
 
 
 
@@ -420,6 +443,10 @@ can we add items a small grounded shadow? avoiding it shadow to look weird or fl
 
 
 Logical lights only?
+
+
+
+
 
 https://doom.fandom.com/wiki/Thing_types
 https://www.doomwiki.org/wiki/DeHackEd#Code_pointers

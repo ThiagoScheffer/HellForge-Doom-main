@@ -75,6 +75,41 @@ struct SkyShellSample {
     float side;
 };
 
+const float shapedTerrainStyle=2.0;
+
+SkyShellSample skyTerrainFace(float angle,float rise,vec3 eye,vec2 radii,ivec2 size,int plane) {
+    // The bounded eye is within 8.75% of the base radius. The two-term
+    // approximation is sub-texel here. Keep the final face intersection exact.
+    vec3 relative=eye/radii.x;
+    float travel=1.0-.5*relative.y*relative.y-relative.x;
+    vec2 uv=skyPlateUV(angle+relative.y,rise*travel+relative.z,vec2(size));
+    ivec2 offset=ivec2(0,plane*size.y);
+    vec4 relief=texelFetch(skyDepthArt,skyDepthTexel(ivec2(floor(uv)),size)+offset,0);
+    // Solve the reference cylinder first, then project onto the local
+    // curved face. Radial relief tapers into the shoulders and valley floor.
+    float radius=radii.x+radii.y*(relief.b*2.0-1.0);
+    uv=skyShellUV(angle,rise,eye,radius,vec2(size));
+    vec4 face=texelFetch(skyDepthArt,skyDepthTexel(ivec2(floor(uv)),size)+offset,0);
+    bool shoulder=false;
+    if(face.g==0.0&&relief.g>0.0&&abs(eye.y)>48.0) {
+        // The rear surface tapers toward the footprint of the front face.
+        // It can appear only along the same formation as the ray moves off
+        // its flank. The reference eye projects both to the same silhouette.
+        float rear=radius+radii.y*(.32+.45*relief.b);
+        vec2 rearUV=skyShellUV(angle,rise,eye,rear,vec2(size));
+        vec4 slope=texelFetch(skyDepthArt,skyDepthTexel(ivec2(floor(rearUV)),size)+offset,0);
+        if(slope.g==relief.g) {
+            face=slope;
+            uv=rearUV;
+            shoulder=true;
+        }
+    }
+    if(face.g==0.0)return SkyShellSample(vec3(0.0),0.0,0.0,uv,0.0);
+    float slope=face.a*2.0-1.0;
+    vec3 rock=skyDepthPalette(face.r)*(1.0+.34*slope)*(shoulder?.89:1.0);
+    return SkyShellSample(rock,1.0,0.0,uv,shoulder?1.0:abs(slope));
+}
+
 SkyShellSample skyShell(float angle,float rise,vec3 eyeInRayBasis,vec2 radii,
                         float layer,ivec2 size,bool filtered,bool crisp) {
     vec2 front=skyShellUV(angle,rise,eyeInRayBasis,radii.x,vec2(size));

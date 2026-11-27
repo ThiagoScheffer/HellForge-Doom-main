@@ -22,6 +22,7 @@ struct SkyFlameParams {
 struct SkySmokeParams {
     float width, height, density, riseSpeed, windResponse, turbulence;
     bool enabled;
+    bool valleyMist=false;
 };
 
 struct SkyFireIlluminationParams {
@@ -59,6 +60,7 @@ struct alignas(16) SkyFireSmokeGpuBlock {
 };
 
 struct Image;
+SkyFireSmokeGpuBlock prepareSkyFireSmoke(const SkyFireSmokeProfile &profile);
 const SkyFireSmokeGpuBlock *skyFireSmokeData(const Image &sky,bool hasScenery);
 
 } // namespace doom3d

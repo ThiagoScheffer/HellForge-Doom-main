@@ -3,6 +3,7 @@
 #include "internal.h"
 #include <cassert>
 #include "sky_atmosphere.h"
+#include "sky_effects.h"
 #include "../shaders/living_surfaces.h"
 #include "../monster_regions.h"
 #include "../monster_eye_damage.h"
@@ -746,6 +747,8 @@ Image &wallImage(int index) {
             fprintf(stderr,"Sky depth: SKY2 fallback (%s).\n",reason);
         }
     }
+    if(settings.doom2DeepSky&&settings.immersiveSky>0&&gamemode!=commercial&&skyTerrainProfile(image))
+        skyDepthScene(image);
     setLivingWallProfile(image,index,name);
     withGlassFrame(image,frame,frameWidth,frameHeight);
     if(image.leaded)return withLeadedRelief(image);

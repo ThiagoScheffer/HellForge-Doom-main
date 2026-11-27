@@ -15,6 +15,16 @@ float skySmokeDensity(SkyFireSource source,vec2 local,float time,float wind) {
 
     float phase=source.motion.z, turbulence=source.motion.y;
     float x=local.x/source.smoke.x;
+    if(turbulence<0.0) {
+        if(abs(x)>=1.20)return 0.0;
+        float lateral=1.0-smoothstep(.30,1.20,abs(x));
+        float vertical=smoothstep(0.0,.24,h)*(1.0-smoothstep(.34,1.0,h));
+        float drift=time*(.013+.036*wind*source.motion.x);
+        float rise=h*1.55-time*source.smoke.w*.11;
+        float broad=skyEffectNoise(vec2(x*.62-drift,rise),phase);
+        float roll=skyEffectNoise(vec2(x*1.28-drift*.54,rise*1.68),phase+.41);
+        return smoothstep(.17,.76,mix(broad,roll,.21))*lateral*vertical*source.smoke.z;
+    }
     // Wind sweeps the top farther than the base. The slower lateral roll
     // changes the silhouette as new billows emerge.
     float lean=wind*source.motion.x*h*(.14+.60*h);
@@ -100,6 +110,8 @@ SkyEffects sampleSkyEffects(float angle,float rise,vec2 axis,vec3 opacity,vec3 h
     effects.debug=vec3(0.0);
 #endif
     if(fireHeader.x==0.0)return effects;
+    if(fireSmokeWarm.w>fireSmokeDark.w&&
+       (rise<fireSmokeDark.w||rise>fireSmokeWarm.w||opacity.z>=1.0))return effects;
     vec2 across=vec2(-axis.y,axis.x);
     float nearest=fireHeader.y;
     if(depthShells.x>0.0)nearest=min(nearest,min(depthShells.x,depthShells.y));

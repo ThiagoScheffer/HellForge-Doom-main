@@ -31,7 +31,7 @@ layout(std140,set=3,binding=3) uniform HellforgeSky {
     vec4 atmosphereLight; // RGB, wind speed in map units per second
     vec4 atmosphereProjection; // near height, near scale, far scale, painted sky blend
     vec4 atmosphereWind; // wind heading in XY, horizon fade, painted scenery haze
-    vec4 sceneryProjection; // far radius, normalized skyline top, style, backdrop opacity
+    vec4 sceneryProjection; // far radius, skyline top, style, backdrop opacity or terrain extinction
     vec4 fireHeader; // count, nearest radius (without scenery), wind speed, haze blend
     vec4 fireSmokeDark,fireSmokeWarm,fireFlameOuter,fireFlameCore;
     SkyFireSource fireSources[4];
@@ -110,9 +110,14 @@ SkyScenerySamples sampleSkyScenery(bool visible,float angle,float rise,vec2 axis
     vec3 eyeInRayBasis=vec3(dot(delta.xy,axis),dot(delta.xy,vec2(-axis.y,axis.x)),delta.z);
     bool crisp=sceneryProjection.x>0.0;
     if(visible) {
-        scenery.near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,size,filtered,crisp);
-        if(scenery.near.coverage<.999)
-            scenery.middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,size,filtered,crisp);
+        if(sceneryProjection.z==shapedTerrainStyle) {
+            scenery.near=skyTerrainFace(angle,rise,eyeInRayBasis,depthShells.yw,size,0);
+            if(scenery.near.coverage<1.0)scenery.middle=skyTerrainFace(angle,rise,eyeInRayBasis,depthShells.xz,size,1);
+        } else {
+            scenery.near=skyShell(angle,rise,eyeInRayBasis,depthShells.yw,2.0,size,filtered,crisp);
+            if(scenery.near.coverage<.999)
+                scenery.middle=skyShell(angle,rise,eyeInRayBasis,depthShells.xz,1.0,size,filtered,crisp);
+        }
     }
     bool needFar=scenery.near.coverage<1.0&&scenery.middle.coverage<1.0;
 #if defined(SKY_COMPOSITION_DEBUG) && SKY_COMPOSITION_DEBUG == 4
@@ -132,12 +137,21 @@ vec3 sceneryAir(vec3 facade,vec3 horizon,float haze,float row) {
     return mix(subdued,horizon*.56,distance);
 }
 
+vec3 terrainAir(vec3 rock,vec3 horizon,float radius,float row) {
+    float linearDepth=radius/depthShells.y;
+    float opticalDepth=sceneryProjection.w*linearDepth*sqrt(linearDepth);
+    float transmittance=exp2(-opticalDepth)*(1.0-.85*smoothstep(.96,1.22,row));
+    return mix(horizon*.85,rock,transmittance);
+}
+
 vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,float row,
                        SkyEffects effects,ivec2 size) {
     bool mountains=sceneryProjection.z==1.0;
+    bool terrain=sceneryProjection.z==shapedTerrainStyle;
     background=skyEffectOver(background,effects.layers[0]);
     if(scenery.far.alpha>0.0) {
-        scenery.far.color=sceneryAir(scenery.far.color,horizon,mountains?.69:.58,row);
+        scenery.far.color=terrain?terrainAir(scenery.far.color,horizon,sceneryProjection.x,row):
+            sceneryAir(scenery.far.color,horizon,mountains?.69:.58,row);
         background=skyCompositeOver(background,scenery.far);
     }
     background=skyEffectOver(background,effects.layers[1]);
@@ -145,7 +159,8 @@ vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,fl
         vec3 paint=scenery.middle.color;
         paint+=mountains?skyRockSeep(scenery.middle.uv,size,scenery.middle.window)*.72
                         :vec3(.085,.042,.014)*scenery.middle.window;
-        vec3 facade=sceneryAir(paint,horizon,mountains?.34:.26,row);
+        vec3 facade=terrain?terrainAir(paint,horizon,depthShells.x,row):
+            sceneryAir(paint,horizon,mountains?.34:.26,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.middle.coverage));
     }
     background=skyEffectOver(background,effects.layers[2]);
@@ -153,7 +168,8 @@ vec3 composeSkyScenery(vec3 background,SkyScenerySamples scenery,vec3 horizon,fl
         vec3 paint=scenery.near.color;
         paint+=mountains?skyRockSeep(scenery.near.uv,size,scenery.near.window)
                         :vec3(.15,.074,.025)*scenery.near.window;
-        vec3 facade=sceneryAir(paint,horizon,mountains?.045:.06,row);
+        vec3 facade=terrain?terrainAir(paint,horizon,depthShells.y,row):
+            sceneryAir(paint,horizon,mountains?.045:.06,row);
         background=skyCompositeOver(background,SkyLayerSample(facade,scenery.near.coverage));
     }
     return skyEffectOver(background,effects.layers[3]);
@@ -306,7 +322,7 @@ void main() {
         bloodHell?((crimson?-9.0:-10.0)-c.style.w):c.style.w;
     // E1 only: dusk sand scattering close to the low horizon, leaving
     // the recognisable painted Starport cloud shapes visible.
-    if(starport) {
+    if(starport&&sceneryProjection.z!=shapedTerrainStyle) {
         float dust=1.0-smoothstep(-0.15,0.75,rise);
         color.rgb=mix(color.rgb,vec3(.42,.265,.155),.21*dust);
     }
@@ -412,7 +428,7 @@ void main() {
         outColor=color;
         return;
 #endif
-        if(sceneryProjection.w>0.0&&!obscured&&v>.015) {
+        if(mountains&&sceneryProjection.w>0.0&&!obscured&&v>.015) {
             vec4 wall=skySceneryBackdrop(uv,ivec2(size));
             float opacity=wall.a*sceneryProjection.w*smoothstep(.015,.48,v);
             // The translucent painting frames the eclipse. Leave the disc
