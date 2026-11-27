@@ -336,6 +336,10 @@ static std::vector<byte> indexedPatchPixels(const byte *data,int size,int w,int 
     return pixels;
 }
 
+static bool paintedRedSkullEye(int row,int eyeTop,byte index) {
+    return row>=eyeTop&&row<eyeTop+3&&index>=176&&index<=190;
+}
+
 // The pressed variants keep their painted red sockets on the dormant face.
 // Only texels still owned by this patch can change in the composite.
 static void preservePressedSkullFaces(const std::vector<ImmersivePatch> &patches,
@@ -356,14 +360,13 @@ static void preservePressedSkullFaces(const std::vector<ImmersivePatch> &patches
             const int localY=y-patch.placement[1],localX=x-patch.placement[0];
             const size_t j=(size_t)localY*art.width+localX;
             const byte index=pixels[2*i];
-            const bool redEye=localY>=eyeTop&&localY<eyeTop+3&&index>=176&&index<=190;
-            if(!redEye&&face[2*j+1])pixels[2*i]=face[2*j];
+            if(!paintedRedSkullEye(localY,eyeTop,index)&&face[2*j+1])pixels[2*i]=face[2*j];
         }
     }
 }
 
 struct PatchEmission {
-    uint64_t led=0,diffuse=0;
+    uint64_t led=0,diffuse=0,skullEyes=0;
 };
 
 static PatchEmission correctPatchEmission(const std::vector<ImmersivePatch> &patches,
@@ -371,6 +374,16 @@ static PatchEmission correctPatchEmission(const std::vector<ImmersivePatch> &pat
     PatchEmission emission;
     for(const auto &patch:patches) {
         const auto &art=*patch.art;
+        if(art.effect==Effect::FixedSkullSwitch&&std::strcmp(art.name,"SW2_2")==0) {
+            const Rect bounds=clippedArtwork(patch,{0,16,art.width,19},w,h);
+            for(int y=bounds[1];y<bounds[3];++y)for(int x=bounds[0];x<bounds[2];++x) {
+                const size_t i=(size_t)y*w+x;
+                if(owners[i]!=patch.part||!paintedRedSkullEye(y-patch.placement[1],16,pixels[2*i]))continue;
+                mask[i]=255;
+                emission.skullEyes+=mask[i];
+            }
+            continue;
+        }
         if(art.effect!=Effect::RedLED&&art.effect!=Effect::GreenLED&&art.effect!=Effect::Fluorescent)continue;
         const Rect body=clippedArtwork(patch,{0,0,art.width,art.height},w,h);
         for(int y=body[1];y<body[3];++y)for(int x=body[0];x<body[2];++x) {
@@ -713,13 +726,13 @@ Image &wallImage(int index) {
     int next;bool animated=P_PicAnimationNext(true,index,&next)>0;
     Image &image=speckledPanel(images.emplace(index,upload(w,h,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
         glass.empty()?nullptr:glass.data(),true)).first->second,name,false);
-    if(patchEmission.led||patchEmission.diffuse) {
+    if(patchEmission.led||patchEmission.diffuse||patchEmission.skullEyes) {
         const float pixels255=float(w)*h*255.f;
         const float led=patchEmission.led/pixels255,diffuse=patchEmission.diffuse/pixels255;
         const float total=image.emissionCoverage;
-        const float generic=std::max(0.f,total-led-diffuse);
+        const float generic=std::max(0.f,total-led-diffuse-patchEmission.skullEyes/pixels255);
         // Only treat the corrected part as a small indicator or diffuser.
-        // Preserve the ordinary weight of emission on other composite patches.
+        // Skull eyes glow on the surface only.
         if(total>0.f)image.emissionWeight=(generic*image.emissionWeight+
             led*std::min(.45f,led*8.f)+diffuse*.5f*std::clamp(diffuse*8.f,.25f,1.f))/total;
     }

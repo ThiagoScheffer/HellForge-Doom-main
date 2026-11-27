@@ -150,7 +150,10 @@ float engravedEyes(bool stone,uint variant,vec2 tile,bool morph,bool pulse,float
         float iris=1.0-smoothstep(0.70,1.22,length(at/vec2(1.48,1.28)));
         float pupil=1.0-smoothstep(0.44,1.04,length(at/vec2(0.58,1.15)));
         float glint=1.0-smoothstep(0.18,0.57,length(at-vec2(-0.48,-0.48)));
-        vec3 tint=lit?vec3(0.38,0.075,0.022):vec3(0.22,0.13,0.070);
+        // The dormant wide skull uses the same moving iris and pupil as the
+        // pressed skull. A defined amber iris reads against its dark sockets.
+        vec3 tint=lit?vec3(0.38,0.075,0.022):
+                  variant==0u?vec3(0.38,0.25,0.10):vec3(0.22,0.13,0.070);
         vec3 eye=mix(rgb+iris*tint,rgb*0.11,pupil*iris);
         eye+=glint*tint*0.50;
         float exposed=smoothstep(-0.26,0.26,p.y-mix(-1.85,1.85,close));
