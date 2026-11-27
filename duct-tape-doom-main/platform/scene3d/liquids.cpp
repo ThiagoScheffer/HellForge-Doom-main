@@ -104,6 +104,11 @@ void watchSplashes() {
             auto found=splashWatch.find(thing);
             if(found==splashWatch.end()) {splashWatch[thing]={z,missile,true,leveltime,down,x,y};continue;}
             SplashWatch &watch=found->second;watch.seen=true;
+            const auto *reaction=corpseReaction(thing);
+            if(reaction&&reaction->touching) {
+                watch.z=z;watch.x=x;watch.y=y;watch.down=down;watch.missile=missile;
+                continue;
+            }
             float size=units(thing->radius)*2;
             if(down&&!watch.down&&surface) {
                 ripple(x,y,i,std::clamp(size*0.8f+16,24.0f,56.0f));

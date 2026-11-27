@@ -25,6 +25,8 @@ struct Drop {
     DropVisual visual=DropVisual::Blood;
     LiquidMaterial material=LiquidMaterial::Blood;
     LiquidSource source=LiquidSource::Normal;
+    int reactionSector=-1;
+    corpse_environment::Reaction reaction{};
 };
 static std::vector<Drop> drops;
 void clearWallBloodDrops() {
@@ -150,10 +152,13 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
     if(t>2.5f)splat=0; // Down a pit.
     float lx=x+vx*t,ly=y+vy*t,lz=z+vz*t-0.5f*gravity*t*t,fall=vz-gravity*t;
     const bool canRest=visual==DropVisual::Bone&&size>=3.f&&where==FLOOR;
+    const bool fragmentContact=visual>=DropVisual::Flesh&&where==FLOOR&&
+        settings.environmentalGibletReactions&&environmentalCorpseReactionsEnabled();
     const sector_t *endSector=where==CEILING?landing:
-        (where==FLOOR&&(splat>0||canRest))?sectorAt(lx,ly):nullptr;
+        (where==FLOOR&&(splat>0||canRest||fragmentContact))?sectorAt(lx,ly):nullptr;
     const size_t endIndex=endSector?endSector-sectors:size_t(numsectors);
-    const bool liquid=endIndex<sectorMist.size()&&sectorMist[endIndex].liquid;
+    const bool liquid=(endIndex<sectorMist.size()&&sectorMist[endIndex].liquid)||
+        (where==FLOOR&&material==LiquidMaterial::Blood&&endSector&&suppressHazardFloorBlood(int(endIndex)));
     const bool restBone=canRest&&
                         endIndex<(size_t)numsectors&&endSector->floorpic!=skyflatnum&&!liquid;
     bool floorSplat=false;
@@ -197,6 +202,10 @@ static bool throwDrop(float x,float y,float z,float vx,float vy,float vz,float s
                       visual==DropVisual::BlueGut?randomRange(.68f,.95f):randomRange(.35f,.7f);
     const auto color=visual==DropVisual::Bone?paletteColor({shade+.25f,shade+.20f,shade+.12f}):bloodColor(shade);
     drops.push_back({x,y,z,vx,vy,vz,now,now+t+(restBone?.42f:0),size,gravity,t,color,decorationSeed!=nullptr&&!environment,visual,material,source});
+    if(fragmentContact&&endSector&&enabledCorpseMedium(endSector)!=corpse_environment::Medium::None&&
+       std::abs(lz-units(endSector->floorheight))<.75f&&
+       (!SV_Active()||!SV_Edited(lx,ly,lz)))
+        drops.back().reactionSector=int(endIndex);
     return floorSplat;
 }
 
@@ -314,7 +323,7 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
     const float heading=std::atan2(dy,dx);
     int wallBudget=settings.goreWallBlood?3:0;
     int flatBudget=emission.tier==GoreTier::Extreme?9:medium?1:routine?2:fatal?6:4;
-    if(settings.goreWallBlood&&!bone)for(int n=0;n<(medium||emission.radial?0:routine?1:m1head?4:fatal?3:2);++n) {
+    if(settings.goreWallBlood&&!bone&&!suppressHazardCorpseBlood(target))for(int n=0;n<(medium||emission.radial?0:routine?1:m1head?4:fatal?3:2);++n) {
         const float a=heading+randomRange(-.43f,.43f),speed=randomRange(68,126);
         throwDrop(x,y,z,std::cos(a)*speed,std::sin(a)*speed,
             randomRange(-18,45),randomRange(.9f,1.4f),randomRange(14,23),BLOOD_SPLAT,&wallBudget,nullptr,
@@ -323,7 +332,7 @@ GoreBurstReport goreBurst(const mobj_t &target,float x,float y,float z,float dx,
     if(!settings.goreFragments){report.path="fragments_off";return report;}
     const float now=gameSeconds();
     int active=0;
-    for(const auto &drop:drops)if(drop.visual>=DropVisual::Flesh&&drop.end>now)++active;
+    for(const auto &drop:drops)if(drop.visual>=DropVisual::Flesh&&(drop.end>now||drop.reaction.touching))++active;
     report.requested=medium?1:routine?std::max(2,style.living-1):m1head?6:fatal?style.fatal:style.living;
     if(emission.radial&&fatal)
         report.requested=std::min(12,report.requested+(emission.tier==GoreTier::Extreme?4:2));
@@ -650,7 +659,7 @@ void spraySawCut(const mobj_t &target,float x,float y,float z,float dx,float dy)
 }
 void sprayKill(const mobj_t &thing,float dx,float dy,float speed,float hitZ,bool gib,int overkill) {
     BloodSourceScope bloodSource(&thing);
-    if(!sprayOn()||!bleeds(thing))return;
+    if(!sprayOn()||!bleeds(thing)||suppressHazardCorpseBlood(thing))return;
     checkSprayLevel();
     float x=units(thing.x),y=units(thing.y),feet=units(thing.z),tall=std::max(16.0f,units(thing.info->height)),r=units(thing.radius);
     float z=feet+(hitZ>=0?std::clamp(hitZ,tall*0.2f,tall*0.9f):tall*0.6f);
@@ -680,7 +689,8 @@ static bool onLiquid(float x,float y) {
 }
 // The slap is heard with or without blood spray (it went quiet with the spray switch).
 void sprayLanding(float x,float y,float z,float speed) {
-    if(onLiquid(x,y))return;
+    const auto *sector=sectorAt(x,y);
+    if(onLiquid(x,y)||(std::abs(z-units(sector->floorheight))<=.75f&&suppressHazardFloorBlood(int(sector-sectors))))return;
     if(speed>1.5f)I_MadeSound(IMPACT_GORE_SLAP,x,y,z);
     if(!sprayOn())return;
     checkSprayLevel();
@@ -712,6 +722,7 @@ void spraySmear(float x,float y,float angle,float size) {
 // Wounds drip while they are fresh: about one drop a second from a big
 // hole, thinning out over twenty seconds, falling with the monster's step.
 static void drip(const mobj_t &thing) {
+    if(suppressHazardCorpseBlood(thing))return;
     BloodSourceScope bloodSource(&thing);
     WoundSpot spots[10];
     int count=woundSpots(&thing,spots,10,true);
@@ -727,6 +738,25 @@ static void drip(const mobj_t &thing) {
                   nullptr,nullptr,w.critical?DropVisual::GoreDrip:DropVisual::Blood);
     }
 }
+static void tickProceduralGibletReactions() {
+    static unsigned serial=~0u;
+    static int lastTic=-1;
+    if(serial!=r_levelserial){serial=r_levelserial;lastTic=-1;}
+    if(lastTic==leveltime)return;
+    lastTic=leveltime;
+    const float now=float(leveltime)/TICRATE;
+    for(auto &drop:drops) {
+        if(drop.reactionSector<0||drop.reaction.complete()||now<drop.born+drop.flight)continue;
+        const auto &sector=sectors[drop.reactionSector];
+        const float t=drop.flight;
+        const float z=drop.z+drop.vz*t-.5f*drop.gravity*t*t;
+        const bool supported=settings.environmentalGibletReactions&&
+            (drop.reaction.touching||std::abs(z-units(sector.floorheight))<.75f);
+        corpse_environment::advance(drop.reaction,supported?enabledCorpseMedium(&sector):
+            corpse_environment::Medium::None,1.f/TICRATE,
+            corpse_environment::speed(settings.environmentalCorpseReactionSpeed),true);
+    }
+}
 void watchSpray() {
     checkSprayLevel();
     if(!acidLiquidOn())clearAcidVisuals();
@@ -735,10 +765,11 @@ void watchSpray() {
     if(levelSerial!=r_levelserial) {drops.clear();slides.clear();clearGiblets();return;}
     if(!sprayOn()&&!goreOnly&&!acidLiquidOn()) {drops.clear();slides.clear();clearGiblets();return;}
     checkSprayLevel();
+    if(goreOnly)tickProceduralGibletReactions();
     if(activeGiblets()) {
         const float now=gameSeconds();
         const int procedural=int(std::count_if(drops.begin(),drops.end(),[&](const Drop &d){
-            return d.visual>=DropVisual::Flesh&&d.end>now;
+            return d.visual>=DropVisual::Flesh&&(d.end>now||d.reaction.touching);
         }));
         tickGiblets(std::count_if(drops.begin(),drops.end(),[](const Drop &d){return d.material==LiquidMaterial::Blood;}),procedural);
     }
@@ -749,6 +780,7 @@ void watchSpray() {
         if(!bleeds(*thing))continue;
         BloodSourceScope bloodSource(thing);
         if(thing->health>0) {if(!P_WeakpointBleeding(thing))drip(*thing);slides.erase(thing);continue;}
+        if(suppressHazardCorpseBlood(*thing))continue;
         float x=units(thing->x),y=units(thing->y),mx=units(thing->momx),my=units(thing->momy),speed=std::hypot(mx,my);
         auto found=slides.find(thing);
         if(found==slides.end()) {slides[thing]={x,y,speed,speed>0?mx/speed:0,speed>0?my/speed:0,0,false,true};continue;}
@@ -788,7 +820,7 @@ void buildSpray(const Uniforms &camera) {
     drops.erase(std::remove_if(drops.begin(),drops.end(),[&](const Drop &d){
         if(d.material==LiquidMaterial::Acid)return now>=d.end||!acidLiquidOn();
         if(d.source==LiquidSource::Environment)return now>=d.end||!wallBloodEnabled();
-        return now>=d.end||now<d.born-0.1f||(d.visual==DropVisual::Blood&&!sprayOn()&&!showGore)||(d.decoration&&!showDecor)||
+        return d.reaction.complete()||(!d.reaction.touching&&now>=d.end+(d.reactionSector>=0?1.f/TICRATE:0.f))||now<d.born-0.1f||(d.visual==DropVisual::Blood&&!sprayOn()&&!showGore)||(d.decoration&&!showDecor)||
                (d.visual!=DropVisual::Blood&&(!showGore||
                   (d.visual==DropVisual::GoreBlood?!settings.goreWallBlood:d.visual==DropVisual::GoreDrip?
                       (!settings.goreBodyDamage||!settings.bloodSpray):!settings.goreFragments)));
@@ -801,7 +833,14 @@ void buildSpray(const Uniforms &camera) {
         const float x=d.x+d.vx*t,y=d.y+d.vy*t,z=height(t);
         const float light=lighting(sectorAt(x,y)),tall=std::abs(d.vz-d.gravity*t)>250?2.0f:1.0f;
         std::array<float,3> lit;for(int c=0;c<3;++c)lit[c]=std::min(1.0f,d.color[c]*light);
-        if(d.visual==DropVisual::BlueGut) {
+        if(d.reaction.medium!=corpse_environment::Medium::None) {
+            const auto &sector=sectors[d.reactionSector];
+            const bool lava=d.reaction.medium==corpse_environment::Medium::Lava;
+            const auto color=lava?std::array<float,3>{.18f,.10f,.07f}:
+                std::array<float,3>{.30f,.39f,.15f};
+            pixelBlock(particleVertices,camera,d.x+d.vx*d.flight,d.y+d.vy*d.flight,
+                units(sector.floorheight)+.5f,d.size*(1.f-d.reaction.progress),.75f,color,true);
+        } else if(d.visual==DropVisual::BlueGut) {
             const float speed=std::hypot(d.vx,d.vy);
             const float sideX=-d.vy/speed*d.size*.42f,sideY=d.vx/speed*d.size*.42f;
             pixelBlock(particleVertices,camera,x,y,z,d.size,1.03f,lit,false,&d.color,false);

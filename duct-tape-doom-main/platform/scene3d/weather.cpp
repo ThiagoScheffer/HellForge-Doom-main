@@ -1488,6 +1488,25 @@ void drawFireEmbers(const Uniforms &camera,float x,float y,float ground,float he
 }
 }
 
+void drawCorpseReactionPlume(const Uniforms &camera,float x,float y,float z,float seconds,
+                             float fade,uint32_t seed,bool burning) {
+    if(burning) {
+        drawGroundFire(camera,x,y,z,seconds,fade,seed,.48f,.72f);
+        drawFireEmbers(camera,x,y,z,6.f,seconds,fade*.5f,seed);
+    }
+    const std::array<float,3> tint=burning?std::array<float,3>{.31f,.26f,.23f}:
+        std::array<float,3>{.42f,.48f,.30f};
+    for(int i=0;i<4;++i) {
+        const float age=std::fmod(seconds*(burning?.67f:.82f)+i*.25f+hashUnit(0,7,seed),1.f);
+        const float angle=hashUnit(i,1,seed)*2.f*float(doomPi);
+        const float drift=2.f+age*(burning?11.f:8.f);
+        const float opacity=std::min(1.f,age*8.f)*(1.f-age)*(.23f+.37f*fade);
+        fluidWeatherSmoke(camera,x+drift*std::cos(angle),y+drift*std::sin(angle),
+            z+4.f+age*(burning?34.f:24.f),4.f+7.f*age,5.f+9.f*age,tint,
+            opacity,(angle-float(doomPi))*.26f+age*.45f,burning?13:16);
+    }
+}
+
 // D3.2: both vanilla dead-tree sprites, prioritized close thunder, and
 // bounded embers. The 20% ignition decision remains deterministic, and
 // a finished fire leaves a cached charcoal-colored tree sprite.

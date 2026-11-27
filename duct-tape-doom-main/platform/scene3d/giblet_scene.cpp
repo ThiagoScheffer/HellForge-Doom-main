@@ -167,7 +167,10 @@ struct Sweep {
         const auto plane=[&](bool top,float z,float time) {
             if(time>last)return;
             const int pic=top?sector->ceilingpic:sector->floorpic;
-            const auto type=pic==skyflatnum?Surface::Sky:!top&&liquid(index)?Surface::Liquid:top?Surface::Ceiling:Surface::Floor;
+            const bool hazardous=!top&&settings.environmentalGibletReactions&&
+                enabledCorpseMedium(sector)!=corpse_environment::Medium::None;
+            const auto type=pic==skyflatnum?Surface::Sky:!top&&(liquid(index)||hazardous)?Surface::Liquid:
+                top?Surface::Ceiling:Surface::Floor;
             Vec3 center=pointAt(a,b,time),contact=center;
             center.z=z;contact.z=top?ceiling:floor;
             accept(time,center,contact,{0,0,top?-1.f:1.f},
@@ -449,11 +452,14 @@ void drawVisual(void *context,const Visual &v) {
     const auto *sector=v.resting&&v.surface.sector>=0&&v.surface.sector<numsectors?
         &sectors[v.surface.sector]:sectorAt(v.center);
     if(!sector)return;
-    if(v.resting&&(sector->floorpic==skyflatnum||liquid(v.surface.sector)))return;
+    const bool reacting=v.reaction.medium!=corpse_environment::Medium::None;
+    if(v.resting&&(sector->floorpic==skyflatnum||(!reacting&&liquid(v.surface.sector))))return;
     const auto &frame=frameFor(v);
     const float size=v.size*frame.scale*(v.resting?2.1f:1.25f)/float(std::max(frame.w,frame.h));
     const float squash=horrorGoreEnabled(settings)&&settings.goreSoftDeformation?v.squash:0.f;
-    const float w=frame.w*size*(1.f+.55f*squash),h=frame.h*size*(1.f-.45f*squash),c=std::cos(v.rotation),s=std::sin(v.rotation);
+    const float keep=1.f-v.reaction.progress;
+    const float w=frame.w*size*(1.f+.55f*squash)*keep,h=frame.h*size*(1.f-.45f*squash)*keep;
+    const float c=std::cos(v.rotation),s=std::sin(v.rotation);
     const Vec3 floor={v.contact.x,v.contact.y,floorZ(sector)};
     if(v.resting&&uncertainSweep(floor,floor,std::min(v.size*.3f,3.f)))return;
     const float rightLength=std::hypot(camera.right[0],camera.right[1]);
@@ -462,7 +468,9 @@ void drawVisual(void *context,const Visual &v) {
     // Use the low B silhouette as an upright cutout, anchored just above
     // the blood decals. A flat quad below their lift vanishes under stains.
     const float base=floor.z+decalLift(floor.x,floor.y,camera)+.12f;
-    const float light=lighting(sector);
+    const float charAmount=v.reaction.medium==corpse_environment::Medium::Lava?
+        std::min(1.f,v.reaction.progress*2.f):0.f;
+    const float light=lighting(sector)*(1.f-.76f*charAmount);
     const int band=tintBand(v.tint)*giblet_art::height;
     const auto vertex=[&](float u,float t) {
         const float a=(u-frame.pivotX)*w,b=(frame.pivotY-t)*h;
@@ -535,7 +543,12 @@ void tickGiblets(size_t bloodDrops,int proceduralFragments) {
     const bool horror=horrorGoreEnabled(settings);
     const Host host={nullptr,hostTrace,gibletImpact,debug?gibletContact:nullptr,
                      horror&&settings.goreStickyFragments?hostAttach:nullptr,hostResolveWall,
-                     horror&&settings.goreSoftDeformation};
+                     horror&&settings.goreSoftDeformation,
+                     [](void *,int sector) {
+                         if(!settings.environmentalGibletReactions||sector<0||sector>=numsectors)
+                             return corpse_environment::Medium::None;
+                         return enabledCorpseMedium(&sectors[sector]);
+                     },corpse_environment::speed(settings.environmentalCorpseReactionSpeed)};
     giblets.advance(1.f/TICRATE,host);
     if(!debug)return;
     for(auto &b:markBudgets)if(b.id&&!giblets.hasActiveEvent(b.id)){reportImpactSummary(b);b={};}

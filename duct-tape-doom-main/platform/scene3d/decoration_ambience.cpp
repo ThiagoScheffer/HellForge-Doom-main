@@ -146,7 +146,7 @@ BodyKind bodyKind(const mobj_t &thing) {
         return BodyKind::Hanging;
     default:break;
     }
-    if(P_HazardAcidCorpse(&thing)||thing.player||!thing.info||thing.health>0||!(thing.flags&MF_CORPSE)
+    if(corpseReaction(&thing)||P_HazardAcidCorpse(&thing)||thing.player||!thing.info||thing.health>0||!(thing.flags&MF_CORPSE)
        ||!(thing.info->flags&MF_COUNTKILL))return BodyKind::None;
     return BodyKind::Corpse;
 }
@@ -405,7 +405,7 @@ bool decayTestAll() {return M_CheckParm((char*)"-decaytest")!=0;}
 // Only normal, terminal death frames of common small monsters. Excludes
 // x-deaths, transient death animations, decorations, and boss-sized actors.
 bool normalDecayCorpse(const mobj_t &thing) {
-    if(P_HazardAcidCorpse(&thing)||thing.player||thing.health>0||!thing.info||!thing.state||
+    if(corpseReaction(&thing)||P_HazardAcidCorpse(&thing)||thing.player||thing.health>0||!thing.info||!thing.state||
        !(thing.flags&MF_CORPSE)||!(thing.info->flags&MF_COUNTKILL))return false;
     switch(thing.type) {
     case MT_POSSESSED:return thing.state==&states[S_POSS_DIE5];
@@ -925,7 +925,7 @@ void decorationAmbienceThing(const mobj_t *thing,const Uniforms &camera) {
        (e.lifetime!=corpseLifetime(thing)||(!pos.ragdoll&&!settled(*thing))))return;
     // Stage 2 is already dry enough to stop sustaining flies, worms and the
     // exotic corpse critters. No gameplay entities or GPU resources are spawned.
-    if(e.kind==BodyKind::Corpse && (P_HazardAcidCorpse(thing)||corpseDecayStage(thing)>=2))return;
+    if(e.kind==BodyKind::Corpse && (corpseReaction(thing)||P_HazardAcidCorpse(thing)||corpseDecayStage(thing)>=2))return;
     bool fly=fliesReady(e,settings.decorationDelay);
     bool worm=settings.decorationInsects>=2&&crittersReady(e,settings.decorationDelay);
     if(!fly&&!worm)return;

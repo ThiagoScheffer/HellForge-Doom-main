@@ -21,6 +21,7 @@ void P_ExplodeMissile(mobj_t*);
 #include <cstdlib>
 namespace doom3d { int criticalThing(mobj_t*,critical_hit_t*); void applySettings(); }
 extern "C" void A_Look(mobj_t*);
+extern "C" void A_VileChase(mobj_t*);
 extern const lab::MapWorld *SV_MapWorld();
 using namespace doom3d;
 static std::string output;
@@ -31,6 +32,7 @@ static bool visualEnhanced=false;
 static bool visualSevere=false;
 static bool visualSawCut=false;
 static bool acidMode=false,visualAcid=false;
+static bool environmentalCorpseMode=false;
 static bool incendiaryMode=false,visualIncendiary=false,incendiaryLargeMode=false;
 static bool visualFeedback=false;
 static bool vileMode=false,visualVile=false;
@@ -776,6 +778,121 @@ static void impAvoidanceIntegration() {
     P_RemoveMobj(blocker);P_RemoveMobj(source);
     std::printf("PASS imp avoidance integration (%d checks)\n",checks);
 }
+static void environmentalCorpseIntegration() {
+    using corpse_environment::Medium;
+    settings.accelerated=settings.environmentalCorpseReactions=1;
+    settings.acidCorpseDissolution=settings.lavaCorpseCombustion=settings.hazardousSurfaceBloodSuppression=1;
+    settings.blood=1;
+    settings.deathRagdoll=settings.environmentEffects=settings.monsterEnvironmentDamage=0;
+    settings.bloodSpray=settings.deathDirector=settings.deathMotion=settings.hitFlinch=settings.wounds=0;
+    settings.goreLevel=settings.criticalParts=0;
+    R_GoreForget=corpseLifecycleEvent;
+    levelSerial=r_levelserial;
+    floors.resize(1);
+    const auto &blood=sprites[Game_Sprite(GAME_SPRITE_BLOOD)];
+    for(int frame=0;frame<blood.numframes;++frame)
+        patch(firstspritelump+blood.spriteframes[frame].lump[0]);
+    settings.deathRagdoll=1;
+    testRagdollRestFixture();
+    settings.deathRagdoll=0;
+    auto *corpse=P_SpawnMobj(fx(100),fx(128),ONFLOORZ,MT_TROOP);
+    auto *sector=corpse->subsector->sector;
+    const int original=sector->floorpic,index=int(sector-sectors);
+    sector->floorpic=R_FlatNumForName((char*)"NUKAGE1");
+    check(corpseSurfaceMedium(sector)==Medium::Acid,"Animated stock acid resolves without sector damage");
+    watchBodies();
+    P_DamageMobj(corpse,nullptr,nullptr,corpse->health+1);
+    check(corpse->health<=0&&!P_HazardAcidCorpse(corpse),"Weapon-style death has no legacy acid record");
+    corpse->z=corpse->floorz+fx(32);
+    ++leveltime;watchBodies();
+    check(!corpseReaction(corpse)&&!suppressHazardCorpseBlood(*corpse),"Airborne corpse above acid is unaffected");
+    corpse->floorz=corpse->z;
+    ++leveltime;watchBodies();
+    check(!corpseReaction(corpse),"Raised support above acid is unaffected");
+    corpse->z=corpse->floorz=sector->floorheight;corpse->momz=0;
+    ++leveltime;watchBodies();
+    const auto *reaction=corpseReaction(corpse);
+    check(reaction&&reaction->medium==Medium::Acid&&reaction->touching&&suppressHazardCorpseBlood(*corpse),
+          "Actual floor contact starts acid and suppresses corpse blood");
+    const float progress=reaction->progress;
+    watchBodies();
+    check(corpseReaction(corpse)->progress==progress,"Two watches in one tic advance only once");
+    settings.environmentEffects=1;
+    check(testCorpseReactionEffectCount()>0,"Acid contact has a queued effect site");
+    ++leveltime; // P_Ticker increments after the last body watch, before drawing.
+    check(testCorpseReactionEffectCount()>0,"Rendering sees the effect site after P_Ticker advances");
+    ++leveltime;
+    check(testCorpseReactionEffectCount()==0,"Stale corpse effect sites expire");
+    leveltime-=2;
+    settings.environmentEffects=0;
+    check(!bloodFloorSplat(100,128,index,4,0,1,false,gameSeconds(),BLOOD_SPECK),"Acid rejects floor blood");
+    check(bloodFloorSplat(100,128,index,4,0,1,true,gameSeconds(),BLOOD_SPECK),"Acid preserves ceiling blood");
+    WallHit wall;
+    check(firstSolidWall(100,128,32,0,1,0,96,wall)&&
+          bloodWallSplat(wall,100,128+wall.t,32,8,1,gameSeconds(),BLOOD_SPLAT,false),
+          "A solid wall beside acid still accepts blood");
+    corpse->z+=fx(10);
+    ++leveltime;watchBodies();
+    check(corpseReaction(corpse)->progress==progress&&!corpseReaction(corpse)->touching,"Airborne reaction pauses");
+    sector->floorpic=R_FlatNumForName((char*)"LAVA1");
+    corpse->z=corpse->floorz;
+    ++leveltime;watchBodies();
+    check(corpseReaction(corpse)->medium==Medium::Lava&&corpseReaction(corpse)->progress>progress,
+          "Lava contact preserves consumption");
+    settings.environmentEffects=1;
+    ++leveltime;
+    check(testCorpseReactionEffectCount()>0,"Burning corpse has smoke after the tic advances");
+    --leveltime;
+    settings.environmentEffects=0;
+    check(!bloodFloorSplat(100,128,index,4,0,1,false,gameSeconds(),BLOOD_SPECK),"Lava rejects floor blood");
+    settings.environmentalCorpseReactions=0;
+    const float pausedAt=corpseReaction(corpse)->progress;
+    ++leveltime;watchBodies();
+    check(corpseReaction(corpse)->progress==pausedAt&&!corpseReaction(corpse)->touching&&!suppressHazardFloorBlood(index),
+          "Master toggle pauses the reaction and releases the blood gate");
+    settings.environmentalCorpseReactions=1;
+    for(int i=0;i<5*TICRATE;++i){++leveltime;watchBodies();}
+    check(corpseReaction(corpse)->complete()&&(corpse->flags&MF_CORPSE),"Completion needs no particles and preserves the actor");
+    settings.environmentalCorpseReactions=0;
+    check(corpseReaction(corpse)->complete(),"Master toggle does not restore consumed visuals");
+    P_SetMobjState(corpse,S_TROO_DIE5);
+    auto *vile=P_SpawnMobj(fx(100),fx(88),ONFLOORZ,MT_VILE);
+    constexpr int north=2; // DI_NORTH in p_enemy.c
+    vile->movedir=north;
+    A_VileChase(vile);
+    check(corpse->health>0&&!corpseReaction(corpse),"Arch-vile raises a consumed corpse through the normal path");
+    P_RemoveMobj(vile);
+    sector->floorpic=original;
+    settings.environmentalCorpseReactions=1;
+    check(bloodFloorSplat(100,128,index,4,0,1,false,gameSeconds(),BLOOD_SPECK),"Solid floor accepts blood");
+    P_DamageMobj(corpse,nullptr,nullptr,corpse->health+1);
+    P_HazardRecordDeath(corpse,HAZARD_ACID);
+    settings.environmentEffects=1;
+    ++leveltime;watchBodies();
+    check(!corpseReaction(corpse)&&testCorpseReactionEffectCount()>0,
+          "Legacy acid death on dry ground emits vapor and keeps its own timer");
+    settings.environmentEffects=0;
+    sector->floorpic=R_FlatNumForName((char*)"NUKAGE1");
+    ++leveltime;watchBodies();
+    check(corpseReaction(corpse)&&P_HazardAcidCorpse(corpse)&&corpseReaction(corpse)->progress<.03f,
+          "Legacy acid death and contact converge on one reaction");
+    G_SaveGame(5,(char*)"Environmental contact");G_DoSaveGame();
+    G_LoadGame((char*)"doomsav5.dsg");G_DoLoadGame();
+    mobj_t *restored=nullptr;
+    for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next) {
+        if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
+        auto *thing=(mobj_t*)t;
+        if(thing->type==MT_TROOP&&thing->x==fx(100)&&thing->y==fx(128))restored=thing;
+    }
+    check(restored&&(restored->flags&MF_CORPSE)&&!corpseReaction(restored),
+          "Save/load keeps the native corpse and releases level-local visual state");
+    levelSerial=r_levelserial;
+    watchBodies();
+    check(corpseReaction(restored)&&corpseReaction(restored)->medium==Medium::Acid,
+          "A loaded corpse reconstructs its reaction from current support");
+    P_RemoveMobj(restored);
+    std::printf("PASS environmental corpse integration (%d checks)\n",checks);
+}
 extern "C" void I_TestFrame() {
     if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
     if(corpseIntegrationMode){corpseIntegrationFrame();return;}
@@ -787,6 +904,7 @@ extern "C" void I_TestFrame() {
     if(vileMode){vileIntegration();I_Quit();return;}
     if(visualVile){vileVisualFrame();return;}
     if(acidMode){acidIntegration();I_Quit();return;}
+    if(environmentalCorpseMode){environmentalCorpseIntegration();I_Quit();return;}
     if(visualAcid){acidVisualFrame();return;}
     if(incendiaryMode){incendiaryIntegration();I_Quit();return;}
     if(incendiaryLargeMode){incendiaryLargeMap();I_Quit();return;}
@@ -811,6 +929,7 @@ int main(int argc,char **argv) {
     if(argc!=4&&argc!=5)return 2;output=argv[3];solidMode=argc==5&&!std::strcmp(argv[4],"--solid");visualEnhanced=argc==5&&!std::strcmp(argv[4],"--visual-enhanced");
     flashlightAwarenessMode=argc==5&&!std::strcmp(argv[4],"--flashlight-awareness");
     impAvoidanceMode=argc==5&&!std::strcmp(argv[4],"--imp-avoidance");
+    environmentalCorpseMode=argc==5&&!std::strcmp(argv[4],"--environmental-corpses");
     visualFeedback=argc==5&&!std::strcmp(argv[4],"--visual-feedback");
     const bool goreSolid=argc==5&&!std::strcmp(argv[4],"--gore-g1-solid");
     solidMode=solidMode||goreSolid;

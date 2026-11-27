@@ -313,7 +313,7 @@ void planSevereFall(SevereFragment &drop,float lifetime) {
 void collectSevereFall(const SevereBurst &burst,const SevereFragment &drop) {
     if(drop.sector<0||drop.sector>=numsectors)return;
     const size_t sector=size_t(drop.sector);
-    if(sector<sectorMist.size()&&sectorMist[sector].liquid)return;
+    if(suppressHazardFloorBlood(drop.sector)||(sector<sectorMist.size()&&sectorMist[sector].liquid))return;
     const auto p=drop.position(drop.end);
     if(std::abs(p[2]-floorZ(&sectors[sector]))>3.f)return;
     for(auto &pool:severePools) {
@@ -517,6 +517,7 @@ void forgetCorpseBlood(const mobj_t *thing,CorpseLifetime lifetime) {
 bool bloodFloorSplat(float x,float y,int sector,float size,float angle,float stretch,bool ceiling,float born,int kind,const uint32_t *decorationSeed,bool replaceOld,LiquidMaterial material,LiquidSource source) {
     if(!(material==LiquidMaterial::Acid?acidLiquidOn():bloodOn())||sector<0||sector>=numsectors)return false;
     checkBloodLevel();
+    if(!ceiling&&material==LiquidMaterial::Blood&&suppressHazardFloorBlood(sector))return false;
     const bool environment=source==LiquidSource::Environment;
     auto &marks=environment?environmentFloors:material==LiquidMaterial::Acid?acidFloors:bloodFloors;
     const size_t limit=environment?24:material==LiquidMaterial::Acid?96:maxFloorBlood;
@@ -738,7 +739,7 @@ void tickBloodFootsteps() {
     const subsector_t *sub=R_PointInSubsector(fixed_t(fx*FRACUNIT),fixed_t(fy*FRACUNIT));
     if(!sub||!sub->sector)return;
     int sector=int(sub->sector-sectors);
-    if(sector<0||sector>=numsectors||sub->sector->floorpic==skyflatnum||
+    if(sector<0||sector>=numsectors||suppressHazardFloorBlood(sector)||sub->sector->floorpic==skyflatnum||
        std::abs(floorZ(sub->sector)-z)>2.f||
        (size_t(sector)<sectorMist.size()&&sectorMist[sector].liquid))return;
     WallHit wall;
@@ -764,7 +765,7 @@ static void updateCorpsePools(float now) {
             if(lifetime)dryCorpseBlood(thing,lifetime);
             continue;
         }
-        if((thing->flags&MF_NOBLOOD)||(marked&&marker->second.dry))continue;
+        if(suppressHazardCorpseBlood(*thing)||(thing->flags&MF_NOBLOOD)||(marked&&marker->second.dry))continue;
         if(corpseDecayStage(thing)>=2) {
             dryCorpseBlood(thing,lifetime);
             continue;
@@ -781,7 +782,7 @@ static void updateCorpsePools(float now) {
             break;
         case CorpseRestState::Resting:break;
         }
-        if(sectors[rest.sector].floorpic==skyflatnum)continue;
+        if(sectors[rest.sector].floorpic==skyflatnum||suppressHazardFloorBlood(rest.sector))continue;
         const auto newLifetime=ensureCorpseLifetime(thing);
         if(!newLifetime)continue;
         pooledCorpses[thing]={newLifetime,true};
@@ -829,7 +830,12 @@ void buildBlood(const Uniforms &camera) {
     checkBloodLevel();
     if(showBlood) {
     updateCorpsePools(now);
-    for(const auto &pool:bloodPools) {
+    for(auto it=bloodPools.begin();it!=bloodPools.end();) {
+        if(suppressHazardFloorBlood(it->sector)) {
+            it=bloodPools.erase(it);
+            continue;
+        }
+        const auto &pool=*it++;
         float age=now-pool.born;
         // The pool spreads over four seconds in eight steps.
         float grow=0.3f+0.7f*std::min(1.0f,std::floor(age*2)/8);
@@ -839,7 +845,7 @@ void buildBlood(const Uniforms &camera) {
         flatBlood(bloodPool+32*pool.tint,pool.sector,pool.x,pool.y,pool.size*grow*spread,pool.angle,1,false,false,wet,dark,wash,camera);
     }
     severePools.erase(std::remove_if(severePools.begin(),severePools.end(),
-        [&](const BloodPool &pool){return now<pool.born||now-pool.born>45.f;}),severePools.end());
+        [&](const BloodPool &pool){return now<pool.born||now-pool.born>45.f||suppressHazardFloorBlood(pool.sector);}),severePools.end());
     for(const auto &pool:severePools) {
         const float age=now-pool.born;
         if(camera.eye[2]<floorZ(&sectors[pool.sector]))continue;
@@ -850,12 +856,12 @@ void buildBlood(const Uniforms &camera) {
             pool.size*grow*spread,pool.angle,1,false,false,wet,dark,wash,camera);
     }
     } // blood-only pools
-    bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){return now-d.born>180;}),bloodFloors.end());
+    bloodFloors.erase(std::remove_if(bloodFloors.begin(),bloodFloors.end(),[&](const BloodFloor &d){return now-d.born>180||(!d.ceiling&&suppressHazardFloorBlood(d.sector));}),bloodFloors.end());
     acidFloors.erase(std::remove_if(acidFloors.begin(),acidFloors.end(),[&](const BloodFloor &d){return now-d.born>25;}),acidFloors.end());
     for(const auto *marks:{&bloodFloors,&acidFloors,&environmentFloors})for(const auto &d:*marks) {
         if(marks==&acidFloors?!showAcid:!showBlood)continue;
         if(marks==&environmentFloors&&!wallBloodEnabled())continue;
-        if(now<d.born)continue;
+        if(now<d.born||(!d.ceiling&&marks!=&acidFloors&&suppressHazardFloorBlood(d.sector)))continue;
         if(d.ceiling?camera.eye[2]>ceilZ(&sectors[d.sector]):camera.eye[2]<floorZ(&sectors[d.sector]))continue; // Back of the flat.
         float wet,dark;bloodAge(now-d.born,0,3,wet,dark);
         float spread,wash=rainWash(!d.ceiling&&rainedOn(d.sector,d.x,d.y),now-d.born,dark,spread);

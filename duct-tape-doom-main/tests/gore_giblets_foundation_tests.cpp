@@ -191,7 +191,62 @@ static void featuredArtwork() {
     check(one.featured==0,"Unknown artwork uses the original material sprites");
 }
 
+static void environmentalReactions() {
+    using namespace hellforge::corpse_environment;
+    Reaction reaction;
+    check(!advance(reaction,Medium::None,1.f,1.f).entered,"No contact leaves the reaction idle");
+    check(advance(reaction,Medium::Acid,1.f,1.f).entered&&std::abs(reaction.progress-1.f/6.f)<.0001f,
+          "Acid uses its own fixed-step duration");
+    const float initial=reaction.progress;
+    advance(reaction,Medium::None,2.f,1.f);
+    check(!reaction.touching&&reaction.progress==initial,"Airborne time preserves consumption");
+    check(advance(reaction,Medium::Lava,1.f,1.f).entered&&reaction.progress>initial,
+          "Changing media preserves consumption and changes the rate");
+    const float changed=reaction.progress;
+    check(!advance(reaction,Medium::Lava,std::numeric_limits<float>::quiet_NaN(),1.f).entered&&reaction.progress==changed,
+          "Repeated contact and invalid time do not restart the reaction");
+    check(advance(reaction,Medium::Lava,5.f,speed(2)).completed&&
+          !advance(reaction,Medium::Lava,5.f,1.f).completed,"Completion fires once");
+    reaction={};
+    check(!reaction.complete()&&reaction.medium==Medium::None,"Reset clears the lifetime");
+
+    for(const auto medium:{Medium::Acid,Medium::Lava}) {
+        struct LiquidFixture {Fixture traceFixture;Medium medium;};
+        LiquidFixture fixture{{},medium};
+        fixture.traceFixture.surface=Surface::Liquid;
+        Host host{};
+        host.context=&fixture;
+        host.trace=[](void *ctx,Vec3 a,Vec3 b,float radius,TraceHit &hit) {
+            return trace(&static_cast<LiquidFixture*>(ctx)->traceFixture,a,b,radius,hit);
+        };
+        host.impact=[](void *ctx,const Impact &hit) {
+            impact(&static_cast<LiquidFixture*>(ctx)->traceFixture,hit);
+        };
+        host.liquidReaction=[](void *ctx,int sector) {
+            return sector==4?static_cast<LiquidFixture*>(ctx)->medium:Medium::None;
+        };
+        System sim;
+        Burst burst;
+        burst.eligible=true;burst.eventId=1;burst.origin={0,0,18};burst.pieces=1;
+        check(sim.emit(burst)==1,"Admit one fragment for liquid collision");
+        sim.advance(1.f/70.f,host);
+        check(!sim.restingCount(),"No effect during flight");
+        for(int i=0;i<70;++i)sim.advance(1.f/70.f,host);
+        check(sim.restingCount()==1&&!fixture.traceFixture.impacts,"Liquid owns the fragment and emits no marks");
+        Reaction visual;
+        sim.forEachVisual([](void *ctx,const Visual &v){*static_cast<Reaction*>(ctx)=v.reaction;},&visual);
+        check(visual.medium==medium&&visual.progress>0.f,"Visual reports material and progress");
+        for(int i=0;i<140;++i)sim.advance(1.f/70.f,host);
+        check(!sim.activeCount(),"Consumed fragment returns its slot");
+        ++burst.eventId;
+        check(sim.emit(burst)==1,"Consumed slot can be reused");
+        sim.forEachVisual([](void *ctx,const Visual &v){*static_cast<Reaction*>(ctx)=v.reaction;},&visual);
+        check(visual.medium==Medium::None&&visual.progress==0.f,"Reused giblet has fresh environmental state");
+    }
+}
+
 int main() {
+    environmentalReactions();
     featuredArtwork();
     wallAttachmentTests();
     Burst burst;

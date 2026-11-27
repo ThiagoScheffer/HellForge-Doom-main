@@ -17,6 +17,12 @@ This is the project’s running record of bugs, investigations, and fixes. Use t
 | HF-009 | Launcher release output omits upstream notices | Notice copies verified |
 | HF-010 | Burning City smoke has rectangular edges | Fix committed. In-game visual check open |
 
+## Environmental Corpse Reactions 1.0
+
+The native renderer now uses physical acid and lava contact to drive corpse and fragment consumption. It retains native corpse actors for resurrection and filters floor blood at the liquid surface.
+
+The Release engine built successfully. The loaded-map smoke driver passed 20 assertions, including raised support, wall blood, Arch-vile resurrection and save/load. The existing corrosive barrel fixture passed 45 assertions. GPU appearance and large-map performance remain open. [Implementation and validation](docs/changes/ENVIRONMENTAL-CORPSE-REACTIONS.md)
+
 ## HF-001 — Sunder 2308 waits on exit
 
 **Reproduction.** Load MAP01 from `Sunder 2308.wad` with accelerated graphics and moving-sector relighting enabled. Idle window closes took about 0.19 seconds. The `relight-quit` smoke mode changes a nearby sector height and requests a normal exit as soon as it detects an active lighting worker. That run stayed in shutdown for at least 88 seconds before the harness timed out.

@@ -100,6 +100,19 @@ static void run(){
  check(selectedOption().isEnabled(physical)&&physicalBodiesEnabled(physical)&&physical.physicalBodies==2,"Physical Bodies enables with explicit ragdoll deaths");
  choose("physical_body_stable_cards");physical.accelerated=0;
  check(!selectedOption().isEnabled(physical)&&physical.physicalBodyStableCards,"software renderer preserves the stable sprite preference");
+ Settings environment;
+ environment.accelerated=1;
+ check(environment.environmentalCorpseReactions&&environment.lavaCorpseCombustion&&
+       environment.hazardousSurfaceBloodSuppression&&environment.environmentalGibletReactions&&
+       environment.environmentalCorpseReactionSpeed==1&&!environment.acidCorpseDissolution,
+       "Environmental defaults preserve the existing acid preference");
+ choose("environmental_corpse_reaction_speed");
+ readOption(environment,"environmental_corpse_reaction_speed",2);
+ check(environment.environmentalCorpseReactionSpeed==2&&selectedOption().isEnabled(environment),
+       "Fast environmental reaction speed loads through the native registry");
+ readOption(environment,"environmental_corpse_reactions",0);
+ check(!selectedOption().isEnabled(environment)&&environment.environmentalCorpseReactionSpeed==2,
+       "Master switch gates the speed control and retains its preference");
  auto original=panel.tabs;for(int i=0;i<25;++i){auto t=panel.tabs[0];t.title="Extra category";panel.tabs.push_back(std::move(t));}selectTab((int)panel.tabs.size()-1);check(panel.tab-panel.tabScroll<visibleLines,"sidebar overflow scrolls");I_Render3DSettingsClick(24,listRow*cellHeight+8,1);check(panel.tab==panel.tabScroll,"sidebar click after scroll");panel.tabs=std::move(original);selectTab(0);paint();
  choose("window_strength");check(!strcmp(panel.tabs[panel.tab].title,"Lighting")&&!strcmp(currentPage().title,"Windows"),"window settings located correctly");panel.draft.bakedLights=0;panel.draft.windowLight=1;float strength=panel.draft.windowStrength;check(!selectedOption().isEnabled(panel.draft)&&dependencyHint(selectedOption()).find("Lighting / Baked")!=std::string::npos,"dependency points to correct sub-tab");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);check(panel.draft.windowStrength==strength,"disabled controls locked");
  choose("fov");I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_TAB,0);check(panel.draft.fov==95&&settings.fov==90,"navigation preserves draft only");choose("fov");I_Render3DSettingsKey(SDL_SCANCODE_R,0);check(panel.draft.fov==90,"reset default");I_Render3DSettingsKey(SDL_SCANCODE_F10,0);check(!panel.open&&applied==0&&settings.bakedLights,"discard draft");

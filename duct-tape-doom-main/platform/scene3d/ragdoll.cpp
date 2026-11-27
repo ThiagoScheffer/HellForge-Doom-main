@@ -1136,7 +1136,11 @@ static void advanceRagdoll(const mobj_t &thing,Ragdoll &doll,int target) {
             // as hard as it came down: its fall (this tic's or the last whole one) and some of its slide.
             // In a liquid it plunges in instead, by its weight too (liquids.cpp); sprayLanding leaves liquids be.
             float wx,wy,hit=std::hypot(std::max(drop,doll.drop),0.5f*slid);world(doll.p[P_SPINE],wx,wy);
-            bodySplash(wx,wy,hit,(float)thing.info->mass,units(thing.radius));
+            CorpseSurface contact;
+            if(!environmentalCorpseReactionsEnabled()||
+               !ragdollCorpseSurface(thing,contact)||
+               enabledCorpseMedium(contact.sector)==corpse_environment::Medium::None)
+                bodySplash(wx,wy,hit,(float)thing.info->mass,units(thing.radius));
             if(!(thing.flags&MF_NOBLOOD))sprayLanding(wx,wy,doll.gz+doll.floorAt(doll.p[P_SPINE]),hit);
         }
         doll.drop=drop;
@@ -1234,6 +1238,35 @@ void tickRagdoll(const mobj_t &thing) {
     doll.lastAdvanceTic=leveltime;
     // Normally one step. Limit catch-up after a renderer or setting pause.
     advanceRagdoll(thing,doll,std::min(leveltime-doll.start,doll.tics+4));
+}
+
+// An existing doll owns support even when airborne. Read its major-body
+// contacts from the solver's grid, or its saved support after it is baked.
+bool ragdollCorpseSurface(const mobj_t &thing,CorpseSurface &surface) {
+    surface={};
+    if(!hasRagdoll(&thing))return false;
+    const auto &doll=dolls.find(&thing)->second;
+    for(int point:{P_SPINE,P_HIP_L,P_HIP_R}) {
+        const V3 p=doll.p[point];
+        const sector_t *sector=doll.resting?doll.restSector:doll.sectorUnder(p);
+        if(corpseSurfaceMedium(sector)==corpse_environment::Medium::None)continue;
+        const float floor=units(sector->floorheight);
+        const float support=doll.resting?doll.restFloor:floor;
+        if(std::abs(doll.gz+p.z-radius[point]-support)>.75f)continue;
+        float x,y;
+        doll.worldPoint(p,x,y);
+        const double fx=double(x)*FRACUNIT,fy=double(y)*FRACUNIT;
+        if(fx<std::numeric_limits<fixed_t>::min()||fx>std::numeric_limits<fixed_t>::max()||
+           fy<std::numeric_limits<fixed_t>::min()||fy>std::numeric_limits<fixed_t>::max())continue;
+        const auto *sub=R_PointInSubsector(fixed_t(fx),fixed_t(fy));
+        if(!sub||!sub->sector||sub->sector->floorheight!=sector->floorheight||
+           sub->sector->floorpic!=sector->floorpic)continue;
+        if(SV_Active()&&thing.subsector&&sub->sector==thing.subsector->sector&&
+           thing.floorz>sector->floorheight+FRACUNIT/64)continue;
+        surface={sector,x,y,floor};
+        break;
+    }
+    return true;
 }
 
 bool ragdollView(const mobj_t &thing,DeathView &view) {
@@ -1606,6 +1639,27 @@ void testRagdollRestFixture() {
     sectors[1].floorheight=height;
     doll.p[P_SPINE].x=std::numeric_limits<float>::infinity();
     require(ragdollRestLocation(&corpse,out)==CorpseRestState::Invalid,"nonfinite point");
+    // The visual torso can be over a different floor from the actor.
+    const auto *viewer=players[displayplayer].mo;
+    require(viewer&&viewer->subsector,"arena has a valid viewer");
+    auto *hazard=viewer->subsector->sector;
+    const int original=hazard->floorpic;
+    hazard->floorpic=R_FlatNumForName((char*)"LAVA1");
+    doll.resting=doll.baked=doll.mirror=false;
+    doll.ox=units(viewer->x);doll.oy=units(viewer->y);
+    doll.floors={doll.ox,doll.oy,1,{hazard}};
+    doll.gx=doll.gy=0.f;doll.gz=units(hazard->floorheight);
+    for(int point:{P_SPINE,P_HIP_L,P_HIP_R})doll.p[point]={0,0,32.f};
+    CorpseSurface contact;
+    require(ragdollCorpseSurface(corpse,contact)&&!contact.sector,"torso above lava has no contact");
+    doll.p[P_SPINE].z=radius[P_SPINE];
+    require(ragdollCorpseSurface(corpse,contact)&&contact.sector==hazard,"torso uses the grid's liquid support");
+    doll.resting=true;doll.restSector=hazard;doll.restFloor=doll.gz;
+    doll.floors.cells.clear();
+    hazard->floorheight+=FRACUNIT;
+    require(ragdollCorpseSurface(corpse,contact)&&contact.z==units(hazard->floorheight),"baked body follows moving support");
+    hazard->floorheight-=FRACUNIT;
+    hazard->floorpic=original;
     corpse.state=&states[S_POSS_STND];
     require(ragdollRestLocation(&corpse,out)==CorpseRestState::NoRagdoll,"stale death chain");
     forgetRagdoll(&corpse);

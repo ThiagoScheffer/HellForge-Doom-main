@@ -146,6 +146,13 @@ void System::step(float dt, const Host &host, int &impactBudget) {
     for (Piece &p : pieces_) {
         if (!p.used) continue;
         p.age += dt;
+        if(p.reaction.medium!=corpse_environment::Medium::None) {
+            const auto contact=host.liquidReaction?host.liquidReaction(host.context,p.surface.sector):
+                corpse_environment::Medium::None;
+            const auto events=corpse_environment::advance(p.reaction,contact,dt,host.reactionSpeed,true);
+            if(events.completed||(!p.reaction.touching&&p.age>=p.lifespan))p.used=false;
+            continue;
+        }
         if (p.age >= p.lifespan) { p.used = false; continue; }
         if (p.attachment==Attachment::Wall) {
             const float phase=std::clamp((p.age-p.attachedAt)/(p.attachedUntil-p.attachedAt),0.f,1.f);
@@ -175,6 +182,22 @@ void System::step(float dt, const Host &host, int &impactBudget) {
             p.p = next; p.rotation += p.angularSpeed*dt; continue;
         }
         const auto surface=hit.surface.type;
+        if(surface==Surface::Liquid&&hit.surface.sector>=0&&host.liquidReaction&&
+           finite(hit.center)&&finite(hit.contact)&&hit.normal.z>.5f&&
+           std::isfinite(hit.fraction)&&hit.fraction>=0.f&&hit.fraction<=1.f) {
+            const auto medium=host.liquidReaction(host.context,hit.surface.sector);
+            if(medium!=corpse_environment::Medium::None) {
+                if(stationaryCount()>=MaxResting) {
+                    oldestStationary()->used=false;
+                    ++stats_.evictedResting;
+                }
+                p.p=hit.center;p.contact=hit.contact;p.normal=hit.normal;p.surface=hit.surface;
+                p.resting=true;p.restedAt=p.age;p.v={};
+                corpse_environment::advance(p.reaction,medium,0.f,host.reactionSpeed,true);
+                if(host.contact)host.contact(host.context,p.eventId,surface,true);
+                continue;
+            }
+        }
         const bool solid=surface==Surface::Wall?
             hit.surface.line>=0&&hit.surface.side>=0&&hit.surface.side<=1&&hit.surface.section>=0&&hit.surface.section<=2:
             (surface==Surface::Floor||surface==Surface::Ceiling)&&hit.surface.sector>=0;
@@ -280,7 +303,7 @@ void System::forEachVisual(VisualFn draw, void *context) const {
         draw(context, {p.p,p.kind,p.tint,p.size,p.rotation,
                        std::clamp(p.age/p.lifespan,0.0f,1.0f),p.variant,p.resting,
                        p.contact,p.normal,p.surface,p.eventId,p.attachment,
-                       p.attachment==Attachment::Wall?p.age-p.attachedAt:0.f,p.squash,p.sag,p.anchor,p.artwork});
+                       p.attachment==Attachment::Wall?p.age-p.attachedAt:0.f,p.squash,p.sag,p.anchor,p.artwork,p.reaction});
     }
 }
 

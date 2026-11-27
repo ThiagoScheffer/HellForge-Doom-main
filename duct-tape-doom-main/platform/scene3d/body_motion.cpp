@@ -1,6 +1,10 @@
 /* Body motion: monsters jolt from the blow that hits or kills them. A
    drawing-only layer over the game's own frames; the game never sees it. */
 #include "internal.h"
+extern "C" {
+#include "../audio/impact_synth.h"
+#include "../audio/sound_options.h"
+}
 
 namespace doom3d {
 // Every tic each monster is watched for lost health. The blow's direction
@@ -26,6 +30,165 @@ static unsigned bodyLevelSerial;
 static std::unordered_map<const mobj_t*,CorpseLifetime> corpseLifetimes;
 static CorpseLifetime nextCorpseLifetime=0;
 
+struct EnvironmentalCorpse {
+    corpse_environment::Reaction reaction;
+    CorpseSurface surface;
+    int updated=-1;
+    int nextAcidSound=0;
+};
+static std::unordered_map<const mobj_t*,EnvironmentalCorpse> environmentalCorpses;
+static int reactionSplashTic=-1;
+static unsigned reactionSplashes=0;
+static std::array<const mobj_t*,12> reactionEffectSites{};
+static unsigned reactionEffectCount=0;
+static int reactionEffectTic=-1;
+static int nextAcidSoundTic=0;
+
+bool environmentalCorpseReactionsEnabled() {
+    return settings.accelerated&&settings.environmentalCorpseReactions&&
+        gamestate==GS_LEVEL&&!netgame&&!demoplayback&&!demorecording&&levelSerial==r_levelserial;
+}
+corpse_environment::Medium corpseSurfaceMedium(const sector_t *sector) {
+    using corpse_environment::Medium;
+    if(!sector||sector->floorpic==skyflatnum)return Medium::None;
+    switch(P_HazardFloorKind(sector->floorpic)) {
+    case HAZARD_ACID:return Medium::Acid;
+    case HAZARD_LAVA:return Medium::Lava;
+    default:return Medium::None;
+    }
+}
+corpse_environment::Medium enabledCorpseMedium(const sector_t *sector) {
+    using corpse_environment::Medium;
+    if(!environmentalCorpseReactionsEnabled())return Medium::None;
+    const auto medium=corpseSurfaceMedium(sector);
+    if(medium==Medium::Acid&&!settings.acidCorpseDissolution)return Medium::None;
+    if(medium==Medium::Lava&&!settings.lavaCorpseCombustion)return Medium::None;
+    return medium;
+}
+bool suppressHazardFloorBlood(int sector) {
+    return environmentalCorpseReactionsEnabled()&&settings.hazardousSurfaceBloodSuppression&&
+        sector>=0&&sector<numsectors&&corpseSurfaceMedium(&sectors[sector])!=corpse_environment::Medium::None;
+}
+static CorpseSurface corpseSurface(const mobj_t &thing) {
+    CorpseSurface surface;
+    if(ragdollCorpseSurface(thing,surface))return surface;
+    const auto *sector=thing.subsector?thing.subsector->sector:nullptr;
+    if(corpseSurfaceMedium(sector)!=corpse_environment::Medium::None&&P_HazardFloorContact(&thing,sector))
+        surface={sector,units(thing.x),units(thing.y),units(sector->floorheight)};
+    return surface;
+}
+bool suppressHazardCorpseBlood(const mobj_t &thing) {
+    const auto *reaction=corpseReaction(&thing);
+    if(reaction&&reaction->complete())return true;
+    if(!environmentalCorpseReactionsEnabled()||!settings.hazardousSurfaceBloodSuppression||
+       thing.health>0||thing.player||!(thing.flags&MF_CORPSE))return false;
+    return corpseSurfaceMedium(corpseSurface(thing).sector)!=corpse_environment::Medium::None;
+}
+const corpse_environment::Reaction *corpseReaction(const mobj_t *thing) {
+    if(!thing||thing->health>0||levelSerial!=r_levelserial||bodyLevelSerial!=r_levelserial)return nullptr;
+    const auto found=environmentalCorpses.find(thing);
+    return found==environmentalCorpses.end()||found->second.reaction.medium==corpse_environment::Medium::None?
+        nullptr:&found->second.reaction;
+}
+static void tickCorpseReaction(const mobj_t &thing) {
+    using corpse_environment::Medium;
+    auto found=environmentalCorpses.find(&thing);
+    if(found!=environmentalCorpses.end()&&(found->second.reaction.complete()||found->second.updated==leveltime))return;
+    if(!environmentalCorpseReactionsEnabled()&&found==environmentalCorpses.end())return;
+    const auto contact=environmentalCorpseReactionsEnabled()?corpseSurface(thing):CorpseSurface{};
+    const auto medium=enabledCorpseMedium(contact.sector);
+    const bool started=found!=environmentalCorpses.end()&&found->second.reaction.medium!=Medium::None;
+    const int legacyAcidAge=!started&&settings.acidCorpseDissolution&&P_HazardAcidCorpse(&thing)?
+        P_HazardDeathAge(&thing):-1;
+    // Acid from a legacy barrel death can dissolve on dry land. Give it
+    // feedback without taking over the existing sprite or its timer.
+    const bool legacy=environmentalCorpseReactionsEnabled()&&!started&&medium==Medium::None&&
+        legacyAcidAge>=0&&legacyAcidAge<ACID_DISSOLVE_TICS;
+    if(!started&&medium==Medium::None&&!legacy)return;
+    if(found==environmentalCorpses.end())found=environmentalCorpses.try_emplace(&thing).first;
+    auto &entry=found->second;
+    entry.updated=leveltime;
+    entry.surface=legacy?CorpseSurface{nullptr,units(thing.x),units(thing.y),units(thing.z)}:contact;
+    if(!started&&medium!=Medium::None) {
+        if(legacyAcidAge>=0) {
+            entry.reaction.medium=medium;
+            entry.reaction.progress=float(legacyAcidAge)/ACID_DISSOLVE_TICS;
+        }
+        forgetCorpseAmbience(&thing);
+    }
+    const auto events=corpse_environment::advance(entry.reaction,medium,1.f/TICRATE,
+        corpse_environment::speed(settings.environmentalCorpseReactionSpeed));
+    if(events.completed)forgetRagdoll(&thing);
+    if(reactionEffectTic!=leveltime){reactionEffectTic=leveltime;reactionEffectCount=0;}
+    if(legacy||entry.reaction.touching) {
+        const auto &site=entry.surface;
+        const auto *viewer=players[displayplayer].mo;
+        if(viewer&&std::hypot(units(viewer->x)-site.x,units(viewer->y)-site.y)<=640.f) {
+            if(reactionEffectCount<reactionEffectSites.size())reactionEffectSites[reactionEffectCount++]=&thing;
+            if((legacy||medium==Medium::Acid)&&leveltime>=entry.nextAcidSound&&leveltime>=nextAcidSoundTic) {
+                I_MadeSound(IMPACT_SPARK_FIZZ,site.x,site.y,site.z+4.f);
+                entry.nextAcidSound=leveltime+2*TICRATE;
+                nextAcidSoundTic=leveltime+TICRATE/5;
+            }
+        }
+    }
+    if(events.entered&&contact.sector) {
+        if(reactionSplashTic!=leveltime){reactionSplashTic=leveltime;reactionSplashes=0;}
+        if(reactionSplashes<4) {
+            ++reactionSplashes;
+            if(!bodySplash(contact.x,contact.y,5.f,float(thing.info->mass),units(thing.radius))) {
+                debrisLiquidSplash(contact.x,contact.y,contact.z,int(contact.sector-sectors),3.f);
+                if(medium==Medium::Acid&&settings.splashes)
+                    I_MadeSound(IMPACT_SPLASH_THICK,contact.x,contact.y,contact.z);
+            }
+        }
+    }
+}
+
+static unsigned corpseReactionEffectCount() {
+    // The body watch runs in R_BeforeTic. Frames normally draw after
+    // P_Ticker has advanced leveltime, and can reuse this one snapshot.
+    if(!environmentalCorpseReactionsEnabled()||bodyLevelSerial!=r_levelserial||
+       !settings.environmentEffects||reactionEffectTic<0||
+       leveltime<reactionEffectTic||leveltime-reactionEffectTic>1)return 0;
+    return reactionEffectCount;
+}
+#ifdef DOOM_TEST_DRIVER
+unsigned testCorpseReactionEffectCount() {return corpseReactionEffectCount();}
+#endif
+void buildCorpseReactionEffects(const Uniforms &camera) {
+    const unsigned sites=corpseReactionEffectCount();
+    if(!sites)return;
+    const float now=gameSeconds();
+    for(unsigned i=0;i<sites;++i) {
+        const auto *thing=reactionEffectSites[i];
+        const auto found=environmentalCorpses.find(thing);
+        if(found==environmentalCorpses.end())continue;
+        const auto &entry=found->second;
+        const auto &contact=entry.surface;
+        const bool legacy=entry.reaction.medium==corpse_environment::Medium::None;
+        if(legacy) {
+            if(!settings.acidCorpseDissolution||!P_HazardAcidCorpse(thing)||P_HazardDissolved(thing))continue;
+        } else if(!entry.reaction.touching||enabledCorpseMedium(contact.sector)!=entry.reaction.medium)continue;
+        if(std::hypot(camera.eye[0]-contact.x,camera.eye[1]-contact.y)>512.f)continue;
+        const auto seed=hash32(uint32_t(uintptr_t(thing)));
+        const float progress=legacy?float(P_HazardDeathAge(thing))/ACID_DISSOLVE_TICS:entry.reaction.progress;
+        const float fade=1.f-progress;
+        const bool burning=entry.reaction.medium==corpse_environment::Medium::Lava;
+        drawCorpseReactionPlume(camera,contact.x,contact.y,contact.z,now,fade,seed,burning);
+        if(!burning)for(int n=0;n<3;++n) {
+            const float age=std::fmod(now*(.9f+.11f*n)+hashUnit(n,0,seed),1.f);
+            const float x=contact.x+12.f*(hashUnit(n,1,seed)-.5f);
+            const float y=contact.y+12.f*(hashUnit(n,2,seed)-.5f);
+            const bool bubble=age<.5f;
+            const std::array<float,3> color=bubble?std::array<float,3>{.38f,.49f,.15f}:
+                std::array<float,3>{.34f,.38f,.24f};
+            pixelBlock(particleVertices,camera,x,y,contact.z+1.f+age*12.f,
+                bubble?.65f:1.2f,bubble?.65f:1.8f,color,false,nullptr,false,nullptr,fade*(1.f-age));
+        }
+    }
+}
+
 CorpseLifetime corpseLifetime(const mobj_t *thing) {
     const auto found=corpseLifetimes.find(thing);
     return found==corpseLifetimes.end()?0:found->second;
@@ -37,6 +200,7 @@ CorpseLifetime ensureCorpseLifetime(const mobj_t *thing) {
     return corpseLifetimes.emplace(thing,nextCorpseLifetime).first->second;
 }
 static void invalidateCorpseLifetime(const mobj_t *thing) {
+    environmentalCorpses.erase(thing);
     if(const auto lifetime=corpseLifetime(thing)) {
         if(P_HazardAcidCorpse(thing))dryCorpseBlood(thing,lifetime);
         forgetCorpseBlood(thing,lifetime);
@@ -46,6 +210,12 @@ static void invalidateCorpseLifetime(const mobj_t *thing) {
 }
 void resetCorpseLifetimes() {
     corpseLifetimes.clear();
+    environmentalCorpses.clear();
+    reactionSplashTic=-1;
+    reactionSplashes=0;
+    reactionEffectCount=0;
+    reactionEffectTic=-1;
+    nextAcidSoundTic=0;
     nextCorpseLifetime=0;
 }
 void corpseLifecycleEvent(const mobj_t *thing,int death) {
@@ -191,7 +361,8 @@ void watchBodies() {
     const bool ragdolls=ragdollDeathsEnabled(settings);
     if((!settings.deathMotion&&!settings.hitFlinch&&!settings.deathDirector&&!ragdolls&&!settings.wounds&&!spray&&
         !settings.criticalParts&&!settings.enhancedWeakPoints&&!settings.weaponVulnerabilities&&!settings.monsterMetalSparks&&
-        !(advancedGoreMode(settings)&&settings.blood&&totalkills<200))||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
+        !(advancedGoreMode(settings)&&settings.blood&&totalkills<200)&&
+        !environmentalCorpseReactionsEnabled()&&environmentalCorpses.empty())||levelSerial!=r_levelserial) {bodyMotionShutdown();return;}
     if(bodyLevelSerial!=r_levelserial) {bodyMotionShutdown();bodyLevelSerial=r_levelserial;}
     for(auto &entry:watched)entry.second.seen=false;
     static std::vector<mobj_t*> bodies;bodies.clear();
@@ -200,7 +371,11 @@ void watchBodies() {
     for(mobj_t *thing:bodies) {
         bool alive=thing->health>0&&!(thing->flags&MF_CORPSE);
         auto found=watched.find(thing);
-        if(found==watched.end()) {watched[thing]={thing->health,units(thing->momx),units(thing->momy),alive,true};continue;}
+        if(found==watched.end()) {
+            watched[thing]={thing->health,units(thing->momx),units(thing->momy),alive,true};
+            if(!alive&&(thing->flags&MF_CORPSE))tickCorpseReaction(*thing);
+            continue;
+        }
         Body &body=found->second;body.seen=true;
         bool died=body.alive&&!alive,hurt=alive&&thing->health<body.health;
         if(alive&&!body.alive) {invalidateCorpseLifetime(thing);hits.erase(thing);impulses.erase(thing);forgetDeath(thing);forgetWounds(thing);} // Raised again.
@@ -239,6 +414,7 @@ void watchBodies() {
         }
         body.pendingDeath=false;
         if(!alive&&ragdolls)tickRagdoll(*thing);
+        if(!alive&&(thing->flags&MF_CORPSE))tickCorpseReaction(*thing);
         if(!alive&&P_HazardAcidCorpse(thing))dryCorpseBlood(thing,corpseLifetime(thing));
         body.health=thing->health;body.momx=units(thing->momx);body.momy=units(thing->momy);body.alive=alive;
     }
@@ -248,6 +424,7 @@ void watchBodies() {
         if(lifetime)forgetCorpseBlood(it->first,lifetime);
         forgetCorpseAmbience(it->first);
         corpseLifetimes.erase(it->first);
+        environmentalCorpses.erase(it->first);
         hits.erase(it->first);forgetDeath(it->first);forgetWounds(it->first);it=watched.erase(it);
     }
     for(auto it=impulses.begin();it!=impulses.end();) {
@@ -257,7 +434,7 @@ void watchBodies() {
     }
     for(auto it=hits.begin();it!=hits.end();) it=leveltime-it->second.tic>2?hits.erase(it):std::next(it);
 }
-void bodyMotionShutdown() {watched.clear();impulses.clear();hits.clear();deathsShutdown();woundsShutdown();}
+void bodyMotionShutdown() {environmentalCorpses.clear();watched.clear();impulses.clear();hits.clear();deathsShutdown();woundsShutdown();}
 
 // A rise to its peak at tic peak, then a slow fall.
 static float pulse(float t,float peak) {return t<=0?0:t/peak*std::exp(1-t/peak);}

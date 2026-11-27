@@ -219,6 +219,8 @@ struct Settings {
     int enhancedWeakPoints=0,weaponVulnerabilities=0,localizedInjuries=0;
     int elementalDot=0,combatMessages=0;
     int monsterEnvironmentDamage=0,monsterHazardAvoidance=1,acidCorpseDissolution=0;
+    int environmentalCorpseReactions=1,lavaCorpseCombustion=1,hazardousSurfaceBloodSuppression=1;
+    int environmentalGibletReactions=1,environmentalCorpseReactionSpeed=1;
     int acidSplatters=1,acidMonsterCoating=1;
     int corrosiveBarrels=0; // Persistent acid leaks and damaging pools from explosive barrels; classic behavior when off.
     int incendiaryBarrels=0;

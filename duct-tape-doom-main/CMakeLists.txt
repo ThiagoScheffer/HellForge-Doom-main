@@ -568,6 +568,17 @@ if(DOOM_BUILD_SDL)
             find_package(Python3 QUIET COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
                 add_test(NAME gore-giblet-art COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/pack_giblets.py" --check)
+                if(DOOM_COMPAT_TEST_IWAD)
+                    set(corpse_test_dir "${CMAKE_CURRENT_BINARY_DIR}/environmental-corpse-smoke")
+                    file(MAKE_DIRECTORY "${corpse_test_dir}")
+                    add_test(NAME environmental-corpse-arena COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/ragdoll_arena.py" imp "${corpse_test_dir}/arena.wad")
+                    set_tests_properties(environmental-corpse-arena PROPERTIES FIXTURES_SETUP EnvironmentalCorpseArena)
+                    add_test(NAME environmental-corpse-contact COMMAND doom-critical-smoke
+                        "${DOOM_COMPAT_TEST_IWAD}" "${corpse_test_dir}/arena.wad" "${corpse_test_dir}" --environmental-corpses)
+                    set_tests_properties(environmental-corpse-contact PROPERTIES
+                        FIXTURES_REQUIRED EnvironmentalCorpseArena WORKING_DIRECTORY "${corpse_test_dir}")
+                endif()
             endif()
             add_executable(doom-settings-navigation-tests tests/settings_navigation.cpp platform/settings_panel.cpp)
             target_compile_features(doom-settings-navigation-tests PRIVATE cxx_std_17)

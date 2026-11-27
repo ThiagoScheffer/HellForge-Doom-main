@@ -743,7 +743,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     }
     void criticalSurface(mobj_t *thing, mobj_t *viewer)
     {
-        if (!thing || !viewer || !thing->subsector || P_HazardAcidCorpse(thing) || thing->sprite < 0 || thing->sprite >= numsprites)
+        if (!thing || !viewer || !thing->subsector || corpseReaction(thing) || P_HazardAcidCorpse(thing) || thing->sprite < 0 || thing->sprite >= numsprites)
             return;
         const auto &sprite = sprites[thing->sprite];
         int frame = thing->frame & FF_FRAMEMASK;
@@ -805,11 +805,21 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Reflected/voxel presentation retains the existing sprite/model path.
         if (!mirror && monsterProjectileVisual(*thing, camera, fraction))
             return;
-        const bool acidCorpse=P_HazardAcidCorpse(thing);
-        const bool lavaCorpse=P_HazardLavaCorpse(thing);
+        const auto *reaction=corpseReaction(thing);
+        if(reaction&&reaction->complete())return;
+        const float consumed=reaction?reaction->progress:0.f;
+        const bool contactAcid=reaction&&reaction->medium==corpse_environment::Medium::Acid;
+        const bool contactLava=reaction&&reaction->medium==corpse_environment::Medium::Lava;
+        const bool acidCorpse=!reaction&&P_HazardAcidCorpse(thing);
+        const bool lavaCorpse=!reaction&&P_HazardLavaCorpse(thing);
         const bool charred=lavaCorpse||P_CombatCharred(thing);
         DeathView death = {thing->sprite, thing->frame, thing->angle, false, 1, 0, {}};
         bool directed = !self && !acidCorpse && deathView(*thing, fraction, death);
+        if(reaction&&!death.ragdoll) {
+            death.fall={};
+            death.bend=0.f;
+            death.settle=0.f;
+        }
         if (death.sprite < 0 || death.sprite >= numsprites)
             return;
         const auto &sprite = sprites[death.sprite];
@@ -837,8 +847,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Hit flinches and death jolts (body_motion.cpp): drawn in strips, a hop lifts the body.
         // A directed death scales the jolt by its phase and adds the landing's settle.
         BodyPose pose;
-        bool posed = !self && !acidCorpse && !death.fall.active && (thing->flags & MF_COUNTKILL) && bodyPose(*thing, fraction, pose);
-        if (directed)
+        bool posed = !reaction && !self && !acidCorpse && !death.fall.active && (thing->flags & MF_COUNTKILL) && bodyPose(*thing, fraction, pose);
+        if (directed && !reaction)
         {
             if (!posed)
                 pose = {};
@@ -855,14 +865,14 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             z += pose.lift;
         const bool ragdoll = death.ragdoll != nullptr;
         const size_t casterIndex=casters.size();
-        if (!self && !acidCorpse && !ragdoll)
+        if (!reaction && !self && !acidCorpse && !ragdoll)
             addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera);
-        if (!self && !acidCorpse && !ragdoll && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
+        if (!reaction && !self && !acidCorpse && !ragdoll && beam && !(thing->flags & (MF_MISSILE | MF_NOBLOCKMAP | MF_SPECIAL)) && (thing->flags & (MF_SOLID | MF_SHOOTABLE)) && !(death.frame & FF_FULLBRIGHT))
             casters.push_back({thing, &image, lump, (bool)flipped(rotation), x, y, z, std::hypot(x - camera.eye[0], y - camera.eye[1])});
         auto pulse = lit.pulse, beamLight = lit.beam, baked = lit.baked;
         const auto &shadowLights = lit.shadows;
         const auto &statics = lit.statics;
-        if (!self && !acidCorpse && !ragdoll)
+        if (!reaction && !self && !acidCorpse && !ragdoll)
             for (const auto &light : shadowLights.lights)
                 if (light.strength > 0.025f)
                     addEnemyShadow(*thing, image, lump, flipped(rotation), x, y, z, camera, &light);
@@ -965,7 +975,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             // Terminal-state eligibility and age come from the corpse tracker.
             // Conventional WAD variants are shared. A baked ragdoll updates
             // its own card while keeping the shape used by lighting and shadows.
-            const int readyDecayStage = !self && !thing->player && !charred && !acidCorpse
+            const int readyDecayStage = !reaction && !self && !thing->player && !charred && !acidCorpse
                 ? corpseDecayStage(thing) : 0;
             const int decayStage = readyDecayStage && !death.ragdoll && death.sprite==thing->sprite
                 ? readyDecayStage : 0;
@@ -977,8 +987,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             Image &uncoatedImage=decayStage ? corpseDecayImage(lump,skinImage,decayStage,decayFamily,spriteKey) :
                 art ? decorationStain(*art,skinImage,spriteKey) : eyeImage;
             Image *residue=acidCorpse&&P_HazardDissolved(thing)?dissolvedCorpseImage(spriteKey):nullptr;
-            if(acidCorpse&&!residue)spriteKey=-1-lump;
-            Image &image=residue?*residue:acidCorpse?acidCorpseImage(lump,sourceImage,spriteKey):
+            if((acidCorpse||contactAcid)&&!residue)spriteKey=-1-lump;
+            Image &image=residue?*residue:(acidCorpse||contactAcid)&&!death.ragdoll?acidCorpseImage(lump,sourceImage,spriteKey):
                 acidCoatedImage(thing,uncoatedImage,spriteKey,camera.eye[0],camera.eye[1],flipped(seen),
                                 uncoatedImage.eyeDamageMask.empty() ? nullptr : &sourceImage);
             // A traceable renderer hand-off is essential: isolated rule tests
@@ -1037,6 +1047,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 }
             }
 
+            if(reaction&&!ragdoll)top=bottom+(top-bottom)*(1.f-consumed);
             float pivotDown=0;
             const float roll=art?decorationRoll(*thing,*art,fraction,rx,ry,top,ceilZ(&sectors[i]),pivotDown):0;
             const float pivot=art?decorationPivot(*art,image,flipped(seen)):0;
@@ -1048,7 +1059,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 woundView(thing, players[displayplayer].mo, baseImage, flipped(seen), x, y, fittedFeet - sink, top, bottom, rx, ry, posed ? &pose : nullptr, (int)seen);
             // Wound holes (wounds.cpp): texels shot through, and their rims.
             std::vector<byte> holes;
-            bool wounded = !self && !acidCorpse && !ragdoll && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
+            bool wounded = !reaction && !self && !acidCorpse && !ragdoll && woundMask(*thing, baseImage, flipped(seen), rx, ry, holes);
             const std::vector<byte> *cut = wounded ? &holes : nullptr;
             auto finish = [&](std::vector<Vertex> &batch, size_t from)
             {
@@ -1060,6 +1071,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     batch[n].statics = packedStatics;
                     batch[n].lampTint = tint;
                     if(ragdoll&&P_CombatCharred(thing)){batch[n].light*=.22f;batch[n].red=batch[n].green=batch[n].blue=0;batch[n].lampTint=0xFF383838u;}
+                    if(contactLava) {
+                        const float charAmount=std::min(1.f,consumed*2.f);
+                        batch[n].light*=1.f-.76f*charAmount;
+                        batch[n].red*=1.f-charAmount;
+                        batch[n].green*=1.f-charAmount;
+                        batch[n].blue*=1.f-charAmount;
+                    }
                     if (grounded)
                     {
                         batch[n].mode |= MODE_GROUNDED;
@@ -1080,10 +1098,11 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     size_t from = batch.size();
                     unsigned cm = m & ~MODE_FLIPPED;
                     float l = -card.half, r = card.half, t = card.top, b = card.top - card.size, s = (float)card.size;
+                    if(reaction)t=b+(t-b)*(1.f-consumed);
                     quad(batch, {card.x + rx * l, card.y + ry * l, t, 0, 0, light, cm}, {card.x + rx * r, card.y + ry * r, t, s, 0, light, cm},
                          {card.x + rx * r, card.y + ry * r, b, s, s, light, cm}, {card.x + rx * l, card.y + ry * l, b, 0, s, light, cm});
                     finish(batch, from);
-                    if (collar)
+                    if (collar && !reaction)
                     {
                         const Image &shadow = images.at(card.key);
                         int shadowLump = -1 - card.key; // the shadow renderer resolves images by -1-lump
@@ -1109,7 +1128,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     const Image &art=lumpImage(fallbackLump,false);
                     if(art.width<=0||art.height<=0)return;
                     const bool flip=fallback.flip[facing];
-                    const float l=-float(art.left),r=l+art.width,t=fz+art.top-sink,b=t-art.height;
+                    const float l=-float(art.left),r=l+art.width,b=fz+art.top-sink-art.height;
+                    const float t=b+art.height*(1.f-consumed);
                     auto &batch=out[-1-fallbackLump];
                     const size_t from=batch.size();
                     const unsigned fm=(m&~MODE_FLIPPED)|((m&MODE_RELIT)&&flip?MODE_FLIPPED:0);
@@ -1117,7 +1137,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     quad(batch,{fx+rx*l,fy+ry*l,t,u,0,light,fm},{fx+rx*r,fy+ry*r,t,v,0,light,fm},
                          {fx+rx*r,fy+ry*r,b,v,float(art.height),light,fm},{fx+rx*l,fy+ry*l,b,u,float(art.height),light,fm});
                     finish(batch,from);
-                    if(collar)addEnemyShadow(*thing,art,fallbackLump,flip,fx,fy,fz,camera);
+                    if(collar&&!reaction)addEnemyShadow(*thing,art,fallbackLump,flip,fx,fy,fz,camera);
                 }
                 return;
             }
@@ -1463,6 +1483,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         buildEpisodeAtmosphere(camera);
         buildInfernoTreeStrikes(camera);
         buildHellfire(camera);
+        buildCorpseReactionEffects(camera);
         buildBubbles(camera);
         timing(9);
         if(lightingTrace) {

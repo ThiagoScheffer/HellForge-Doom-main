@@ -5,6 +5,8 @@
 // Integration: Gore resolver -> emit(); tick -> advance(); renderer -> forEachVisual();
 // Existing HellForge blood/decal code remains the only owner of world marks.
 
+#include "environmental_corpse_reactions.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -80,6 +82,8 @@ struct Host {
     bool (*attach)(void *,const TraceHit &,WallAnchor &) = nullptr;
     bool (*resolveWall)(void *,const WallAnchor &,float sag,Vec3 &contact,Vec3 &normal) = nullptr;
     bool softDeformation=true;
+    corpse_environment::Medium (*liquidReaction)(void *,int sector)=nullptr;
+    float reactionSpeed=1.f;
 };
 
 struct Burst {
@@ -119,6 +123,7 @@ struct Visual {
     float attachedAge=0,squash=0,sag=0;
     WallAnchor anchor{};
     Artwork artwork=Artwork::Automatic;
+    corpse_environment::Reaction reaction{};
 };
 
 using VisualFn = void (*)(void *context, const Visual &visual);
@@ -183,6 +188,7 @@ private:
         bool sticky=false,softDeformation=false,attachedOnce=false;
         float attachedAt=0,attachedUntil=0,squash=0,sag=0;
         Artwork artwork=Artwork::Automatic;
+        corpse_environment::Reaction reaction{};
     };
     std::array<Piece, MaxPieces> pieces_{};
     std::array<std::uint64_t, 32> recentEvents_{};

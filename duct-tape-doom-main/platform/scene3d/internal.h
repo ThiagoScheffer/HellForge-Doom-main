@@ -27,6 +27,7 @@ extern "C" {
 #include "../../linuxdoom-1.10/p_weakpoints.h"
 #include "../../linuxdoom-1.10/p_acid.h"
 #include "../../linuxdoom-1.10/p_hazard.h"
+#include "../environmental_corpse_reactions.h"
 #include "../../linuxdoom-1.10/p_incendiary.h"
 #include "doomstat.h"
 #include "r_state.h"
@@ -645,6 +646,23 @@ void revenantDeath(const mobj_t *revenant);
 void drawRevenantSouls(const Uniforms &camera,float fraction);
 void watchBodies();
 void bodyMotionShutdown();
+namespace corpse_environment = hellforge::corpse_environment;
+struct CorpseSurface {
+    const sector_t *sector=nullptr;
+    float x=0,y=0,z=0;
+};
+bool environmentalCorpseReactionsEnabled();
+corpse_environment::Medium corpseSurfaceMedium(const sector_t *sector);
+corpse_environment::Medium enabledCorpseMedium(const sector_t *sector);
+bool suppressHazardFloorBlood(int sector);
+bool suppressHazardCorpseBlood(const mobj_t &thing);
+const corpse_environment::Reaction *corpseReaction(const mobj_t *thing);
+bool ragdollCorpseSurface(const mobj_t &thing,CorpseSurface &surface);
+void buildCorpseReactionEffects(const Uniforms &camera);
+#ifdef DOOM_TEST_DRIVER
+unsigned testCorpseReactionEffectCount();
+#endif
+void drawCorpseReactionPlume(const Uniforms &camera,float x,float y,float z,float seconds,float fade,uint32_t seed,bool burning);
 bool bodyPose(const mobj_t &thing,float fraction,BodyPose &pose);
 void bodyQuads(std::vector<Vertex> &out,const BodyPose &pose,const Vertex &base,float x,float y,float feet,float rx,float ry,
                float left,float right,int imageTop,int rows,float u0,float u1,const std::vector<byte> *holes=nullptr);

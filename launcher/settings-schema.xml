@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="8c81b26e270946c0ab5895387916cf80783cc8a9bdbdbf6c0fe31f879375bd51">
+<settings source="platform/settings_panel.cpp" source_sha256="bbf4dd2c9b695f498a4e5e3f9b36843fbc3e3688711d939b255681ce35e5e945">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -114,6 +114,11 @@
   <option key="physical_bodies" title="Physical Bodies" category="Destruction" kind="choice" choices="0=Legacy|1=Natural|2=Cinematic" />
   <option key="physical_body_contacts" title="Environmental body contacts" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="physical_body_stable_cards" title="Stable ragdoll sprites" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="environmental_corpse_reactions" title="Environmental Corpse Reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="lava_corpse_combustion" title="Lava corpse combustion" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="hazardous_surface_blood_suppression" title="Suppress blood on hazardous liquids" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="environmental_giblet_reactions" title="Environmental giblet reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
+  <option key="environmental_corpse_reaction_speed" title="Reaction speed" category="Destruction" kind="choice" choices="0=Slow|1=Normal|2=Fast" />
   <option key="death_face_viewer" title="Dying turn to face you" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="death_motion" title="Death reactions" category="Destruction" kind="check" choices="0=Off|1=On" />
   <option key="hit_flinch" title="Hit flinches" category="Destruction" kind="check" choices="0=Off|1=On" />
