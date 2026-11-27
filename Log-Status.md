@@ -17,6 +17,14 @@ This is the project’s running record of bugs, investigations, and fixes. Use t
 | HF-009 | Launcher release output omits upstream notices | Notice copies verified |
 | HF-010 | Burning City smoke has rectangular edges | Fix committed. In-game visual check open |
 
+## Universal Atmospheric Fog — Sprite Coverage Fix
+
+The world shader now resolves sprite exposure from the world-position sector lookup for every active haze profile. Monsters, decorations, pickups, and other world sprite draws use the same outdoor exposure and view-depth fog equations as nearby geometry. Deimos retains its whiteout equation.
+
+The Vulkan SPIR-V and Metal MSL shader variants were regenerated. The Release engine built, and 13 focused CTest checks and the standalone Deimos fog regression passed. Matched Vulkan captures checked Burning City, Blood Hell, Starport, Inferno, and Deimos in a custom WAD. At the doorway, only the outdoor monster and tree changed. With fog disabled, both sprites matched the baseline. The held pistol and HUD matched in both cases. A geometry-only Blood Hell frame matched pixel for pixel, and a Blood Hell voxel fixture received the haze. Metal runtime was outside the Windows test coverage.
+
+The Blood Hell capture showed a green armor halo through the fog. The separate bloom pass lacks the sector lookup texture needed to match the base sprite's outdoor extinction. Flat debris particles also use a separate shader.
+
 ## Environmental Corpse Reactions 1.0
 
 The native renderer now uses physical acid and lava contact to drive corpse and fragment consumption. It retains native corpse actors for resurrection and filters floor blood at the liquid surface.

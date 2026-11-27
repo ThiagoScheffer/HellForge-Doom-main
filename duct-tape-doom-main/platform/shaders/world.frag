@@ -406,12 +406,12 @@ void main() {
     if((vMode&MODE_MIRROR_FLOOR)!=0u&&c.water.z>0.0&&c.effects.z==0.0) liquidMirror(color,albedo);
     // Sprite mode bits can carry a wound palette index. Look up the world
     // sector independently so decorations, wound overlays and voxels share
-    // the same outdoor frost as the geometry behind them.
+    // the same outdoor haze as nearby geometry.
     bool worldHaze=c.haze.w>0.0&&c.effects.z==0.0&&(vMode&MODE_SCREEN)==0u;
     bool deimos=c.style.w<=-3.0&&c.style.w>-5.0;
     const uint noSector=65535u;
     uint hazeSector=mapped?sector:noSector;
-    if(worldHaze&&sprite&&deimos) {
+    if(worldHaze&&sprite) {
         ivec2 cell=ivec2(floor((vWorld.xy-c.map.xy)*c.map.z));
         if(all(greaterThanEqual(cell,ivec2(0)))&&all(lessThan(cell,textureSize(seams,0))))
             hazeSector=uint(round(texelFetch(seams,cell,0).r*65535.0));
