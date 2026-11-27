@@ -320,12 +320,18 @@ const game_mood &levelMood() {
 }
 float lighting(const sector_t *sector,bool bright) {
     if(bright) return 1;
+    const int model=effectiveLightingModel(settings);
+    const bool outdoor=sector->ceilingpic==skyflatnum;
+    const size_t index=sector-sectors;
     float level=lampLightLevel(sector)/255.0f;
-    if(bakedLightsActive&&lampDrop.size()==(size_t)numsectors)level-=lampDrop[sector-sectors];
-    // The episode's mood (Game_Mood) can darken the outdoors.
-    if(sector->ceilingpic==skyflatnum)level*=levelMood().outdoor;
-    level=std::clamp(level,0.12f,1.0f);
-    size_t index=sector-sectors;
+    if(!outdoor&&doom_lighting_model::sourceDriven(model)) {
+        level=doom_lighting_model::interiorAmbient(level,model);
+    } else {
+        if(bakedLightsActive&&lampDrop.size()==(size_t)numsectors)level-=lampDrop[index];
+        // The episode's mood (Game_Mood) can darken the outdoors.
+        if(outdoor)level*=levelMood().outdoor;
+        level=std::clamp(level,0.12f,1.0f);
+    }
     if(index<shotDim.size())level*=shotDim[index]; // Rooms whose lamps were shot out (shot_lights.cpp).
     return level;
 }

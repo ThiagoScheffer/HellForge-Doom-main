@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="76a6cf77ab8aacc49a771ccbbe28cf463b6575cb1fc125fd37989a2b9af1e6e5">
+<settings source="platform/settings_panel.cpp" source_sha256="8c81b26e270946c0ab5895387916cf80783cc8a9bdbdbf6c0fe31f879375bd51">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -180,6 +180,7 @@
   <option key="fluid_shade_blue" title="Shadow blue" category="Fluid Weapons" kind="slider" min="0" max="255" step="1" />
   <option key="map_light_cache" title="Cache map lighting" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="baked_lights" title="Baked static lights" category="Lighting" kind="check" choices="0=Off|1=On" />
+  <option key="lighting_model" title="Illumination model" category="Lighting" kind="choice" choices="0=Enhanced|1=Source-driven Hybrid|2=Physical Environment" />
   <option key="window_light" title="Window light" category="Lighting" kind="check" choices="0=Off|1=On" />
   <option key="window_strength" title="Window light strength" category="Lighting" kind="slider" min="0.5" max="2" step="0.25" />
   <option key="dim_lit_rooms" title="Darker rooms around lamps and windows" category="Lighting" kind="check" choices="0=Off|1=On" />

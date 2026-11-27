@@ -587,7 +587,7 @@ static void startLevel() {
 }
 static bool levelPending() {return levelSerial!=r_levelserial||floors.empty();}
 bool bakesPending() {
-    return (settings.bakedLights&&lightBakeKey!=lightBakeInputs())||(settings.bounce&&bounceKey!=bounceInputs())||
+    return (settings.bakedLights&&lightBakeKey!=lightBakeInputs())||bounceBakePending()||
         ((settings.skyLight||settings.bakedAO)&&ambientKey!=bakeThingsKey)||(settings.lightFlow&&flowKey!=flowInputs())||(settings.sun&&!sunBaked);
 }
 bool loadPending() {return worldPending&&(levelPending()||settings.thingShadows!=bakeThingsKey||bakesPending());}
@@ -599,7 +599,7 @@ static void planStages(bool level) {
     planLoading(LoadStage::Sun,settings.sun&&(level||!sunBaked));
     planLoading(LoadStage::Lights,lights);
     planLoading(LoadStage::Grid,settings.bakedLights&&settings.gridSpriteLight&&(lights||staticSerial!=lightBakeSerial));
-    planLoading(LoadStage::Bounce,settings.bounce&&(level||lights||bounceKey!=bounceInputs()));
+    planLoading(LoadStage::Bounce,settings.bounce&&(level||lights||bounceBakePending()));
     planLoading(LoadStage::Ambient,(settings.skyLight||settings.bakedAO)&&(level||ambientKey!=bakeThingsKey));
     planLoading(LoadStage::Flow,settings.lightFlow&&(level||flowKey!=flowInputs()));
 }
@@ -826,6 +826,12 @@ FrameView prepareFrame(int w,int h) {
         if(level) {planStages(true);startLevel();}
         syncBakeThings();
         if(!level)planStages(false);
+        const int model=effectiveLightingModel(settings);
+        static int previousLightingModel=doom_lighting_model::Enhanced;
+        // Sector moves and fixture changes while static lights are off cannot
+        // keep the old source-driven bake current for when it is re-enabled.
+        if(!settings.bakedLights&&doom_lighting_model::sourceDriven(previousLightingModel))lightBakeKey=-1;
+        previousLightingModel=model;
         relightMovingSectors();
         stamp(0);
         if(settings.sun&&!sunBaked)bakeSun();
@@ -949,10 +955,21 @@ FrameView prepareFrame(int w,int h) {
         profileAdd(profile.frame.geometryMs,geometryStart);
         if(profile.enabled)skipProfiledLights();
         // Surface lights come from this frame's geometry; the bake applies from the next frame.
-        if(settings.bakedLights&&lightBakeKey!=lightBakeInputs())bakeLights();
+        bool rebuiltLights=settings.bakedLights&&lightBakeKey!=lightBakeInputs();
+        if(rebuiltLights)bakeLights();
         if(settings.bakedLights&&settings.gridSpriteLight&&lightBakeKey==lightBakeInputs()&&staticSerial!=lightBakeSerial)bakeStaticGrid();
-        if(settings.bounce&&bounceKey!=bounceInputs())bakeBounce();
-        if((settings.skyLight||settings.bakedAO)&&ambientKey!=bakeThingsKey)bakeAmbient();
+        static int skyLightingModel=doom_lighting_model::Enhanced;
+        const bool currentFrameLights=bakedLightsActive;
+        // Dependent source-driven bakes sample the new outdoor lamp classification.
+        // The loading pass still leaves the frame's geometry and direct-light flags paired.
+        if(rebuiltLights&&doom_lighting_model::sourceDriven(model))bakedLightsActive=true;
+        if(bounceBakePending())bakeBounce();
+        if(settings.skyLight||settings.bakedAO) {
+            if(ambientKey!=bakeThingsKey)bakeAmbient();
+            else if(skyLightingModel!=model||(rebuiltLights&&doom_lighting_model::sourceDriven(model)))refreshSkyLevel();
+            skyLightingModel=model;
+        }
+        bakedLightsActive=currentFrameLights;
         if(settings.lightFlow&&flowKey!=flowInputs())bakeFlow();
         camera.bake[1]=settings.bounce&&bounceKey>=0?bounceStrength:0;
         camera.bake[3]=camera.bake[1]>0?settings.bounceTint:0;
@@ -1231,6 +1248,51 @@ void I_Render3DStartFrame(void) {
     if(settings.accelerated&&doom_terror::dynamicMode(settings.chromaticAberration))syncTerror(terrorPlayer());
 }
 #ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestLightingModelTransition(int frame) {
+    using namespace doom_lighting_model;
+    struct Preset {int model,baked,emissive;};
+    static constexpr Preset presets[]={{Enhanced,1,1},{Hybrid,1,1},{Physical,1,1},
+        {Physical,0,1},{Physical,1,1},{Physical,1,0},{Physical,1,1},{Hybrid,1,1},{Enhanced,1,1}};
+    static unsigned expectedSerial;
+    const auto &preset=presets[frame/3];
+    if(frame%3==0) {
+        settings.lightingModel=preset.model;
+        settings.bakedLights=preset.baked;
+        settings.emissive=preset.emissive;
+        settings.gridSpriteLight=settings.bounce=1;
+        expectedSerial=lightBakeSerial+(preset.baked&&lightBakeKey!=lightBakeInputs()?1:0);
+        return 0;
+    }
+
+    int expectedModel=preset.baked&&preset.emissive?preset.model:Enhanced;
+    if(settings.lightingModel!=preset.model||effectiveLightingModel(settings)!=expectedModel||
+        lightBakeSerial!=expectedSerial||bakesPending()||bakedLightsActive!=(preset.baked!=0)||
+        (preset.baked&&staticSerial!=lightBakeSerial))
+        I_Error((char*)"Lighting model transition has stale bake state at frame %d",frame);
+
+    bool indoor=false,outdoor=false;
+    for(int i=0;i<numsectors;++i) {
+        const auto &sector=sectors[i];
+        const auto authored=sector.lightlevel;
+        float expected=lampLightLevel(&sector)/255.f;
+        if(sector.ceilingpic!=skyflatnum&&expectedModel!=Enhanced) {
+            indoor=true;
+            expected=std::clamp(expected,0.f,1.f)*(expectedModel==Hybrid?.25f:.05f);
+        } else {
+            if(preset.baked)expected-=lampDrop[i];
+            if(sector.ceilingpic==skyflatnum) {outdoor=true;expected*=levelMood().outdoor;}
+            else indoor=true;
+            expected=std::clamp(expected,.12f,1.f);
+        }
+        if((size_t)i<shotDim.size())expected*=shotDim[i];
+        if(std::abs(lighting(&sector)-expected)>1e-6f||lighting(&sector,true)!=1.f||sector.lightlevel!=authored)
+            I_Error((char*)"Incorrect sector ambient in mode %d, sector %d",expectedModel,i);
+    }
+    if(!indoor||!outdoor)I_Error((char*)"Lighting model test map needs both interior and sky sectors");
+    if(frame%3==2)fprintf(stderr,"Illumination transition %d: model %d, direct generation %u.\n",frame/3,expectedModel,lightBakeSerial);
+    return frame==(int)std::size(presets)*3-1;
+}
+
 extern "C" void I_TestBundledModSettings() {
     int weapons=settings.fluidWeapons,sounds=settings.fluidSounds,monsters=settings.fluidMonsters;
     int digSetting=settings.breakableWalls;

@@ -23,6 +23,7 @@ static std::vector<std::array<WallEmissionIntegral,8>> wallEmissionIntegrals;
 static std::vector<SurfaceLight> mergeInputs,mergeResult;
 static std::vector<size_t> mergeMembership;
 static std::vector<float> mergeWeights;
+static int mergeLightingModel=doom_lighting_model::Enhanced;
 static bool sameSurface(const SurfaceLight &a,const SurfaceLight &b,bool shine=true) {
     return a.key==b.key&&a.x==b.x&&a.y==b.y&&a.z==b.z&&a.radius==b.radius&&a.strength==b.strength&&
         a.color==b.color&&a.facing==b.facing&&a.extent==b.extent&&a.group==b.group&&a.flickerSector==b.flickerSector&&(!shine||a.shine==b.shine);
@@ -124,6 +125,12 @@ SurfaceLightKey surfaceCellOf(const SurfaceLight &tile) {
 }
 // Merged emissive lights, kept apart where walls divide their tiles.
 std::vector<SurfaceLight> mergedSurfaceLights(std::vector<SurfaceLight> tiles) {
+    const int model=effectiveLightingModel(settings);
+    if(mergeLightingModel!=model) {
+        // Visibility groups depend on the strength-weighted center.
+        mergeLightingModel=model;
+        surfaceGroups.clear();mergeResult.clear();surfaceSelection.clear();
+    }
     bool hit=tiles.size()==mergeInputs.size()&&!mergeResult.empty();
     if(hit)for(size_t i=0;i<tiles.size();++i)if(!sameSurface(tiles[i],mergeInputs[i],false)){hit=false;break;}
     if(!hit) {
@@ -234,10 +241,9 @@ float materialEmissionGain(const Image &image) {
 static float lampLevel(int sector) {
     readLampRanges();
     if(sector<0||sector>=numsectors)return 1;
-    float f=std::clamp((lampRanges[sector].peak-96)/112.0f,0.0f,1.0f);
     // The material's emissive texels are lit separately in world.frag;
     // this factor controls the light cast into the environment, not the texels.
-    return .08f+.92f*f*f;
+    return doom_lighting_model::fixtureOutput(lampRanges[sector].peak,effectiveLightingModel(settings));
 }
 // Lamps in a flickering sector follow it. Blinking and strobing sectors
 // switch them, as a shot-out lamp sputters: out while the sector stands in
@@ -374,8 +380,12 @@ void collectSurfaceLights() {
         // fog-only lights so the glow around torches and pools remains.
         surfaceSelection.clear();
         if(!settings.fog)return;
-        if(settings.emissive)for(const auto &light:mergedSurfaceLights(surfaceLights))
-            staticFog.push_back({light.x,light.y,light.z,light.radius,light.strength,light.color});
+        const bool sourceDriven=sourceDrivenLighting(settings);
+        if(settings.emissive)for(const auto &light:mergedSurfaceLights(surfaceLights)) {
+            float strength=light.strength*(sourceDriven?light.shine:1.f);
+            if(sourceDriven&&strength<=0)continue;
+            staticFog.push_back({light.x,light.y,light.z,light.radius,strength,light.color});
+        }
         std::vector<std::pair<float,size_t>> scored;
         for(size_t n=0;n<staticFog.size();++n) {
             const StaticFog &f=staticFog[n];
@@ -385,8 +395,9 @@ void collectSurfaceLights() {
         std::sort(scored.begin(),scored.end(),[](const auto &a,const auto &b){return a.first>b.first;});
         for(size_t n=0;n<std::min(size_t(4),scored.size())&&flashes.count<maxLights;++n) {
             const StaticFog &f=staticFog[scored[n].second];
+            const auto before=flashes.count;
             appendLight(f.x,f.y,f.z,f.radius,f.strength,f.color,nullptr,0.75f,false);
-            fogOnly[flashes.count-1]=true;
+            if(flashes.count>before)fogOnly[before]=true;
         }
         return;
     }

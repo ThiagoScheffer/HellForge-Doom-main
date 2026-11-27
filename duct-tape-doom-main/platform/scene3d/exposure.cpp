@@ -23,6 +23,7 @@ static Bounce bounce={},targetBounce={};
 // light is held at its recent peak so flickering and strobing sectors don't
 // pump the exposure.
 static float adaptedLight=-1,exposure=1;static int adaptTic=-1;static unsigned adaptLevelSerial;
+static int adaptedLightingModel=-1;
 static std::vector<std::pair<float,int>> steadyLights;
 static float steadyLight(const sector_t *sector) {
     auto &held=steadyLights[sector-sectors];
@@ -47,9 +48,13 @@ static float viewLight(const Uniforms &camera) {
     return count?own*0.4f+sum/count*0.6f:own;
 }
 void updateExposure(Uniforms &camera) {
-    if(!settings.eyeAdaptation||camera.effects[2]!=0||!players[displayplayer].mo) {adaptedLight=-1;exposure=1;return;}
-    if(adaptLevelSerial!=r_levelserial||steadyLights.size()!=(size_t)numsectors) {
-        adaptedLight=-1;adaptLevelSerial=r_levelserial;steadyLights.assign(numsectors,{0.0f,-1});
+    const int model=effectiveLightingModel(settings);
+    if(adaptedLightingModel!=model||adaptLevelSerial!=r_levelserial||steadyLights.size()!=(size_t)numsectors) {
+        adaptedLightingModel=model;adaptLevelSerial=r_levelserial;
+        adaptedLight=-1;exposure=1;adaptTic=-1;steadyLights.assign(numsectors,{0.0f,-1});
+    }
+    if(!settings.eyeAdaptation||camera.effects[2]!=0||!players[displayplayer].mo) {
+        adaptedLight=-1;exposure=1;camera.fx[0]=1;return;
     }
     if(leveltime!=adaptTic) {
         float target=viewLight(camera);
@@ -60,7 +65,7 @@ void updateExposure(Uniforms &camera) {
         }
         adaptTic=leveltime;
         float ratio=std::sqrt(target/std::max(adaptedLight,0.05f));
-        exposure=1+std::round((std::clamp(ratio,0.6f,1.5f)-1)*16)/16;
+        exposure=doom_lighting_model::quantizedExposure(ratio,model);
     }
     camera.fx[0]=exposure;
 }

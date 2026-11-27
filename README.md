@@ -192,6 +192,34 @@ the developer's observed configuration issue; it is not a claim that every baked
 lighting artifact has been eliminated. The current Sky light tooltip also recommends
 this combination.
 
+## Physical Environment Lighting 1.0
+
+Choose **F4 → Lighting → Illumination model**. The selection is saved as
+`lighting_model` in `graphics.cfg`.
+
+| Model | Interior lighting |
+| :--- | :--- |
+| **Enhanced** (default) | Keeps the established sector lighting, minimum brightness and room-darkening controls for maximum WAD compatibility. |
+| **Source-driven Hybrid** | Keeps 25% of authored interior ambient light, drops the minimum and reduces how much sector brightness limits recognized fixture output. |
+| **Physical Environment** | Keeps 5% of authored interior ambient light, drops the minimum and lets recognized powered fixtures emit independently of sector brightness. |
+
+The two source-driven models require accelerated 3D, baked static lights and
+emissive textures. Disabling any prerequisite uses Enhanced and preserves your
+selection for when all three are enabled again. F4 enforces these dependencies
+and disables the Enhanced room-darkening controls while a source-driven mode is
+active. The launcher's generated catalogue lists the choices without enforcing
+their runtime dependencies. The classic software renderer keeps its existing
+lighting. Switching modes refreshes direct light, bounce and the baked sprite
+grid when enabled. Each effective mode has its own map-light cache identity.
+
+Outdoor ambient policy and existing sun, sky and window-light algorithms
+continue to apply. Outdoor lamp classification still reads the saved
+room-darkening settings. Door spill, sector light flow and nighttime window spill
+still use authored-light approximations. Flicker and lamp destruction update
+direct light. Some indirect light can remain until a full bake refreshes it.
+Maps that rely on invisible authored lighting can appear darker. Performance
+impact has yet to be established.
+
 ## Feature catalog
 
 The broader feature set includes both recent changes and earlier implementation

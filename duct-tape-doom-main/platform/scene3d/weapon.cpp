@@ -253,7 +253,7 @@ static void updateWeaponProbe(const Uniforms &camera,sector_t *sector) {
     bool glow=settings.emissive;
     auto lit=[&](const std::array<float,3> &albedo,const Image *image,int at,const uint8_t *baked,float out[3]) {
         float level=lighting(&sectors[at]),shown[3]={};
-        if(baked) {for(int c=0;c<3;++c)shown[c]=baked[c]/255.0f*2;fillHeadroom(shown,level);}
+        if(baked&&bakedLightsActive) {for(int c=0;c<3;++c)shown[c]=baked[c]/255.0f*2;fillHeadroom(shown,level);}
         float cover=glow&&image&&image->emissionWeight>0?image->emissionCoverage:0;
         for(int c=0;c<3;++c)out[c]=albedo[c]*(level+shown[c])*(1-cover)+(cover>0?image->emissionColor[c]*cover*0.9f:0);
     };

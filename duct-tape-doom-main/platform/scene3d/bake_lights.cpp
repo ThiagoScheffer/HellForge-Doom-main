@@ -41,7 +41,8 @@ const std::vector<int> &bakeGridLights(float x,float y) {
 int lightBakeInputs() {return (1<<15)| // Lighting model v2: invalidate old light-bake input identities.
     (settings.emissive?1:0)|(settings.bakeOnlyLights?2:0)|(settings.windowLight?4:0)|(settings.dimLitRooms?8:0)|
     (settings.windowLight?(int)std::lround(settings.windowStrength*4)<<4:0)|
-    (settings.dimLitRooms?(int)std::lround(settings.unlitDarkening*20)<<8:0)|(settings.windowLight&&settings.sun?1<<14:0);}
+    (settings.dimLitRooms?(int)std::lround(settings.unlitDarkening*20)<<8:0)|(settings.windowLight&&settings.sun?1<<14:0)|
+    (effectiveLightingModel(settings)<<16);}
 // Bake-only lights: glowing liquid floors and ceilings (lava, nukage, slime,
 // magma, or flats that mostly glow) light as pools; lamps and panels stay
 // point lights.

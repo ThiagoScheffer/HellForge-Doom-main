@@ -63,6 +63,7 @@ uint64_t worldKey(const std::string &stage) {
         settings.bakeOnlyLights,settings.gridSpriteLight,settings.thingShadows,settings.bounce,
         settings.skyLight,settings.bakedAO,settings.lightFlow,settings.dimLitRooms};
     h=hashBytes(h,options,sizeof(options));value(h,settings.windowStrength);value(h,settings.unlitDarkening);
+    value(h,effectiveLightingModel(settings));
     for(int i=0;i<numsectors;++i) {
         const auto &s=sectors[i];value(h,s.floorheight);value(h,s.ceilingheight);value(h,s.floorpic);value(h,s.ceilingpic);
         value(h,s.lightlevel);value(h,s.special);value(h,s.tag);
@@ -218,6 +219,25 @@ int BakeCache::selfTest() {
         for(size_t i=0;i<bytes.size();i+=4)bytes[i]=(uint8_t)(i/4);
         auto original=bytes;
         BakeCache test("storage-test",{cacheChannel(bytes,0,512)});require(test.enabled,"cache enabled");
+        {
+            struct RestoreSettings {
+                Settings original=settings;
+                ~RestoreSettings() {settings=original;}
+            } restore;
+            settings.accelerated=settings.bakedLights=settings.emissive=1;
+            settings.lightingModel=doom_lighting_model::Enhanced;
+            const auto enhanced=worldKey("lighting-model-test");
+            settings.lightingModel=doom_lighting_model::Hybrid;
+            const auto hybrid=worldKey("lighting-model-test");
+            settings.lightingModel=doom_lighting_model::Physical;
+            const auto physical=worldKey("lighting-model-test");
+            require(enhanced!=hybrid&&enhanced!=physical&&hybrid!=physical,
+                "effective illumination models have distinct cache keys");
+            settings.bakedLights=0;
+            const auto fallback=worldKey("lighting-model-test");
+            settings.lightingModel=doom_lighting_model::Enhanced;
+            require(fallback==worldKey("lighting-model-test"),"lighting prerequisites determine cache identity");
+        }
         float strength=settings.windowStrength;settings.windowStrength+=0.25f;
         BakeCache settingChange("storage-test",{cacheChannel(bytes,0,512)});
         require(settingChange.key!=test.key,"settings invalidate identity");settings.windowStrength=strength;

@@ -87,6 +87,7 @@ fps 0
         (folder / 'memory.json').write_text(json.dumps(samples))
         text = (folder / 'engine.log').read_text(errors='replace')
         expected = ('CACHE STORAGE PASS' if mode == 'storage' else
+                    'LIGHTING MODE TRANSITIONS PASS' if mode == 'lighting-models' else
                     'intentional diagnostic regression' if mode == 'crash' else
                     f'RELOAD PASS {mode} {cycles} cycles')
         assert expected in text, f'{name}: exit {process.returncode}; see {folder}/engine.log\n{text[-2000:]}'
@@ -123,9 +124,9 @@ fps 0
     run('warm-save', 'save', args.cycles)
     computed = set(re.findall(r'3D cache: (\w+) stored; checksum (\w+)', cold))
     restored = set(re.findall(r'3D cache: (\w+) hit; checksum (\w+)', warm))
-    assert {stage for stage, _ in restored} == {'sun', 'lights', 'grid', 'bounce', 'ambient', 'flow'}
+    assert {stage for stage, _ in restored} == {'sun', 'lights_hf2', 'grid_hf2', 'bounce', 'ambient', 'flow'}
     assert restored <= computed, 'Restored output differs from cold output'
-    entries = list(cache.rglob('lights-*.bake'))
+    entries = list(cache.rglob('lights_hf2-*.bake'))
     assert entries
     for entry in entries:
         entry.write_bytes(entry.read_bytes()[:20])
@@ -134,6 +135,7 @@ fps 0
     changed = run('settings-change', 'restart', 1, True, 'window_light 0\n')
     assert 'miss (no matching entry)' in changed
     run('storage-contract', 'storage', 1)
+    run('illumination-transitions', 'lighting-models', 1)
     run('crash-diagnostics', 'crash', 1, False)
     print('All reload/cache regressions passed:', out, flush=True)
 

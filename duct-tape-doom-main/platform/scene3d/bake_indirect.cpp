@@ -4,6 +4,7 @@
 
 namespace doom3d {
 int bounceKey=-1;
+static unsigned bounceLightSerial=0;
 
 int bakeThingsKey=-1,ambientKey=-1,flowKey=-1;
 float skyLevel=0; // Typical sky-sector light; indoor sky light rises toward it.
@@ -11,8 +12,14 @@ std::array<float,3> skyTint={1,1,1};
 // Which inputs bounce light gathers: 1 always, 2 the sun, 4 baked lights,
 // 8 bake-only lights (pools as areas).
 int bounceInputs() {
-    bool lights=lightBakeKey==lightBakeInputs();
-    return 1|(settings.sun&&sunLevel>0?2:0)|(lights?4:0)|(lights&&(lightBakeKey&2)?8:0);
+    bool lights=settings.bakedLights&&lightBakeKey==lightBakeInputs();
+    return 1|(settings.sun&&sunLevel>0?2:0)|(lights?4:0)|(lights&&(lightBakeKey&2)?8:0)|
+        (effectiveLightingModel(settings)<<4);
+}
+bool bounceBakePending() {
+    if(!settings.bounce)return false;
+    const int inputs=bounceInputs();
+    return bounceKey!=inputs||((inputs&4)&&!flatLightCells.empty()&&!wallBakeCells.empty()&&bounceLightSerial!=lightBakeSerial);
 }
 // Bounce light: each sample averages what 16 cosine-weighted rays hit,
 // albedo (the surface texture's average color) times its sun and baked
@@ -171,6 +178,7 @@ void bakeBounce() {
     }
     uploadFlatLight();
     uploadWallBake();
+    bounceLightSerial=lightBakeSerial;
     fprintf(stderr,"3D bounce: %s%s, every %d cells, baked in %.0f ms.\n",sun?"sun":"no sun",lights?" and lights":"",
         step,(SDL_GetTicksNS()-start)/1e6);
 }
@@ -276,6 +284,17 @@ static void bakeSpread(int step,FlatSample flatSample,FlatWrite flatWrite,WallSa
         }
     });
 }
+bool refreshSkyLevel() {
+    std::vector<float> skyLights;
+    for(int i=0;i<numsectors;++i)if(sectors[i].ceilingpic==skyflatnum)skyLights.push_back(lighting(&sectors[i]));
+    skyLevel=0;
+    if(!skyLights.empty()) {
+        std::nth_element(skyLights.begin(),skyLights.begin()+skyLights.size()/2,skyLights.end());
+        skyLevel=skyLights[skyLights.size()/2];
+        skyTint=skyColor();
+    }
+    return !skyLights.empty();
+}
 // Sky light and ambient occlusion, baked together from 12 cosine-weighted
 // rays per sample, every ~8 units: the share that escapes through a sky
 // ceiling (walls see at most half the sky, so theirs counts double) and how
@@ -288,20 +307,13 @@ void bakeAmbient() {
     ambientKey=bakeThingsKey;
     if(flatLightCells.empty()||wallBakeCells.empty())return;
     uint64_t start=SDL_GetTicksNS();
-    std::vector<float> skyLights;
-    for(int i=0;i<numsectors;++i)if(sectors[i].ceilingpic==skyflatnum)skyLights.push_back(lighting(&sectors[i]));
-    skyLevel=0;
-    if(!skyLights.empty()) {
-        std::nth_element(skyLights.begin(),skyLights.begin()+skyLights.size()/2,skyLights.end());
-        skyLevel=skyLights[skyLights.size()/2];
-        skyTint=skyColor();
-    }
+    const bool hasSky=refreshSkyLevel();
     BakeCache cache("ambient",{cacheChannel(flatLightCells,(size_t)mapWidth*mapHeight*8+3,(size_t)mapWidth*mapHeight*2),
         cacheWallChannel(wallBakeCells,atlasHeight,3,1,true)});
     if(!cache.restore()) {
     // Occlusion counts only hits within 64 units; rays run on only to find
     // the sky, so on maps without one they stop there, open either way.
-    float reach=skyLights.empty()?64:INFINITY;
+    float reach=hasSky?INFINITY:64;
     auto gather=[&](int sector,float x,float y,float z,const float normal[3],uint32_t seed,std::array<float,2> &out) {
         seed=seed*2654435761u;seed^=seed>>15;float rotation=(seed&1023)/1024.0f;
         float sky=0,open=0;
@@ -430,6 +442,6 @@ float flowLightAt(float x,float y,const sector_t *sector,float light) {
     if(cell.own!=(uint16_t)(sector-sectors)||cell.flow==noSector)return light;
     return light+std::round(std::max(0.0f,lighting(&sectors[cell.flow])-light)*contactCells[4*i+3]/255.0f*0.8f*16)/16;
 }
-void indirectNewLevel() {bounceKey=-1;ambientKey=-1;flowKey=-1;bakeThingsKey=-1;}
+void indirectNewLevel() {bounceKey=-1;bounceLightSerial=0;ambientKey=-1;flowKey=-1;bakeThingsKey=-1;}
 void indirectShutdown() {indirectNewLevel();skyLevel=0;}
 } // namespace doom3d

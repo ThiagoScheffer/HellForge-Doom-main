@@ -17,6 +17,7 @@ extern "C" {
 #include "doomtype.h"
 }
 #include "flash_lighting.h"
+#include "lighting_model.h"
 #include "i_render3d.h"
 
 struct SDL_Window;
@@ -109,6 +110,7 @@ struct Settings {
     int sun=1; // Sun shadows baked at level load from the sky texture.
     int mapLightCache=1; // Persistent numeric lighting bakes; no live effects.
     int bakedLights=1; // Static lights baked at level load; nearby dynamic copies add flicker and detail.
+    int lightingModel=doom_lighting_model::Enhanced;
     int windowLight=1; // Openings to the sky light the rooms beside them like big soft lamps, in the bake.
     float windowStrength=1; // How brightly window light shines in (0.5-2).
     int dimLitRooms=1; // Rooms the baked lamps and windows light well lose part of their flat sector light.
@@ -293,6 +295,12 @@ struct Settings {
     int fewerSurfaceLights=0; // Only the 8 nearest glowing-texture lights stay dynamic, not 24.
 };
 inline bool advancedGoreMode(const Settings &s) {return s.goreLevel==1||s.goreLevel==2;}
+inline int effectiveLightingModel(const Settings &s) {
+    return doom_lighting_model::effectiveModel(s.lightingModel,s.accelerated!=0,s.bakedLights!=0,s.emissive!=0);
+}
+inline bool sourceDrivenLighting(const Settings &s) {
+    return doom_lighting_model::sourceDriven(effectiveLightingModel(s));
+}
 inline bool ragdollDeathsEnabled(const Settings &s) {return s.accelerated&&s.deathRagdoll;}
 inline bool physicalBodiesEnabled(const Settings &s) {
     return ragdollDeathsEnabled(s)&&s.physicalBodies>=1&&s.physicalBodies<=2;

@@ -514,6 +514,12 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 check("map_light_cache","Cache map lighting",&s.mapLightCache,"Reuse baked lighting from disk when map, resources, settings and static world state match. Live effects remain dynamic. Cache is limited to 1 GiB."),
                   check("baked_lights","Baked static lights",&s.bakedLights,
                     "Torches, lamps and glowing textures light the whole level, baked at level load; nearby ones still flicker."),
+                choice("lighting_model","Illumination model",&s.lightingModel,
+                    {"Enhanced","Source-driven Hybrid","Physical Environment"},{0,1,2},
+                    "Enhanced preserves existing map lighting. Hybrid retains 25% of interior sector light and boosts fixture output. "
+                    "Physical retains 5% and gives powered emissive fixtures full output at any sector brightness. "
+                    "Requires accelerated 3D, baked static lights and emissive textures. Changing the model rebuilds affected lighting.",
+                    [](const Settings &d){return d.accelerated!=0&&d.bakedLights!=0&&d.emissive!=0;}),
                 check("window_light","Window light",&s.windowLight,
                     "Windows, open doorways and holes in the ceiling let the outdoor light in: they light the rooms beside them "
                     "like big soft lamps in the sky's color, fading deeper into the room. Baked at level load.",
@@ -522,14 +528,14 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     "How brightly the outdoors shines in through windows and openings. Changing it re-bakes the lights.",
                     [](const Settings &d){return d.bakedLights!=0&&d.windowLight!=0;}),
                 check("dim_lit_rooms","Darker rooms around lamps and windows",&s.dimLitRooms,
-                    "Rooms that lamps, screens and windows light well lose part of their even light level, so the light "
+                    "In Enhanced illumination, rooms that lamps, screens and windows light well lose part of their even light level, so the light "
                     "visibly comes from them and the far corners fall darker. Baked at level load.",
-                    [](const Settings &d){return d.bakedLights!=0;}),
+                    [](const Settings &d){return d.bakedLights!=0&&!sourceDrivenLighting(d);}),
                 slider("unlit_darkening","Darker rooms without lamps",&s.unlitDarkening,0,0.85,0.05,
-                    "Remove residual even lighting from enclosed interiors. Above 50%, extra darkness applies only "
+                    "Remove residual even lighting from enclosed interiors in Enhanced illumination. Above 50%, extra darkness applies only "
                     "where very little steady static light reaches the room; actual lamps, windows and shots still illuminate it. "
                     "Changing this setting re-bakes lighting.",
-                    [](const Settings &d){return d.bakedLights!=0&&d.dimLitRooms!=0;},
+                    [](const Settings &d){return d.bakedLights!=0&&d.dimLitRooms!=0&&!sourceDrivenLighting(d);},
                     {"Off","5%","10%","15%","20%","25%","30%","35%","40%","45%","50%",
                      "55%","60%","65%","70%","75%","80%","85%"}),
                 check("sun_shadows","Sun shadows",&s.sun,"Shadows and sunlit patches baked at level load from the sky texture and map geometry."),

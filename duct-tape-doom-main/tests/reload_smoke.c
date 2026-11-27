@@ -20,9 +20,11 @@ extern int key_use;
 extern unsigned r_levelserial;
 extern void I_RunEngine(void (*entry)(void));
 extern int I_TestBakeCacheStorage(void);
+extern int I_TestLightingModelTransition(int frame);
 extern int I_TestRelightRunning(void);
 extern void I_TestNativeCrash(void);
 static int storageMode,crashMode,autoLoadMode,startupMode,relightQuitMode;
+static int lightingModelsMode;
 extern int g_death_load_last_save;
 static int stage,begin,initialSerial,frames,cycles,goal=10,saveMode;
 static void effects(void) {
@@ -41,6 +43,13 @@ static void effects(void) {
 void I_TestFrame(void) {
     if(gamestate!=GS_LEVEL||!players[0].mo)return;
     if(++frames>30000){fprintf(stderr,"RELOAD FAIL timeout stage %d\n",stage);exit(3);}
+    if(lightingModelsMode) {
+        if(frames>=4&&I_TestLightingModelTransition(frames-4)) {
+            fprintf(stderr,"LIGHTING MODE TRANSITIONS PASS\n");
+            I_Quit();
+        }
+        return;
+    }
     if(relightQuitMode) {
         // Simulate a nearby sector moving even on maps without a type-1 door.
         if(frames==4)players[0].mo->subsector->sector->ceilingheight+=8*FRACUNIT;
@@ -122,6 +131,7 @@ int main(int argc,char **argv) {
     if(argc<5)return 2;
     autoLoadMode=!strcmp(argv[3],"autoload");
     startupMode=!strcmp(argv[3],"startup");
+    lightingModelsMode=!strcmp(argv[3],"lighting-models");
     relightQuitMode=!strcmp(argv[3],"relight-quit");
     crashMode=!strcmp(argv[3],"crash");storageMode=!strcmp(argv[3],"storage");saveMode=!strcmp(argv[3],"save");goal=atoi(argv[4]);if(goal<1||goal>50)return 2;
     char *args[128]={argv[0],"-iwad",argv[1],"-warp","1","-skill","1","-graphics",argv[2],

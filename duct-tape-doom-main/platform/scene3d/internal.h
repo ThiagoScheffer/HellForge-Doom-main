@@ -309,6 +309,8 @@ extern int bakeThingsKey,ambientKey,flowKey;
 extern float skyLevel;
 extern std::array<float,3> skyTint;
 int bounceInputs();
+bool bounceBakePending();
+bool refreshSkyLevel();
 void bakeBounce();
 void syncBakeThings();
 void bakeAmbient();

@@ -35,6 +35,40 @@ static void run(){
   }
  }
  check(seen.size()==registry.size(),"all settings reachable exactly once");
+ Settings illumination;
+ check(illumination.lightingModel==doom_lighting_model::Enhanced,"older profiles default to Enhanced");
+ for(int model:{0,1,2}) {
+  readOption(illumination,"lighting_model",model);
+  check(illumination.lightingModel==model,"illumination presets deserialize");
+ }
+ readOption(illumination,"lighting_model",3);
+ check(illumination.lightingModel==2,"invalid illumination choice is ignored");
+ choose("lighting_model");check(!strcmp(panel.tabs[panel.tab].title,"Lighting"),"illumination choice is on the Lighting tab");
+ panel.draft.accelerated=panel.draft.bakedLights=panel.draft.emissive=1;
+ I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+ check(panel.draft.lightingModel==2&&settings.lightingModel==0,"F4 selects Physical in the draft");
+ for(int Settings::*prerequisite:{&Settings::accelerated,&Settings::bakedLights,&Settings::emissive}) {
+  panel.draft.*prerequisite=0;
+  check(!selectedOption().isEnabled(panel.draft)&&effectiveLightingModel(panel.draft)==0,"missing prerequisite falls back to Enhanced");
+  I_Render3DSettingsKey(SDL_SCANCODE_RIGHT,0);
+  check(panel.draft.lightingModel==2,"disabled control preserves the requested model");
+  panel.draft.*prerequisite=1;
+  check(effectiveLightingModel(panel.draft)==2,"restored prerequisite restores Physical");
+ }
+ panel.draft.dimLitRooms=1;
+ for(const char *key:{"dim_lit_rooms","unlit_darkening"}) {
+  choose(key);check(!selectedOption().isEnabled(panel.draft),"source-driven mode disables Enhanced room controls");
+ }
+ choose("lighting_model");I_Render3DSettingsKey(SDL_SCANCODE_R,0);
+ check(panel.draft.lightingModel==0&&panel.draft.dimLitRooms,"reset restores Enhanced and preserves room controls");
+ choose("unlit_darkening");check(selectedOption().isEnabled(panel.draft),"Enhanced restores interaction with room controls");
+ FILE *illuminationFile=tmpfile();check(illuminationFile!=nullptr,"isolated illumination profile");
+ writeOptions(illuminationFile,illumination);rewind(illuminationFile);
+ Settings restoredIllumination;char illuminationLine[512];int storedModel=-1;
+ while(fgets(illuminationLine,sizeof(illuminationLine),illuminationFile))
+  if(sscanf(illuminationLine,"lighting_model %d",&storedModel)==1)break;
+ fclose(illuminationFile);readOption(restoredIllumination,"lighting_model",storedModel);
+ check(restoredIllumination.lightingModel==2,"illumination choice round-trips");
  Settings kh3;
  check(kh3.wounds==1,"wounds default to Classic");
  for(int mode:{0,1,2}) {
