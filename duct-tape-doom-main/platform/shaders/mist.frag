@@ -27,6 +27,8 @@ void main() {
         // Fade smoothly into nearby geometry using the already-bound scene
         // depth; no extra depth pass or light/shadow query is necessary.
         float near=smoothstep(16.0,80.0,distance)*smoothstep(0.0,36.0,sceneZ-layerZ);
+        // Zero alpha adds no light and the shaft pipeline has no depth target.
+        if(across<=0.0||along<=0.0||near<=0.0)discard;
         // Animate continuously at the prior average speed (35 tics/s *
         // 0.35 world units/tic), rather than jumping on whole game tics.
         float noise=textureLod(cloud,
@@ -41,6 +43,8 @@ void main() {
     // Suppress sheets edge-on and soften the camera crossing a layer.
     soft*=smoothstep(0.025,0.18,abs(delta.z)/max(distance,0.001));
     soft*=smoothstep(0.0,3.0,abs(delta.z));
+    // Zero alpha preserves both color and alpha in the mist blend.
+    if(soft<=0.0)discard;
     vec2 uv=vWorld.xy/160.0+vec2(c.fog.w*0.009,c.fog.w*0.005)+vUV;
     float noise=textureLod(cloud,uv,0.0).r;
     float alpha=vLight*(0.25+noise*0.75)*soft;

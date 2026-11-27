@@ -1,5 +1,6 @@
 /* Effects in the air: mist, sunbeams, heat haze and dust motes. */
 #include "internal.h"
+#include "../sprite_frustum.h"
 
 namespace doom3d {
 // Dust scatters sunlight mostly onward: a Henyey-Greenstein lobe (g 0.35,
@@ -43,37 +44,133 @@ void buildShafts(const Uniforms &camera) {
         quad(shaftVertices,vertex(-1,0),vertex(1,0),vertex(1,1),vertex(-1,1));
     }
 }
+namespace {
+struct MistSubsector {
+    size_t index, sector, firstTriangle, endTriangle;
+};
+// The fan always starts at point zero; edge identifies the other two points.
+struct MistTriangle {
+    size_t subsector, edge;
+};
+struct MistLayer {
+    size_t sector;
+    float z,u,v,alpha;
+};
+struct MistOrder {
+    float depth;
+    size_t triangle, layer;
+};
+std::vector<MistSubsector> mistSubsectors;
+std::vector<MistTriangle> mistTriangles;
+std::vector<MistLayer> mistLayers;
+std::vector<MistOrder> mistOrder;
+bool mistTopologyReady=false;
+}
+
+void clearMistTopology() {
+    decltype(mistSubsectors){}.swap(mistSubsectors);
+    decltype(mistTriangles){}.swap(mistTriangles);
+    decltype(mistLayers){}.swap(mistLayers);
+    decltype(mistOrder){}.swap(mistOrder);
+    mistTopologyReady=false;
+}
+
+void buildMistTopology() {
+    if(mistTopologyReady||floors.size()!=(size_t)numsubsectors||
+       floorBounds.size()!=floors.size()||sectorFloors.size()!=(size_t)numsectors||
+       sectorMist.size()!=sectorFloors.size())return;
+    for(size_t sector=0;sector<sectorMist.size();++sector) {
+        const auto &mist=sectorMist[sector];
+        if(!(mist.pit||mist.liquid||mist.toxic))continue;
+        for(size_t leaf:sectorFloors[sector]) {
+            if(leaf>=floors.size()||floors[leaf].size()<3)continue;
+            const size_t first=mistTriangles.size();
+            for(size_t edge=1;edge+1<floors[leaf].size();++edge)
+                mistTriangles.push_back({leaf,edge});
+            mistSubsectors.push_back({leaf,sector,first,mistTriangles.size()});
+        }
+    }
+    // Keep the legacy subsector/layer/fan order for equal-depth triangles.
+    std::sort(mistSubsectors.begin(),mistSubsectors.end(),
+        [](const auto &a,const auto &b){return a.index<b.index;});
+    mistTopologyReady=true;
+}
+
 void buildMist(const Uniforms &camera) {
     mistVertices.clear();
     if(!settings.fog||camera.effects[2]!=0)return;
-    struct Triangle { float depth; Vertex v[3]; };
-    std::vector<Triangle> triangles;
-    for(int i=0;i<numsubsectors;++i) {
-        const auto &poly=floors[i];if(poly.size()<3)continue;
-        const sector_t &sector=*subsectors[i].sector;const auto &mist=sectorMist[&sector-sectors];
-        if(!(mist.pit||mist.liquid||mist.toxic)||sector.floorpic==skyflatnum)continue;
-        const auto &bounds=floorBounds[i];
+    const uint64_t start=profileStart();
+    const bool profiled=profile.enabled;
+    if(!mistTopologyReady) {
+        buildMistTopology();
+        if(!mistTopologyReady)return; // Map polygons and sector classifications are not ready.
+    }
+    mistOrder.clear();
+    mistLayers.clear();
+    const doom_sprite_frustum::Camera frustum{
+        {camera.eye[0],camera.eye[1],camera.eye[2]},
+        {camera.right[0],camera.right[1],camera.right[2]},
+        {camera.up[0],camera.up[1],camera.up[2]},
+        {camera.forward[0],camera.forward[1],camera.forward[2]},
+        camera.projection[0],camera.projection[1],camera.projection[2]};
+    if(profiled)profile.frame.mistCandidateSubsectors=(int)mistSubsectors.size();
+    for(const auto &entry:mistSubsectors) {
+        const auto &sector=sectors[entry.sector];
+        const auto &mist=sectorMist[entry.sector];
+        if(sector.floorpic==skyflatnum)continue;
+        const auto &bounds=floorBounds[entry.index];
         if(camera.eye[0]<bounds[0]-2000||camera.eye[0]>bounds[2]+2000||
-           camera.eye[1]<bounds[1]-2000||camera.eye[1]>bounds[3]+2000)continue;
-        float bottom=floorZ(&sector),top=ceilZ(&sector);
-        float extent=std::min(mist.pit?24.0f:16.0f,std::max(0.0f,top-bottom-2));
-        int layers=mist.pit?4:3;
-        for(int layer=0;layer<layers&&extent>=4;++layer) {
-            float z=bottom+extent*(layer+1)/(layers+1);
+           camera.eye[1]<bounds[1]-2000||camera.eye[1]>bounds[3]+2000) {
+            if(profiled)++profile.frame.mistCulledSubsectors;
+            continue;
+        }
+        const float bottom=floorZ(&sector),top=ceilZ(&sector);
+        const float extent=std::min(mist.pit?24.0f:16.0f,std::max(0.0f,top-bottom-2));
+        if(extent<4)continue;
+        // The full current layer range stays inside these bounds. The shared
+        // clip-space test keeps edge and near-plane crossings conservatively.
+        if(doom_sprite_frustum::outside(
+            {{bounds[0],bounds[1],bottom},{bounds[2],bounds[3],bottom+extent}},frustum)) {
+            if(profiled)++profile.frame.mistCulledSubsectors;
+            continue;
+        }
+        if(profiled)++profile.frame.mistVisibleSubsectors;
+        const auto &poly=floors[entry.index];
+        const int layers=mist.pit?4:3;
+        for(int layer=0;layer<layers;++layer) {
+            const float z=bottom+extent*(layer+1)/(layers+1);
             float alpha=(mist.toxic?0.09f:mist.liquid?0.075f:0.06f)*(mist.outdoor?0.65f:1.0f);
             alpha*=1.0f-layer*0.15f;
-            for(size_t n=1;n+1<poly.size();++n) {
-                Triangle triangle={};int v=0;
-                for(Point p:{poly[0],poly[n],poly[n+1]}) {
-                    triangle.v[v++]={p.x,p.y,z,layer*0.31f,layer*0.17f,alpha,0,mist.color[0],mist.color[1],mist.color[2]};
-                    triangle.depth+=(p.x-camera.eye[0])*camera.forward[0]+(p.y-camera.eye[1])*camera.forward[1]+(z-camera.eye[2])*camera.forward[2];
-                }
-                triangles.push_back(triangle);
+            const size_t layerIndex=mistLayers.size();
+            mistLayers.push_back({entry.sector,z,layer*0.31f,layer*0.17f,alpha});
+            for(size_t i=entry.firstTriangle;i<entry.endTriangle;++i) {
+                const size_t edge=mistTriangles[i].edge;
+                float depth=0;
+                for(Point p:{poly[0],poly[edge],poly[edge+1]})
+                    depth+=(p.x-camera.eye[0])*camera.forward[0]+(p.y-camera.eye[1])*camera.forward[1]+(z-camera.eye[2])*camera.forward[2];
+                mistOrder.push_back({depth,i,layerIndex});
             }
         }
     }
-    std::stable_sort(triangles.begin(),triangles.end(),[](const auto &a,const auto &b){return a.depth>b.depth;});
-    for(const auto &triangle:triangles)mistVertices.insert(mistVertices.end(),triangle.v,triangle.v+3);
+    const uint64_t sortStart=profileStart();
+    std::stable_sort(mistOrder.begin(),mistOrder.end(),[](const auto &a,const auto &b){return a.depth>b.depth;});
+    profileAdd(profile.frame.mistSortMs,sortStart);
+
+    mistVertices.reserve(mistOrder.size()*3);
+    for(const auto &item:mistOrder) {
+        const auto &triangle=mistTriangles[item.triangle];
+        const auto &layer=mistLayers[item.layer];
+        const auto &poly=floors[triangle.subsector];
+        const auto &color=sectorMist[layer.sector].color;
+        for(Point p:{poly[0],poly[triangle.edge],poly[triangle.edge+1]})
+            mistVertices.push_back({p.x,p.y,layer.z,layer.u,layer.v,layer.alpha,0,color[0],color[1],color[2]});
+    }
+    if(profiled) {
+        profileAdd(profile.frame.mistBuildMs,start);
+        profile.frame.mistBuildMs-=profile.frame.mistSortMs;
+        profile.frame.mistTriangles=(int)mistOrder.size();
+        profile.frame.mistVertices=(int)mistVertices.size();
+    }
 }
 
 // Heat haze: hot-air volumes over lava and hot damaging floors (40 units

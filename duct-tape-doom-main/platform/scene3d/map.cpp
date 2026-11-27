@@ -275,6 +275,7 @@ static void buildSurfaceMaps(float minx,float miny,float maxx,float maxy) {
     fprintf(stderr,"3D surface maps: %dx%d cells of %.0f units.\n",mapWidth,mapHeight,mapCell);
 }
 void buildMap() {
+    clearMistTopology();
     floors.assign(numsubsectors,{});
     float minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
     for(int i=0;i<numvertexes;++i) {
@@ -286,7 +287,7 @@ void buildMap() {
     weldFloors();
     sectorFloors.assign(numsectors,{});
     for(int i=0;i<numsubsectors;++i)
-        sectorFloors[subsectors[i].sector-sectors].push_back(i);
+        if(subsectors[i].sector)sectorFloors[subsectors[i].sector-sectors].push_back(i);
     floorBounds.assign(numsubsectors,{1e9f,1e9f,-1e9f,-1e9f});
     for(int i=0;i<numsubsectors;++i) for(Point p:floors[i]) {
         auto &b=floorBounds[i];b[0]=std::min(b[0],p.x);b[1]=std::min(b[1],p.y);
@@ -298,6 +299,7 @@ void buildMap() {
         wallBounds[i]={std::min(ax,bx),std::min(ay,by),std::max(ax,bx),std::max(ay,by)};
     }
     classifySectorMist();
+    buildMistTopology();
     buildSurfaceMaps(minx,miny,maxx,maxy);
     size_t triangles=0; for(auto &p:floors) if(p.size()>2) triangles+=p.size()-2;
     fprintf(stderr,"3D map: %d subsectors, %zu floor triangles, %d lines.\n",numsubsectors,triangles,numlines);
@@ -336,6 +338,7 @@ float lighting(const sector_t *sector,bool bright) {
     return level;
 }
 void mapShutdown() {
+    clearMistTopology();
     floors.clear();floorBounds.clear();wallBounds.clear();sectorFloors.clear();seamCells.clear();contactCells.clear();sectorMist.clear();
     seamTexture=nullptr;contactTexture=nullptr;
 }

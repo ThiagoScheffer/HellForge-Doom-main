@@ -476,6 +476,8 @@ void decorationBloodDrop(const mobj_t &source,float x,float y,float z,uint32_t s
 // atmosphere.cpp
 void buildShafts(const Uniforms &camera);
 void buildMist(const Uniforms &camera);
+void buildMistTopology();
+void clearMistTopology();
 void buildHeat(const Uniforms &camera);
 void buildDust(const Uniforms &camera);
 // embers.cpp

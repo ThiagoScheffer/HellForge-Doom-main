@@ -611,6 +611,10 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                     hasFootprints)}},
             {"Air",{
                 check("fog","Atmospheric fog",&s.fog,"Height fog and soft cloud layers derived from pits, liquids and damaging floors."),
+                choice("fog_light_budget","Local fog lights",&s.fogLightBudget,
+                    {"Performance","Balanced","High (Legacy)"},{1,2,4},
+                    "Sets how many nearby lights can glow through fog. High uses four, Balanced uses two, and Performance uses one. Height fog and mist density stay the same.",
+                    [](const Settings &d){return d.accelerated&&d.fog;}),
                 check("sun_shafts","Sunbeams",&s.sunShafts,
                     "Soft shafts of sunlight slant down through ceiling holes and windows, where the dust motes glint. Needs sun shadows.",
                     [](const Settings &d){return d.sun!=0;}),

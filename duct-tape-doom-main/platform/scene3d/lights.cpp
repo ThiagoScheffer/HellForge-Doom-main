@@ -639,7 +639,8 @@ void selectFogLights(const Uniforms &camera) {
         candidates.emplace_back(score,i);
     }
     std::stable_sort(candidates.begin(),candidates.end(),[](auto a,auto b){return a.first>b.first;});
-    for(size_t i=0;i<std::min(size_t(4),candidates.size());++i)
+    const size_t budget=std::min<size_t>(settings.fogLightBudget,std::size(fogLights.indices));
+    for(size_t i=0;i<std::min(budget,candidates.size());++i)
         fogLights.indices[fogLights.count++]=candidates[i].second;
 }
 // A sphere that misses a triangle's bounds cannot illuminate any fragment

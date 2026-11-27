@@ -5,6 +5,8 @@
    doom-perf-smoke <iwad> [-maps MAP01,E1M2] [-spacing 512] [-budget 16.7]
                    [-out perf-report] [-strict] [-at x,y[,facing]] [engine options]
 
+   -fog-only starts on the single requested map and measures only fog passes.
+   -fog-reference spot,facing keeps ablations at an exact grid view from views.csv.
    -at times just that spot (facing east, north, west or south, or all four),
    for re-checking a slow view the report found; use it with one map.
    -combat-seconds N runs 1..120 seconds of active plasma combat at that spot.
@@ -61,6 +63,7 @@ extern void P_KillMobj(mobj_t*,mobj_t*);
 #define MAX_MAPS 160
 #define TIMED_FRAMES 5   /* Single GPU frames spike; slow views are timed again. */
 #define TOP_SPOTS 8
+#define FOG_TIMED_FRAMES 25
 /* Pitfall thresholds. */
 #define MANY_BLOCKERS 12       /* Wall tests per pixel for one light. */
 #define MANY_VIEW_BLOCKERS 64  /* ...summed over the lights of one view. */
@@ -87,6 +90,9 @@ static int at_x, at_y, at_yaw = -1, at_set; /* -at: one spot, optionally one fac
 static double budget = 1000.0 / 60;
 static const char *out_dir = "perf-report";
 static const char *map_filter;
+static int fog_only, fog_reference_spot = -1, fog_reference_yaw = -1;
+static FILE *fog_csv;
+static char spawn_path[512], leader_path[512];
 static unsigned shot_skip;
 static int combat_seconds,combat_realtime,combat_cells;
 static int view_shots,live_seconds,live_door;
@@ -136,7 +142,7 @@ extern int key_fire;
 static FILE *report, *csv;
 static summary_t summaries[MAX_MAPS];
 
-static enum { START, LOADING, SETTLING, SAMPLING, CONFIRMING, ABLATING, SHOT_PREP, SHOT, COMBAT, LIVE, DOOR, FINISHED } state = START;
+static enum { START, LOADING, SETTLING, SPAWN, SAMPLING, CONFIRMING, ABLATING, SHOT_PREP, SHOT, LEADER_SHOT, COMBAT, LIVE, DOOR, FINISHED } state = START;
 static unsigned seen_serial, level_serial;
 static uint64_t request_time;
 static double load_ms;
@@ -149,9 +155,9 @@ static int view;              /* SAMPLING: spot * 5 + phase; phase 0 settles. */
 static int candidates[TOP_SPOTS], candidate_count, candidate; /* The slowest view of the slowest spots. */
 static ablation_t ablations[16];
 static int ablation_count, ablation;
-static double timed_gpu[TIMED_FRAMES], timed_cpu[TIMED_FRAMES];
+static double timed_gpu[FOG_TIMED_FRAMES], timed_cpu[FOG_TIMED_FRAMES];
 static int timed_frame = -1;
-static int worst;             /* Index into samples. */
+static int worst, scan_worst; /* Indices into samples. */
 static char shot_path[512];
 static void view_shot(int spot,int yaw) {
     if(!view_shots)return;
@@ -181,8 +187,9 @@ static double median(double *values, int count)
 static int time_view(const I_Render3DFrameProfile *frame, double *gpu, double *cpu)
 {
     if (timed_frame >= 0) { timed_gpu[timed_frame] = frame->gpuMs; timed_cpu[timed_frame] = frame->cpuMs; }
-    if (++timed_frame < TIMED_FRAMES) return 0;
-    *gpu = median(timed_gpu, TIMED_FRAMES); *cpu = median(timed_cpu, TIMED_FRAMES);
+    const int count = fog_only ? FOG_TIMED_FRAMES : TIMED_FRAMES;
+    if (++timed_frame < count) return 0;
+    *gpu = median(timed_gpu, count); *cpu = median(timed_cpu, count);
     timed_frame = -1;
     return 1;
 }
@@ -316,6 +323,29 @@ static void request_map(void)
     state = LOADING;
 }
 
+static const char atmosphere_columns[] =
+    ",mist_build_ms,mist_sort_ms,mist_candidates,mist_visible,mist_culled,mist_triangles,mist_vertices,shaft_vertices,"
+    "fog_lights_selected,mist_upload_bytes,shaft_upload_bytes,msaa_samples,render_width,render_height,render_scale,"
+    "fog_enabled,photo_active,episode_haze\n";
+
+static void write_atmosphere(FILE *file, const I_Render3DFrameProfile *frame)
+{
+    fprintf(file, ",%.6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%llu,%llu,%d,%d,%d,%d,%d,%d,%.4f\n",
+            frame->mistBuildMs, frame->mistSortMs, frame->mistCandidateSubsectors,
+            frame->mistVisibleSubsectors, frame->mistCulledSubsectors, frame->mistTriangles,
+            frame->mistVertices, frame->shaftVertices, frame->fogLightsSelected,
+            frame->mistUploadBytes, frame->shaftUploadBytes, frame->msaaSamples,
+            frame->renderWidth, frame->renderHeight, frame->renderScale,
+            frame->fogEnabled, frame->photoActive, frame->episodeHaze);
+}
+
+static void fog_frame(const char *label, const I_Render3DFrameProfile *frame)
+{
+    if (!fog_csv || timed_frame < 0) return;
+    fprintf(fog_csv, "%s,%d,%.6f,%.6f,%.6f", label, timed_frame, cost(frame), frame->cpuMs, frame->gpuMs);
+    write_atmosphere(fog_csv, frame);
+}
+
 static void record(int spot, int yaw, const I_Render3DFrameProfile *frame)
 {
     sample_t *sample = &samples[sample_count++];
@@ -324,12 +354,13 @@ static void record(int spot, int yaw, const I_Render3DFrameProfile *frame)
     for (int i = 0; i < frame->lights; ++i)
         if (frame->light[i].blockers > most) most = frame->light[i].blockers;
     const spot_t *s = &spots[spot];
-    fprintf(csv, "%s,%d,%d,%d,%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%.3f,%d,%d,%d,%d,%d\n",
+    fprintf(csv, "%s,%d,%d,%d,%d,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%.3f,%d,%d,%d,%d,%d",
             maps[map_index].name, spot, s->x >> FRACBITS, s->y >> FRACBITS, s->sector, facing_names[yaw],
             cost(frame), frame->cpuMs, frame->gpuMs, frame->prepareMs, frame->geometryMs, frame->lightsMs,
             frame->spritesMs, frame->masksMs, frame->lights, frame->blockers, most, frame->triangles,
             frame->litTriangles, frame->lightTriangles, frame->reflection,frame->worldGeometryMs,
             frame->worldSubsectors,frame->worldRejectedSubsectors,frame->worldLines,frame->worldRejectedLines,frame->worldTriangles);
+    write_atmosphere(csv, frame);
 }
 
 /* The slowest view of each of the slowest spots, by their single frames. */
@@ -353,11 +384,22 @@ static void pick_candidates(void)
 
 static void plan_ablations(void)
 {
+    ablation_count = 0;
+    ablation = 0;
+    ablations[ablation_count++] = (ablation_t){"(as played)", 0};
+    I_Render3DProfile(1, 0);
+    if (fog_only)
+    {
+        ablations[ablation_count++] = (ablation_t){"full fog", I_RENDER3D_SKIP_FOG};
+        ablations[ablation_count++] = (ablation_t){"local fog lights", I_RENDER3D_SKIP_FOG_LIGHTS};
+        ablations[ablation_count++] = (ablation_t){"episode/outdoor haze", I_RENDER3D_SKIP_EPISODE_HAZE};
+        ablations[ablation_count++] = (ablation_t){"mist and sunbeams (full)", I_RENDER3D_SKIP_MIST};
+        ablations[ablation_count++] = (ablation_t){"mist and sunbeams (draw)", I_RENDER3D_SKIP_MIST_DRAW};
+        return;
+    }
     const I_Render3DFrameProfile *f = &samples[worst].frame;
     unsigned kinds = 0;
     for (int i = 0; i < f->lights; ++i) kinds |= 1u << f->light[i].kind;
-    ablation_count = 0;
-    ablations[ablation_count++] = (ablation_t){"(as played)", 0};
     if (kinds) ablations[ablation_count++] = (ablation_t){"all dynamic lights", I_RENDER3D_SKIP_LIGHTS};
     if (kinds & (kinds - 1))
         for (int k = 0; k < I_RENDER3D_LIGHT_KINDS; ++k)
@@ -366,8 +408,6 @@ static void plan_ablations(void)
     ablations[ablation_count++] = (ablation_t){"bloom", I_RENDER3D_SKIP_BLOOM};
     ablations[ablation_count++] = (ablation_t){"fog", I_RENDER3D_SKIP_FOG};
     ablations[ablation_count++] = (ablation_t){"mist and sunbeams", I_RENDER3D_SKIP_MIST};
-    ablation = 0;
-    I_Render3DProfile(1, ablations[0].skip);
 }
 
 static void describe_lights(const I_Render3DFrameProfile *f, const char *indent)
@@ -429,20 +469,31 @@ static void report_map(void)
     }
     qsort(costs, sample_count, sizeof(double), compare_doubles);
     summary->median = costs[sample_count / 2];
-    summary->worst = cost(&samples[worst].frame);
+    summary->worst = cost(&samples[fog_reference_spot < 0 ? worst : scan_worst].frame);
     out("   One frame per view: median %.1f ms, 95%% %.1f ms; %d of %d views over the %.1f ms budget\n",
         summary->median, costs[(int)(sample_count * 0.95)], summary->over, sample_count, budget);
     free(costs);
 
     const I_Render3DFrameProfile *f = &samples[worst].frame;
-    out("   Slowest view (median of %d frames), %s-bound:\n", TIMED_FRAMES, f->cpuMs > f->gpuMs ? "CPU" : "GPU");
+    const int repeats = fog_only ? FOG_TIMED_FRAMES : TIMED_FRAMES;
+    out("   %s (median of %d frames), %s-bound:\n", fog_reference_spot < 0 ? "Slowest view" : "Reference view",
+        repeats, f->cpuMs > f->gpuMs ? "CPU" : "GPU");
     spot_line(worst, "     ");
     out("     CPU: scene %.1f ms (geometry %.1f: light wall blockers %.1f, sprite lighting %.1f; light masks %.1f)\n",
         f->prepareMs, f->geometryMs, f->lightsMs, f->spritesMs, f->masksMs);
     out("     %d world triangles, %d lit by dynamic lights (%d light-triangle pairs)%s\n", f->triangles,
         f->litTriangles, f->lightTriangles, f->reflection ? ", liquid reflection pass" : "");
     if (f->lights) { out("     Lights:\n"); describe_lights(f, "       "); }
-    out("     Saved by leaving out (GPU / CPU, median of %d frames):\n", TIMED_FRAMES);
+    if (fog_only)
+    {
+        out("     Atmospheric work: build %.4f ms, sort %.4f ms, %d candidates, %d visible, %d culled\n",
+            f->mistBuildMs, f->mistSortMs, f->mistCandidateSubsectors, f->mistVisibleSubsectors, f->mistCulledSubsectors);
+        out("     %d mist triangles, %d mist vertices (%llu upload bytes), %d shaft vertices (%llu upload bytes), %d local fog lights\n",
+            f->mistTriangles, f->mistVertices, f->mistUploadBytes, f->shaftVertices, f->shaftUploadBytes, f->fogLightsSelected);
+        out("     Atmosphere metrics for each timed frame: %s/fog.csv\n", out_dir);
+    }
+    out(fog_only ? "     Ablation deltas from as played (GPU / CPU, median of %d frames):\n" :
+        "     Saved by leaving out (GPU / CPU, median of %d frames):\n", repeats);
     double base_gpu = ablations[0].gpu, base_cpu = ablations[0].cpu, light_saving = 0;
     out("       %-30s %6.1f / %5.1f ms\n", ablations[0].name, base_gpu, base_cpu);
     for (int i = 1; i < ablation_count; ++i)
@@ -506,7 +557,7 @@ static void report_map(void)
 #undef WARN
 
     /* The other timed spots, slowest first. */
-    if (candidate_count > 1) out("   Other slow spots (median of %d frames):\n", TIMED_FRAMES);
+    if (candidate_count > 1) out("   Other slow spots (median of %d frames):\n", repeats);
     for (int i = 0; i < candidate_count; ++i)
         for (int j = i + 1; j < candidate_count; ++j)
             if (cost(&samples[candidates[j]].frame) > cost(&samples[candidates[i]].frame))
@@ -535,6 +586,7 @@ static void report_summary(void)
     out("\n%d of %d maps have views over budget. Report: %s/report.txt, every view: %s/views.csv\n",
         over, map_count, out_dir, out_dir);
     fclose(report); fclose(csv); report = csv = NULL;
+    if (fog_csv) { fclose(fog_csv); fog_csv = NULL; }
     if (strict && over) I_Error("Performance smoke: %d maps over budget", over);
 }
 
@@ -550,6 +602,7 @@ void I_TestFrame(void)
     case START:
         if (gamestate != GS_LEVEL || !players[consoleplayer].mo) return;
         if (!I_Render3DIsAccelerated()) I_Error("Performance smoke: the GPU renderer is off");
+        if (!fog_only)
         {
             boolean saved=debugnotarget;debugnotarget=false;
             const char *code="notarget";
@@ -563,6 +616,7 @@ void I_TestFrame(void)
             debugnotarget=saved;
             fprintf(stderr,"Notarget regression: typed ON/OFF and player visibility passed.\n");
         }
+        if (!fog_only)
         {
             extern int S_AdjustSoundParams(mobj_t*,mobj_t*,fixed_t,int*,int*,int*);
             extern int snd_SfxVolume;
@@ -590,9 +644,28 @@ void I_TestFrame(void)
         snprintf(path, sizeof(path), "%s/views.csv", out_dir);
         csv = fopen(path, "w");
         if (!report || !csv) I_Error("Performance smoke: cannot write to %s", out_dir);
+        if (fog_only)
+        {
+            const int file = M_CheckParm("-file");
+            if (map_count != 1 || gameepisode != maps[0].episode || gamemap != maps[0].map)
+                I_Error("Performance smoke: startup did not load the requested fog map");
+            out("Loaded %s from IWAD %s\n", maps[0].name, myargv[2]);
+            if (gamemode != commercial && gameepisode <= 4)
+            {
+                extern char *mapnames[];
+                out("Map title: %s\n", mapnames[(gameepisode - 1) * 9 + gamemap - 1]);
+            }
+            if (file && file + 1 < myargc) out("Additional WAD: %s\n", myargv[file + 1]);
+            snprintf(path, sizeof(path), "%s/fog.csv", out_dir);
+            fog_csv = fopen(path, "w");
+            if (!fog_csv) I_Error("Performance smoke: cannot write %s", path);
+            fputs("view,frame,frame_ms,cpu_ms,gpu_ms", fog_csv);
+            fputs(atmosphere_columns, fog_csv);
+        }
         fputs("map,spot,x,y,sector,facing,frame_ms,cpu_ms,gpu_ms,scene_ms,geometry_ms,light_blockers_ms,"
               "sprite_light_ms,light_masks_ms,lights,blockers,most_light_blockers,triangles,lit_triangles,"
-              "light_triangles,reflection,world_geometry_ms,subsectors,rejected_subsectors,linedefs,rejected_linedefs,world_triangles\n", csv);
+              "light_triangles,reflection,world_geometry_ms,subsectors,rejected_subsectors,linedefs,rejected_linedefs,world_triangles", csv);
+        fputs(atmosphere_columns, csv);
         {
             int count = 0, w = 0, h = 0, fullscreen = 0;
             SDL_Window **windows = SDL_GetWindows(&count);
@@ -608,6 +681,14 @@ void I_TestFrame(void)
         if(combat_seconds)out("Live combat stress: %d seconds, active monsters, god mode, held plasma fire.\n",combat_seconds);
         I_Render3DProfile(1, 0);
         map_index = 0;
+        if (fog_only)
+        {
+            request_time = SDL_GetTicksNS();
+            paused = true;
+            settle_frames = 0;
+            state = SETTLING;
+            return;
+        }
         if(door_save) {
             level_serial=r_levelserial;request_time=SDL_GetTicksNS();
             G_LoadGame((char*)door_save);
@@ -650,6 +731,19 @@ void I_TestFrame(void)
         if (fresh && ++settle_frames == 3)
         {
             load_ms = (SDL_GetTicksNS() - request_time) / 1e6;
+            if (fog_only)
+            {
+                const mobj_t *mo = players[consoleplayer].mo;
+                out("Spawn: (%.3f, %.3f), facing %.3f degrees, level tic %d; render %dx%d at %d%%, MSAA %dx, fog %s, episode haze %.4f, photo %s\n",
+                    mo->x / (double)FRACUNIT, mo->y / (double)FRACUNIT, mo->angle * (360.0 / 4294967296.0), leveltime,
+                    frame->renderWidth, frame->renderHeight, frame->renderScale, frame->msaaSamples,
+                    frame->fogEnabled ? "on" : "off", frame->episodeHaze, frame->photoActive ? "on" : "off");
+                snprintf(spawn_path, sizeof(spawn_path), "%s/%s-spawn.png", out_dir, maps[map_index].name);
+                out("Spawn screenshot: %s\n", spawn_path);
+                I_Render3DScreenshotTo(spawn_path);
+                state = SPAWN;
+                return;
+            }
             if(M_CheckParm("-test-pickup-lights")) {
                 int sprites[]={SPR_ARM1,SPR_ARM2,SPR_SOUL,SPR_MEGA};
                 mobj_t* player=players[consoleplayer].mo;
@@ -745,6 +839,7 @@ void I_TestFrame(void)
                 players[consoleplayer].cheats|=CF_GODMODE;
                 paused=false;combat_start=SDL_GetTicksNS();combat_previous=0;state=DOOR;I_Render3DProfile(0,0);return;
             }
+            start_sampling:
             find_spots();
             if (!spot_count) { worst = 0; report_map(); goto next_map; }
             if(live_seconds) {
@@ -788,6 +883,15 @@ void I_TestFrame(void)
             place(&spots[0], 0);
         }
         return;
+    case SPAWN:
+    {
+        if (!fresh) return;
+        double gpu, cpu;
+        fog_frame("spawn", frame);
+        if (!time_view(frame, &gpu, &cpu)) return;
+        out("Spawn as played (median of %d frames): CPU %.3f ms, GPU %.3f ms\n", FOG_TIMED_FRAMES, cpu, gpu);
+        goto start_sampling;
+    }
     case SAMPLING:
         if (!fresh) { place(&spots[view / 5], view % 5 ? view % 5 - 1 : 0); return; }
         if (view % 5) record(view / 5, view % 5 - 1, frame);
@@ -823,6 +927,26 @@ void I_TestFrame(void)
         worst = candidates[0];
         for (int i = 1; i < candidate_count; ++i)
             if (cost(&samples[candidates[i]].frame) > cost(&samples[worst].frame)) worst = candidates[i];
+        if (fog_only)
+        {
+            const sample_t *leader = &samples[worst];
+            out("Scan leader: spot %d facing %s, CPU %.3f ms, GPU %.3f ms\n",
+                leader->spot, facing_names[leader->yaw], leader->frame.cpuMs, leader->frame.gpuMs);
+        }
+        scan_worst = worst;
+        if (fog_reference_spot >= 0)
+        {
+            if (fog_reference_spot >= spot_count)
+                I_Error("Performance smoke: reference spot %d is outside the scan", fog_reference_spot);
+            worst = fog_reference_spot * 4 + fog_reference_yaw;
+        }
+        if (fog_only)
+        {
+            const sample_t *reference = &samples[worst];
+            const spot_t *spot = &spots[reference->spot];
+            out("Ablation view: spot %d, (%.6f, %.6f), facing %s\n", reference->spot,
+                spot->x / (double)FRACUNIT, spot->y / (double)FRACUNIT, facing_names[reference->yaw]);
+        }
         plan_ablations();
         state = ABLATING;
         I_Render3DProfileTeleported();
@@ -831,11 +955,19 @@ void I_TestFrame(void)
     }
     case ABLATING:
         place(&spots[samples[worst].spot], samples[worst].yaw);
-        if (!fresh || !time_view(frame, &ablations[ablation].gpu, &ablations[ablation].cpu)) return;
+        if (!fresh) return;
+        fog_frame(ablations[ablation].name, frame);
+        if (!time_view(frame, &ablations[ablation].gpu, &ablations[ablation].cpu)) return;
+        if (fog_only && ablation == 0)
+        {
+            samples[worst].frame = *frame;
+            samples[worst].frame.gpuMs = ablations[0].gpu;
+            samples[worst].frame.cpuMs = ablations[0].cpu;
+        }
         if (++ablation < ablation_count) { I_Render3DProfile(1, ablations[ablation].skip); return; }
         I_Render3DProfile(1, 0);
         /* The screenshot frame runs unpaused so no PAUSE sign covers it. */
-        paused = false;
+        if (!fog_only) paused = false;
         state = SHOT_PREP;
         return;
     case SHOT_PREP:
@@ -847,6 +979,19 @@ void I_TestFrame(void)
         state = SHOT;
         return;
     case SHOT:
+        if (fog_only && scan_worst != worst)
+        {
+            const sample_t *leader = &samples[scan_worst];
+            I_Render3DProfileTeleported();
+            place(&spots[leader->spot], leader->yaw);
+            snprintf(leader_path, sizeof(leader_path), "%s/%s-scan-leader.png", out_dir, maps[map_index].name);
+            out("Scan leader screenshot: %s\n", leader_path);
+            I_Render3DScreenshotTo(leader_path);
+            state = LEADER_SHOT;
+            return;
+        }
+        /* Fall through when the reference screenshot already shows the scan leader. */
+    case LEADER_SHOT:
         report_map();
     next_map:
         if (++map_index < map_count) { request_map(); return; }
@@ -937,18 +1082,31 @@ int main(int argc, char **argv)
 {
     if (argc < 2 || argv[1][0] == '-')
     {
-        fprintf(stderr, "Usage: %s <iwad> [-maps MAP01,E1M2] [-spacing units] [-budget ms] [-out dir] [-strict] [-at x,y[,facing]] [engine options]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <iwad> [-maps MAP01,E1M2] [-spacing units] [-budget ms] [-out dir] [-strict] [-at x,y[,facing]] [-fog-only [-fog-reference spot,facing]] [engine options]\n", argv[0]);
         return 1;
     }
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     if (!SDL_Init(SDL_INIT_VIDEO)) return 1;
     static char *args[256];
     int count = 0, graphics = 0;
-    static char graphics_path[1024];
+    static char graphics_path[1024], warp_episode[2], warp_map[3];
     args[count++] = "perf"; args[count++] = "-iwad"; args[count++] = argv[1];
     for (int i = 2; i < argc && count < 240; ++i)
     {
         if (!strcmp(argv[i], "-maps") && i + 1 < argc) map_filter = argv[++i];
+        else if (!strcmp(argv[i], "-fog-only")) fog_only=1;
+        else if (!strcmp(argv[i], "-fog-reference") && i + 1 < argc)
+        {
+            char facing[16], extra;
+            if (sscanf(argv[++i], "%d,%15[^,]%c", &fog_reference_spot, facing, &extra) == 2)
+                for (int k = 0; k < 4; ++k)
+                    if (!strcmp(facing, facing_names[k])) fog_reference_yaw = k;
+            if (fog_reference_spot < 0 || fog_reference_yaw < 0)
+            {
+                fprintf(stderr, "Invalid fog reference. Use spot,facing from views.csv\n");
+                return 1;
+            }
+        }
         else if (!strcmp(argv[i], "-view-shots")) view_shots=1;
         else if (!strcmp(argv[i], "-live-door")) live_door=1;
         else if (!strcmp(argv[i], "-live-seconds") && i+1<argc) live_seconds=atoi(argv[++i]);
@@ -976,6 +1134,11 @@ int main(int argc, char **argv)
         }
     }
     if (spacing < 32 || budget <= 0 || combat_seconds<0 || combat_seconds>120 || live_seconds<0 || live_seconds>120) { fprintf(stderr, "Invalid spacing, budget or duration\n"); return 1; }
+    if (fog_reference_spot >= 0 && (!fog_only || at_set))
+    {
+        fprintf(stderr, "-fog-reference requires the -fog-only grid scan\n");
+        return 1;
+    }
     if (!graphics)
     {
         /* The player's settings, read but never written. */
@@ -989,7 +1152,40 @@ int main(int argc, char **argv)
         }
     }
     if (!skill_given) { args[count++] = "-skill"; args[count++] = "4"; }
-    args[count++] = "-warp"; args[count++] = "1"; args[count++] = "1";
+    if (fog_only)
+    {
+        if (!map_filter || combat_seconds || combat_realtime || live_seconds || live_door || door_save || monster_sim || view_shots)
+        {
+            fprintf(stderr, "-fog-only requires one -maps target and cannot be combined with live smoke modes\n");
+            return 1;
+        }
+        if (strlen(map_filter) == 4 && toupper((unsigned char)map_filter[0]) == 'E' &&
+            toupper((unsigned char)map_filter[2]) == 'M' && map_filter[1] >= '1' && map_filter[1] <= '5' &&
+            map_filter[3] >= '1' && map_filter[3] <= '9')
+        {
+            warp_episode[0] = map_filter[1]; warp_map[0] = map_filter[3];
+        }
+        else if (strlen(map_filter) == 5 && !SDL_strncasecmp(map_filter, "MAP", 3) &&
+                 isdigit((unsigned char)map_filter[3]) && isdigit((unsigned char)map_filter[4]))
+        {
+            warp_map[0] = map_filter[3]; warp_map[1] = map_filter[4];
+        }
+        else
+        {
+            fprintf(stderr, "-fog-only requires one map name (ExMy or MAPxx)\n");
+            return 1;
+        }
+    }
+    args[count++] = "-warp";
+    if (fog_only)
+    {
+        if (warp_episode[0]) args[count++] = warp_episode;
+        args[count++] = warp_map;
+        /* Let the spawn camera initialize with one game tic even if GPU
+           startup took a different amount of wall-clock time. */
+        singletics = true;
+    }
+    else { args[count++] = "1"; args[count++] = "1"; }
     args[count++] = "-config"; args[count++] = "perf.cfg";
     args[count++] = "-nomusic";
     int toasty_test=0;for(int i=1;i<argc;++i)if(!strcmp(argv[i],"-test-toasty")||!strcmp(argv[i],"-test-toasty-menu"))toasty_test=1;

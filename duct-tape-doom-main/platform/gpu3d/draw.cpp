@@ -92,6 +92,10 @@ void uploadFrame(SDL_GPUCommandBuffer *command,const std::vector<const std::vect
         auto& draws=residentBindings[&vertices];
         auto stream=[&](size_t first,size_t count){
             if(!count)return;Uint32 size=(Uint32)(count*sizeof(Vertex));
+            if(profile.enabled) {
+                if(&vertices==&mistVertices)profile.frame.mistUploadBytes+=size;
+                if(&vertices==&shaftVertices)profile.frame.shaftUploadBytes+=size;
+            }
             dynamic.push_back({vertices.data()+first,size,nullptr,bytes});draws.push_back({nullptr,bytes,(Uint32)count});
             bytes=(bytes+size+255)&~Uint32(255);
         };

@@ -87,6 +87,7 @@ struct Settings {
     float fov=90;
     float flashlightTintGain=1;
     int emissive=1, fog=1, palette=0;
+    int fogLightBudget=4;
     int voxelModels=1,voxelEyes=1;
     int keyPickupHands=1;
     int helmetFace=0;

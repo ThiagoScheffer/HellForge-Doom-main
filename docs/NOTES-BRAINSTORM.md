@@ -431,7 +431,10 @@ increate light bolts to improve visuals on rain atmosphere
 Bodies when drop or die on Acid or lava, should dissolve,no blood or burn if lava.
 
 
-current gibs assets all dark no light, some assets looks like have a dark stroke around it,not looking good as meat or gore flesh.
+some of the current gibs assets all dark no light, some assets looks like have a dark stroke around it,not lookinggood as meat or gore flesh. also we added a reference new gibs to improve.
+example of weird dark stroke: HFORGA0 HFLEG1B0  
+example of good palette: HFBRNB0 GIB3A0 HFHEADA0 HFHEADB0 HFLEG0A0 GIB4B0
+- check later we can edit first and recompile.
 
 
 

@@ -346,7 +346,7 @@ void applySettings() {
     if(!settings.accelerated||!settings.blood||!advancedGoreMode(settings)||!settings.goreFragments)clearGiblets();
     if(!settings.accelerated||!settings.greenImpactFire)resetGreenImpactFire();
     if(!settings.accelerated||!settings.fireballWallMelt||settings.fireballWallMeltIntensity<=0.f)clearThermalWallMelts();
-    R_BeforeLevelReset=+[]{resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();resetFootprints();};
+    R_BeforeLevelReset=+[]{clearMistTopology();resetTerror();stopRelight();resetHellfire();resetVileEffects();resetRevenantSouls();resetWallAmbience();sprayShutdown();resetFootprints();};
     if(!settings.accelerated||!settings.episodeAtmosphere)resetHellfire();
     if(!settings.accelerated)stopRelight();
     fitGame(settings);
@@ -1045,10 +1045,13 @@ FrameView prepareFrame(int w,int h) {
              episodeAtmosphereNow==5?
                 doom_episode::bloodHellHaze(bloodHellMistNow):
                 std::clamp(game.haze+stormHazeNow+extraHaze,0.f,1.f)):0.f;
-        buildMist(camera);
+        const unsigned skip=profile.enabled?profile.skip:0;
+        if(skip&I_RENDER3D_SKIP_MIST)mistVertices.clear();
+        else buildMist(camera);
         buildAcid(camera); // Append to the depth-tested effect pass after its batches are cleared.
         buildIncendiary(camera);
-        buildShafts(camera);
+        if(skip&I_RENDER3D_SKIP_MIST)shaftVertices.clear();
+        else buildShafts(camera);
         buildRings(camera);
         updateExposure(camera);
         updateFlashlightTint(camera);
@@ -1056,8 +1059,15 @@ FrameView prepareFrame(int w,int h) {
         // the flame; most of its light is the carried flame (lights.cpp).
         if(torchFlame>0)for(int c=0;c<3;++c)camera.flashlightTint[c]+=0.1f*torchFlame*torchColor()[c];
         selectFogLights(camera);
-        if(profile.skip&I_RENDER3D_SKIP_MIST) {mistVertices.clear();shaftVertices.clear();}
-        if(profile.skip&I_RENDER3D_SKIP_FOG) {fogLights={};camera.materials[2]=0;}
+        if(profile.enabled) {
+            profile.frame.shaftVertices=(int)shaftVertices.size();
+            profile.frame.fogLightsSelected=(int)fogLights.count;
+            profile.frame.fogEnabled=settings.fog;
+            profile.frame.episodeHaze=camera.haze[3];
+        }
+        if(skip&I_RENDER3D_SKIP_FOG)camera.materials[2]=0;
+        if(skip&(I_RENDER3D_SKIP_FOG|I_RENDER3D_SKIP_FOG_LIGHTS))fogLights={};
+        if(skip&(I_RENDER3D_SKIP_FOG|I_RENDER3D_SKIP_EPISODE_HAZE))camera.haze[3]=0;
         if(profile.skip&I_RENDER3D_SKIP_BLOOM) camera.materials[1]=0;
     }
     if(!worldPending) {translucentWorld.clear();transferredSkies.clear();mistVertices.clear();shaftVertices.clear();heatVertices.clear();skyVertices.clear();}

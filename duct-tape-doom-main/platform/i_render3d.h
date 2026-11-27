@@ -47,6 +47,9 @@ enum {
 #define I_RENDER3D_SKIP_BLOOM (1u << 9)
 #define I_RENDER3D_SKIP_FOG (1u << 10)
 #define I_RENDER3D_SKIP_MIST (1u << 11)
+#define I_RENDER3D_SKIP_FOG_LIGHTS (1u << 12)
+#define I_RENDER3D_SKIP_EPISODE_HAZE (1u << 13)
+#define I_RENDER3D_SKIP_MIST_DRAW (1u << 14)
 typedef struct {
     float x, y, z, radius;
     int kind;      /* I_RENDER3D_LIGHT_* */
@@ -66,6 +69,13 @@ typedef struct {
       int worldSubsectors,worldRejectedSubsectors,worldLines,worldRejectedLines,worldTriangles;
     int lights, blockers, triangles, litTriangles, lightTriangles, reflection;
     I_Render3DLightProfile light[64];
+    double mistBuildMs, mistSortMs; /* Build excludes sort and sunbeams. */
+    int mistCandidateSubsectors, mistVisibleSubsectors, mistCulledSubsectors;
+    int mistTriangles, mistVertices, shaftVertices, fogLightsSelected;
+    unsigned long long mistUploadBytes, shaftUploadBytes;
+    int msaaSamples, renderWidth, renderHeight, renderScale;
+    int fogEnabled, photoActive;
+    float episodeHaze; /* Strength before profiling ablations. */
 } I_Render3DFrameProfile;
 void I_Render3DProfile(int enabled, unsigned skip);
 const I_Render3DFrameProfile *I_Render3DLastFrame(void);

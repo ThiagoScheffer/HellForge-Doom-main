@@ -482,8 +482,15 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     std::vector<unsigned> overlay=hudPixels(pixels);
     FrameView view=prepareFrame(w,h);Uniforms &camera=view.camera;
     stage(1);
-    bool drawMist=!mistVertices.empty()||!shaftVertices.empty();
+    const bool drawMist=(!mistVertices.empty()||!shaftVertices.empty())&&
+        !(profile.enabled&&(profile.skip&I_RENDER3D_SKIP_MIST_DRAW));
     bool msaa=sampleCount!=SDL_GPU_SAMPLECOUNT_1;
+    if(profile.enabled) {
+        profile.frame.msaaSamples=1<<(int)sampleCount;
+        profile.frame.renderWidth=w;profile.frame.renderHeight=h;
+        profile.frame.renderScale=settings.scale;
+        profile.frame.photoActive=r_photoactive;
+    }
     // Transient quads join the frame upload; textures created while drawing
     // go through the upload command buffer, which is submitted first.
     std::vector<SpriteDraw> weapons;if(worldPending&&!director_view_active)weapons=weaponDraws(camera);
