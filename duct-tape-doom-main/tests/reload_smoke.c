@@ -21,10 +21,13 @@ extern unsigned r_levelserial;
 extern void I_RunEngine(void (*entry)(void));
 extern int I_TestBakeCacheStorage(void);
 extern int I_TestLightingModelTransition(int frame);
+extern void I_TestBrokenFlicker(void);
+extern void I_TestMaterialDestruction(bool verify);
 extern int I_TestRelightRunning(void);
 extern void I_TestNativeCrash(void);
 static int storageMode,crashMode,autoLoadMode,startupMode,relightQuitMode;
 static int lightingModelsMode;
+static int materialAuditMode,materialFlickerMode,materialDestructionMode;
 extern int g_death_load_last_save;
 static int stage,begin,initialSerial,frames,cycles,goal=10,saveMode;
 static void effects(void) {
@@ -43,6 +46,16 @@ static void effects(void) {
 void I_TestFrame(void) {
     if(gamestate!=GS_LEVEL||!players[0].mo)return;
     if(++frames>30000){fprintf(stderr,"RELOAD FAIL timeout stage %d\n",stage);exit(3);}
+    if(materialAuditMode)return;  // -rendercheck terminates the process.
+    if(materialFlickerMode) {
+        if(frames>=5){I_TestBrokenFlicker();I_Quit();}
+        return;
+    }
+    if(materialDestructionMode) {
+        if(frames==4)I_TestMaterialDestruction(false);
+        if(frames>=8){I_TestMaterialDestruction(true);I_Quit();}
+        return;
+    }
     if(lightingModelsMode) {
         if(frames>=4&&I_TestLightingModelTransition(frames-4)) {
             fprintf(stderr,"LIGHTING MODE TRANSITIONS PASS\n");
@@ -132,11 +145,25 @@ int main(int argc,char **argv) {
     autoLoadMode=!strcmp(argv[3],"autoload");
     startupMode=!strcmp(argv[3],"startup");
     lightingModelsMode=!strcmp(argv[3],"lighting-models");
+    materialAuditMode=!strcmp(argv[3],"material-audit");
+    materialFlickerMode=!strcmp(argv[3],"material-flicker");
+    materialDestructionMode=!strcmp(argv[3],"material-destruction");
     relightQuitMode=!strcmp(argv[3],"relight-quit");
     crashMode=!strcmp(argv[3],"crash");storageMode=!strcmp(argv[3],"storage");saveMode=!strcmp(argv[3],"save");goal=atoi(argv[4]);if(goal<1||goal>50)return 2;
-    char *args[128]={argv[0],"-iwad",argv[1],"-warp","1","-skill","1","-graphics",argv[2],
-        "-config","reload-doom.cfg","-nosound","-nomusic","-width","960","-height","540"};
-    int count=17;
+    const char *iwad=argv[1],*slash;
+    if((slash=strrchr(iwad,'/')))iwad=slash+1;
+    if((slash=strrchr(iwad,'\\')))iwad=slash+1;
+    int originalDoom=!SDL_strcasecmp(iwad,"DOOM.WAD")||!SDL_strcasecmp(iwad,"DOOM1.WAD");
+    char *args[128]={argv[0],"-iwad",argv[1]};
+    int count=3,hasWarp=0;
+    for(int i=5;i<argc;++i)if(!strcmp(argv[i],"-warp"))hasWarp=1;
+    if(!hasWarp) {
+        args[count++]="-warp";args[count++]="1";
+        if(originalDoom)args[count++]="1";
+    }
+    char *defaults[]={"-skill","1","-graphics",argv[2],"-config","reload-doom.cfg","-nosound","-nomusic",
+        "-width","960","-height","540"};
+    for(size_t i=0;i<sizeof(defaults)/sizeof(*defaults);++i)args[count++]=defaults[i];
     for(int i=5;i<argc&&count<127;++i)args[count++]=argv[i];
     myargc=count;myargv=args;I_RunEngine(D_DoomMain);return 0;
 }

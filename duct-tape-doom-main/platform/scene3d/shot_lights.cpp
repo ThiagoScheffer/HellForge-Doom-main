@@ -140,11 +140,14 @@ static std::vector<int> joinedPlanes(int sector,bool ceiling) {
 }
 // A whole floor or ceiling going dark, for planes with no tile of their own.
 static SurfaceLightKey wholePlane(int sector,bool ceiling) {return {0,sector,(int)ceiling,0,0,1};}
+bool fixtureShotOut(const SurfaceLightKey &key) {
+    return tileShotOut(key)||tileShotOut(key[0]==1?wholePiece(key[1],key[2],key[5]):wholePlane(key[1],key[2]));
+}
 // Planes without tiles among those joined to the given ones go dark with them.
 static void darkenLampless(const std::set<std::pair<int,int>> &planes,float now,float x,float y,float z) {
     std::set<std::pair<int,int>> lit;
     for(const auto &tile:surfaceLights)if(tile.key[0]==0)lit.insert({tile.key[1],tile.key[2]});
-    for(const auto &entry:brokenTiles)if(entry.first[0]==0&&entry.first[5]==0)lit.insert({entry.first[1],entry.first[2]});
+    for(const auto &entry:brokenTiles)if(entry.first[0]==0&&entry.first[5]!=1)lit.insert({entry.first[1],entry.first[2]});
     for(const auto &[sector,ceiling]:planes)for(int joined:joinedPlanes(sector,ceiling)) {
         if(lit.count({joined,ceiling})||brokenTiles.count(wholePlane(joined,ceiling)))continue;
         brokenTiles[wholePlane(joined,ceiling)]={now,x,y,z};
@@ -160,7 +163,7 @@ static std::vector<const SurfaceLight*> fixtureTiles(const SurfaceLight &hit) {
     constexpr float widest=448;
     std::vector<int> planes=hit.key[0]==0?joinedPlanes(hit.key[1],hit.key[2]):std::vector<int>{};
     auto same=[&](const SurfaceLightKey &k) {
-        if(hit.key[0]==0)return k[0]==0&&k[2]==hit.key[2]&&k[5]==0&&std::find(planes.begin(),planes.end(),k[1])!=planes.end();
+        if(hit.key[0]==0)return k[0]==0&&k[2]==hit.key[2]&&k[5]!=1&&std::find(planes.begin(),planes.end(),k[1])!=planes.end();
         return hit.key[0]==1&&k[0]==1&&k[1]==hit.key[1]&&k[2]==hit.key[2]&&k[5]==hit.key[5];
     };
     std::vector<const SurfaceLight*> tiles;
@@ -319,7 +322,7 @@ void shotFlat(int sector,bool ceiling,float x,float y,float z,int reach) {
     const float normal[3]={0,0,ceiling?-1.0f:1.0f};
     std::vector<int> planes=joinedPlanes(sector,ceiling);
     shotSurface(name,true,lumpImage(lump,true),x,-y,[&](const SurfaceLightKey &k) {
-        return k[0]==0&&k[2]==(int)ceiling&&k[5]==0&&std::find(planes.begin(),planes.end(),k[1])!=planes.end();
+        return k[0]==0&&k[2]==(int)ceiling&&k[5]!=1&&std::find(planes.begin(),planes.end(),k[1])!=planes.end();
     },[&] {
         size_t before=brokenTiles.size();
         darkenLampless({{sector,(int)ceiling}},gameSeconds(),x,y,z);
@@ -708,6 +711,11 @@ bool addBrokenWall(std::vector<Vertex> &out,const line_t &line,int side,int span
     }
     int firstU=(int)std::ceil((u-image.emissionU)/w),lastU=(int)std::floor((u+len-image.emissionU)/w);
     int firstV=(int)std::ceil((anchor-top-image.emissionV)/h),lastV=(int)std::floor((anchor-bottom-image.emissionV)/h);
+    if(sourceDrivenLighting(settings)&&(lastU<firstU||lastV<firstV)&&tileShotOut({1,index,side,firstU,firstV,span})) {
+        const unsigned m=mode|MODE_DEAD_GLOW;
+        quad(out,vertex(0,top,m),vertex(len,top,m),vertex(len,bottom,m),vertex(0,bottom,m));
+        return true;
+    }
     int stepU=std::max(1,64/image.width),stepV=std::max(1,64/image.height);
     std::vector<std::array<float,4>> dark; // along0, along1, z0, z1
     for(int tileU=firstU;tileU<=lastU;tileU+=stepU)for(int tileV=firstV;tileV<=lastV;tileV+=stepV) {
@@ -754,7 +762,7 @@ bool addBrokenFlat(std::vector<Vertex> &out,int leaf,int sector,bool ceiling,con
     auto ours=[&](const SurfaceLightKey &k){return k[0]==0&&k[1]==sector&&k[2]==(int)ceiling;};
     std::set<std::pair<int,int>> tiles,dark;
     for(const auto &tile:surfaceLights)if(ours(tile.key))tiles.insert({tile.key[3],tile.key[4]});
-    for(const auto &entry:brokenTiles)if(ours(entry.first)&&entry.first[5]==0) {
+    for(const auto &entry:brokenTiles)if(ours(entry.first)&&entry.first[5]!=1) {
         tiles.insert({entry.first[3],entry.first[4]});
         if(tileShotOut(entry.first))dark.insert({entry.first[3],entry.first[4]});
     }
@@ -813,15 +821,46 @@ extern "C" void I_TestBrokenFlicker(void) {
             brokenTiles[key]={gameSeconds()-age,0,0,0};brokenPieces.insert({0,index*2,0});}
         sectors[sector].lightlevel=off?0:255;
         std::vector<Vertex> out;unsigned mode=unsigned(sector+1)<<MODE_SECTOR_SHIFT;
+        const bool destroyed=kind==2||(kind==1&&tileDark(wholePiece(index,0,0)));
         bool handled=addBrokenWall(out,lines[index],0,0,image,{0,0},{128,0},0,128,0,128,1,mode,42);
-        if(handled!=bool(kind||off))I_Error((char*)"Flicker wall handling mismatch");
+        if(handled!=bool(destroyed||off))I_Error((char*)"Flicker wall handling mismatch");
         if(handled&&out.empty())I_Error((char*)"Flicker wall missing geometry");
-        for(const auto &v:out)if(bool(v.mode&MODE_DEAD_GLOW)!=bool(kind)||bool(v.mode&MODE_LAMP_OFF)!=bool(off)
+        // An intact unpowered surface has both flags; a broken surface
+        // keeps its broken-glass treatment even during an off phase.
+        for(const auto &v:out)if(!(v.mode&MODE_DEAD_GLOW)||bool(v.mode&MODE_LAMP_OFF)!=bool(off&&!destroyed)
             ||(v.mode>>MODE_SECTOR_SHIFT)!=unsigned(sector+1))I_Error((char*)"Flicker changed physical screen damage");
     }
     sectors[sector].lightlevel=savedLight;brokenTiles=std::move(savedTiles);brokenPieces=std::move(savedPieces);
     puts("Intact and shot-out screens: on/off cycles, partial/whole damage and sputter ages passed.");
 }
+
+extern "C" void I_TestMaterialDestruction(bool verify) {
+    static SurfaceLightKey key,cell;
+    static float previousStrength;
+    if(!sourceDrivenLighting(settings))I_Error("Material destruction test requires source-driven lighting");
+    if(!verify) {
+        for(const auto &tile:surfaceLights) {
+            if(tile.key[0]!=1||tileKind(tile.key)!=DOOM_EMISSIVE_LAMP)continue;
+            const auto merged=surfaceCellOf(tile);
+            if(std::count_if(surfaceLights.begin(),surfaceLights.end(),[&](const auto &other) {
+                return surfaceCellOf(other)==merged;
+            })!=1)continue;
+            const auto at=std::find(bakeSourceKeys.begin(),bakeSourceKeys.end(),merged);
+            if(at==bakeSourceKeys.end())continue;
+            key=tile.key;cell=merged;previousStrength=bakeSources[at-bakeSourceKeys.begin()].strength;
+            breakFixture(tile);
+            return;
+        }
+        I_Error("Material destruction test needs a stock baked wall fixture");
+    }
+    finishRelight();
+    const auto at=std::find(bakeSourceKeys.begin(),bakeSourceKeys.end(),cell);
+    if(!fixtureShotOut(key)||std::any_of(surfaceLights.begin(),surfaceLights.end(),[](const auto &light){return light.key==key;})||
+        at==bakeSourceKeys.end()||bakeSources[at-bakeSourceKeys.begin()].strength>=previousStrength)
+        I_Error("Destroyed stock wall fixture left stale nominal power");
+    puts("MATERIAL DESTRUCTION PASS");
+}
+
 #endif
 // Doom lights a lamp-lit room by its sector level as much as by the lamps,
 // so a room that lost them falls dark by the share of its baked floor light

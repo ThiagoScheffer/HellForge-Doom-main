@@ -64,6 +64,35 @@ int main() {
     check(merged.size()==1&&merged[0].radius>256&&merged[0].strength>1.65f,"Tiles of one cell must merge into one wider light");
     pool.push_back({{0,0,1,0,0,0},32,32,120,256,1.65f,{0.2f,1,0.1f},1});
     check(mergeSurfaceLights(pool).size()==2,"Floor and ceiling lights must stay separate");
+    {
+        SurfaceLightSelection powered;
+        powered.capacity=1;
+        std::vector<SurfaceLight> two={lamp(1,0),lamp(2,96)};
+        for(int i=0;i<4;++i)powered.update(two,eye,.05f,true);
+        check(powered.slots[0].light.key==two[0].key,"nearest powered fixture is selected");
+        two[0].shine=0;
+        powered.update(two,eye,.05f,true);
+        check(powered.slots.size()==1&&powered.slots[0].light.key==two[1].key,"off fixture frees its slot immediately");
+        check(two.size()==2&&two[0].strength>0,"off fixture retains nominal ownership");
+        two[0].shine=1;
+        for(int i=0;i<5;++i)powered.update(two,eye,.05f,true);
+        check(powered.slots[0].light.key==two[0].key,"reactivated fixture returns through ordinary ranking");
+        float away[]={1200,0,0};
+        powered.update(two,away,.05f,true);
+        check(powered.slots.size()==1&&powered.slots[0].gain>0&&powered.slots[0].gain<1,"range exit keeps fade");
+        two.erase(two.begin());
+        powered.update(two,away,.05f,true);
+        check(powered.slots.empty(),"destruction during fade clears stale strength");
+
+        two={lamp(1,32),lamp(2,192)};
+        for(auto &l:two)l.radius=l.radiusLimit=88;
+        const auto bounded=mergeSurfaceLights(two);
+        check(bounded.size()==1&&bounded[0].radius==88,"merging a row of capped indicators preserves the cap");
+        two[1].radius=224;two[1].radiusLimit=0;
+        check(mergeSurfaceLights(two)[0].radius>224,"mixed group keeps ordinary emitter reach");
+        two[0].flickerSector=1;two[1].flickerSector=2;
+        check(mergeSurfaceLights(two).size()==2,"distinct flicker groups never share power");
+    }
     for(int step=0;step<32;++step) {
         std::vector<SurfaceLight> moving;
         for(int i=0;i<400;++i) {

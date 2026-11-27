@@ -399,6 +399,7 @@ extern uint64_t surfaceLightTime;
 std::array<float,2> panelNormal(const SurfaceLight &light);
 std::vector<SurfaceLight> mergedSurfaceLights(std::vector<SurfaceLight> tiles);
 void collectFlatLights();
+void trackWallLightMaterial(int side,const side_t &surface);
 void collectSurfaceLights();
 void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float top,int tex,float anchor,int span);
 // The merge cell (mergeSurfaceLights key) a tile's light joins.
@@ -515,6 +516,7 @@ extern std::vector<float> shotDim;
 void dimShotSector(int sector,float share);
 // Whether a glowing tile is out now (sputtering out for a moment after the shot).
 bool tileDark(const SurfaceLightKey &key);
+bool fixtureShotOut(const SurfaceLightKey &key);
 // Whether a glowing tile has been shot out, sputtering or not.
 bool tileShotOut(const SurfaceLightKey &key);
 void shotWall(const line_t &line,int side,int section,float along,float x,float y,float z,int reach=1);

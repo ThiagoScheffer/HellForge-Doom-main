@@ -1,6 +1,8 @@
 /* Light from glowing wall and floor textures, grouped into tiles that
    see each other. */
 #include "internal.h"
+#include "../material_light_coverage.h"
+#include <tuple>
 extern "C" {
 }
 
@@ -11,22 +13,74 @@ static std::unordered_map<SurfaceLightKey,int,SurfaceLightKeyHash> surfaceGroups
 float surfaceEye[3];
 SurfaceLightSelection surfaceSelection;
 uint64_t surfaceLightTime;
-struct FlatLightSample { Point point; int u,v; };
-static std::map<std::pair<int,int>,std::vector<FlatLightSample>> flatLightSamples;
+struct FlatLightSample { Point point; int u,v,component=0;float fraction=1; };
+static std::map<std::tuple<int,int,bool>,std::vector<FlatLightSample>> flatLightSamples;
+static constexpr size_t flatCoverageLimit=4*1024*1024;
+static size_t flatCoverageBudget=flatCoverageLimit;
+static bool clippedWallLimitReported=false;
+static std::vector<std::array<int,3>> wallMaterials;
+static std::vector<std::array<int,2>> flatMaterials;
+#ifdef DOOM_TEST_DRIVER
+struct MaterialAudit {
+    size_t surfaces=0,logical=0,off=0,clipped=0,destroyed=0;
+};
+static std::map<const Image *,MaterialAudit> auditedMaterials;
+static bool auditMaterials=false;
+static unsigned auditedLevel=~0u;
+struct MaterialAuditFrame {
+    ~MaterialAuditFrame() {
+        if(!auditMaterials)return;
+        size_t areaPieces=0,live=0,fog=0;
+        for(const auto &area:bakeAreas)areaPieces+=area.pieces.size();
+        for(unsigned i=0;i<flashes.count;++i) {
+            fog+=fogOnly[i];
+            live+=!fogOnly[i]&&lightKinds[i]==I_RENDER3D_LIGHT_SURFACE;
+        }
+        std::map<std::pair<bool,std::string>,std::pair<const Image *,MaterialAudit>> ordered;
+        for(const auto &[key,image]:images) {
+            const auto found=auditedMaterials.find(&image);
+            if(found==auditedMaterials.end())continue;
+            char name[9]={};
+            if(key>=0)R_TextureName(key,name);
+            else memcpy(name,lumpinfo[-1-key].name,8);
+            ordered[{key<0,name}]={&image,found->second};
+        }
+        for(const auto &[name,entry]:ordered) {
+            const auto &[image,counts]=entry;
+            int rule=Game_GlowKind(name.second.c_str(),name.first);
+            if(rule==DOOM_EMISSIVE_NONE&&!image->switchIndicator&&!image->emissionWeight&&!image->explicitEmissionHash)continue;
+            fprintf(stderr,"Material audit %s %s kind %u coverage %.6f surfaces %zu logical %zu off %zu clipped %zu destroyed %zu\n",
+                name.first?"flat":"wall",name.second.c_str(),unsigned(image->lightMaterial),image->emissionCoverage,
+                counts.surfaces,counts.logical,counts.off,counts.clipped,counts.destroyed);
+        }
+        fprintf(stderr,"Material audit totals preset %d bake_only %d logical %zu switch %zu static %zu areas %zu pieces %zu slots %zu live %zu fog %zu\n",
+            effectiveLightingModel(settings),bakeOnlyActive,surfaceLights.size(),switchLights.size(),bakeSources.size(),
+            bakeAreas.size(),areaPieces,surfaceSelection.slots.size(),live,fog);
+        auditMaterials=false;auditedLevel=r_levelserial;
+    }
+};
+#endif
 // Pixel integration depends only on the translated material and its clipped
 // texture coordinates. Retain one entry per wall side/span, bounded by map size.
 struct WallEmissionIntegral {
-    int texture=-1;std::array<float,4> bounds{};
+    int texture=-1;uint64_t mask=0;std::array<float,4> bounds{};
     double weight=0,centerU=0,centerV=0;
 };
 static std::vector<std::array<WallEmissionIntegral,8>> wallEmissionIntegrals;
+struct WallPointSample {int u,v;float atU,atV,extent,coverage;};
+struct WallPoints {
+    int texture=-1;uint64_t mask=0;std::array<float,4> bounds{};
+    std::vector<WallPointSample> points;
+};
+static std::unordered_map<size_t,WallPoints> wallPointSamples;
 static std::vector<SurfaceLight> mergeInputs,mergeResult;
 static std::vector<size_t> mergeMembership;
 static std::vector<float> mergeWeights;
 static int mergeLightingModel=doom_lighting_model::Enhanced;
 static bool sameSurface(const SurfaceLight &a,const SurfaceLight &b,bool shine=true) {
     return a.key==b.key&&a.x==b.x&&a.y==b.y&&a.z==b.z&&a.radius==b.radius&&a.strength==b.strength&&
-        a.color==b.color&&a.facing==b.facing&&a.extent==b.extent&&a.group==b.group&&a.flickerSector==b.flickerSector&&(!shine||a.shine==b.shine);
+        a.color==b.color&&a.facing==b.facing&&a.extent==b.extent&&a.group==b.group&&a.flickerSector==b.flickerSector&&
+        a.radiusLimit==b.radiusLimit&&(!shine||a.shine==b.shine);
 }
 
 
@@ -285,11 +339,18 @@ void lampGlow(std::vector<Vertex> &out,size_t first,const sector_t *sector,const
     for(size_t n=first;n<out.size();++n)out[n].lampTint=(out[n].lampTint&0xFFFFFFu)|alpha<<24;
 }
 static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,float z,const Image &image,int facing,float radius=224,float extent=0,
-                         float crowd=1) {
-    if(!settings.emissive || image.emissionWeight==0 || tileDark(key)) return;
+                         float crowd=1,float coverage=1) {
+    const bool sourceDriven=sourceDrivenLighting(settings);
+    if(!settings.emissive||image.emissionWeight==0)return;
+    if(sourceDriven?fixtureShotOut(key):tileDark(key)) {
+#ifdef DOOM_TEST_DRIVER
+        if(auditMaterials)++auditedMaterials[&image].destroyed;
+#endif
+        return;
+    }
     // Lamps too dim to light stay listed (strength 0), and so do lamps
     // switched off: shots still find them.
-    SurfaceLight light={key,x,y,z,radius,1.65f*image.emissionWeight*lampLevel(sector)*crowd,image.emissionColor,facing,extent};
+    SurfaceLight light={key,x,y,z,radius,1.65f*image.emissionWeight*lampLevel(sector)*crowd*coverage,image.emissionColor,facing,extent};
     if(image.switchIndicator) {
         // Switches change state dynamically and must not enter the static
         // bake. Unlike the old fixed 1.2 light, their contribution follows
@@ -297,16 +358,114 @@ static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,f
         // Keep a compact halo without painting nearby walls a solid color.
         light.radius=88;
         light.strength=std::min(.30f,1.15f*image.emissionWeight*
-            (.25f+.75f*lampLevel(sector))*crowd);
+            (.25f+.75f*lampLevel(sector))*crowd*coverage);
         light.extent=0;
         switchLights.push_back(light);
+#ifdef DOOM_TEST_DRIVER
+        if(auditMaterials)++auditedMaterials[&image].logical;
+#endif
         return;
+    }
+    if(sourceDriven) {
+        light.radius=doom_material_light::sourceRadius(radius,image.lightMaterial,true);
+        if(light.radius<radius)light.radiusLimit=light.radius;
+        if(!doom_material_light::canEmit(light.strength,light.radius))return;
     }
     if(lampFlickers(sector,image)) {light.flickerSector=sector;light.shine=lampShine(sector);}
     surfaceLights.push_back(light);
+#ifdef DOOM_TEST_DRIVER
+    if(auditMaterials) {
+        auto &counts=auditedMaterials[&image];
+        ++counts.logical;counts.off+=light.shine<=0;counts.clipped+=coverage<1;
+    }
+#endif
 }
+static void materialReplaced() {
+    lightBakeKey=-1;
+    surfaceGroups.clear();mergeResult.clear();surfaceSelection.clear();
+}
+// Raw material IDs change on a permanent replacement. An animation advances
+// only the translation, and its live copy is reconciled every frame.
+void trackWallLightMaterial(int side,const side_t &surface) {
+    if(!sourceDrivenLighting(settings))return;
+    if(wallMaterials.size()!=(size_t)numsides)wallMaterials.assign(numsides,{-1,-1,-1});
+    auto &previous=wallMaterials[side];
+    const std::array<int,3> current={surface.midtexture,surface.toptexture,surface.bottomtexture};
+    if(previous==current)return;
+    auto isStaticEmitter=[](int tex) {
+        if(tex<=0)return false;
+        auto emitting=[](const Image &image) {return image.emissionWeight>0&&!image.switchIndicator;};
+        return emitting(wallImage(tex))||emitting(wallImage(texturetranslation[tex]));
+    };
+    if(previous[0]>=0)
+        for(size_t i=0;i<current.size();++i)if(previous[i]!=current[i]&&(isStaticEmitter(previous[i])||isStaticEmitter(current[i]))) {
+            materialReplaced();
+            break;
+        }
+    previous=current;
+}
+
+static void addClippedFlatSamples(int sector,const Image &image,const std::map<std::pair<int,int>,Point> &whole,
+                                  std::vector<FlatLightSample> &result) {
+    using namespace doom_material_light;
+    struct Piece {int leaf;std::vector<CoveragePoint> footprint;CoveredEmission emission;};
+    std::map<std::pair<int,int>,std::vector<Piece>> repeats;
+    std::vector<CoveragePoint> scratch;
+    const auto limitMessage=[] {fprintf(stderr,"3D material lighting: clipped flat coverage budget reached.\n");};
+    for(int leaf:sectorFloors[sector]) {
+        const auto &polygon=floors[leaf];
+        if(polygon.size()<3)continue;
+        const auto &bounds=floorBounds[leaf];
+        const int u0=(int)std::floor(bounds[0]/image.width),u1=(int)std::ceil(bounds[2]/image.width);
+        const int v0=(int)std::floor(-bounds[3]/image.height),v1=(int)std::ceil(-bounds[1]/image.height);
+        for(int u=u0;u<u1;++u)for(int v=v0;v<v1;++v) {
+            if(whole.count({u,v}))continue;
+            std::vector<CoveragePoint> footprint;
+            footprint.reserve(polygon.size());
+            for(auto p:polygon)footprint.push_back({p.x-u*float(image.width),-p.y-v*float(image.height)});
+            clipBox(footprint,scratch,0,0,float(image.width),float(image.height));
+            const auto emission=integrateEmission(footprint,image.emission.data(),image.width,image.height,flatCoverageBudget);
+            if(!flatCoverageBudget) {limitMessage();return;}
+            if(emission.weight>0)repeats[{u,v}].push_back({leaf,std::move(footprint),emission});
+        }
+    }
+    const double nominal=image.emissionCoverage*image.width*image.height*255.0;
+    for(auto &[tile,pieces]:repeats) {
+        std::sort(pieces.begin(),pieces.end(),[](const Piece &a,const Piece &b){return a.leaf<b.leaf;});
+        std::vector<size_t> parents(pieces.size());
+        for(size_t i=0;i<pieces.size();++i)parents[i]=i;
+        auto root=[&](size_t i) {while(parents[i]!=i)i=parents[i];return i;};
+        const uint64_t comparisons=uint64_t(pieces.size())*(pieces.size()-1)/2;
+        if(comparisons>=flatCoverageBudget) {flatCoverageBudget=0;limitMessage();return;}
+        flatCoverageBudget-=size_t(comparisons);
+        for(size_t i=0;i<pieces.size();++i)for(size_t j=0;j<i;++j)if(sharesEdge(pieces[i].footprint,pieces[j].footprint)) {
+            const auto a=root(i),b=root(j);
+            parents[std::max(a,b)]=std::min(a,b);
+        }
+        std::map<size_t,std::vector<const Piece *>> components;
+        for(size_t i=0;i<pieces.size();++i)components[root(i)].push_back(&pieces[i]);
+        const auto [u,v]=tile;
+        for(const auto &[owner,members]:components) {
+            CoveredEmission sum;
+            const Piece *largest=members.front();
+            for(const auto *piece:members) {
+                sum.add(piece->emission);
+                if(piece->emission.weight>largest->emission.weight)largest=piece;
+            }
+            auto center=sum.center();
+            if(std::none_of(members.begin(),members.end(),[&](const Piece *piece) {
+                return insideConvex(piece->footprint,center.x,center.y);
+            }))center=largest->emission.center();
+            result.push_back({{center.x+u*image.width,-center.y-v*image.height},u,v,
+                components.size()==1?0:pieces[owner].leaf+2,float(std::min(1.0,sum.weight/nominal))});
+        }
+    }
+}
+
 static const std::vector<FlatLightSample> &flatSamples(int sectorIndex,int lump,const Image &image) {
-    auto key=std::make_pair(sectorIndex,lump);
+    const bool clipped=sourceDrivenLighting(settings)&&image.lightMaterial!=doom_material_light::Kind::Liquid&&
+        image.emissionCoverage<.4f;
+    auto key=std::make_tuple(sectorIndex,lump,clipped);
     auto cached=flatLightSamples.find(key);
     if(cached!=flatLightSamples.end()) return cached->second;
     std::map<std::pair<int,int>,Point> samples;
@@ -321,33 +480,52 @@ static const std::vector<FlatLightSample> &flatSamples(int sectorIndex,int lump,
         int lastV=(int)std::floor((-bounds[1]-image.emissionV)/image.height);
         for(int u=firstU;u<=lastU;++u) for(int v=firstV;v<=lastV;++v) {
             Point point={image.emissionU+u*image.width,-image.emissionV-v*image.height};
-            bool positive=false,negative=false;
-            for(size_t n=0;n<poly.size();++n) {
-                Point a=poly[n],b=poly[(n+1)%poly.size()];
-                float cross=(b.x-a.x)*(point.y-a.y)-(b.y-a.y)*(point.x-a.x);
-                positive|=cross>0.01f;negative|=cross<-0.01f;
-            }
-            if(!(positive&&negative)) samples[{u,v}]=point;
+            if(doom_material_light::insideConvex(poly,point.x,point.y))samples[{u,v}]=point;
         }
     }
     std::vector<FlatLightSample> result;
     for(const auto &sample:samples) result.push_back({sample.second,sample.first.first,sample.first.second});
+    if(clipped&&flatCoverageBudget)addClippedFlatSamples(sectorIndex,image,samples,result);
     return flatLightSamples.emplace(key,std::move(result)).first->second;
 }
 void collectFlatLights() {
     switchLights.clear();
+#ifdef DOOM_TEST_DRIVER
+    static const bool audit=M_CheckParm((char*)"-materiallightaudit")!=0;
+    auditMaterials=audit&&leveltime>=12&&auditedLevel!=r_levelserial&&bakedLightsActive;
+    if(auditMaterials)auditedMaterials.clear();
+#endif
     if(!settings.emissive) return;
+    const bool track=sourceDrivenLighting(settings);
+    if(track&&flatMaterials.size()!=(size_t)numsectors)flatMaterials.assign(numsectors,{-1,-1});
     for(int i=0;i<numsectors;++i) for(int ceiling=0;ceiling<2;++ceiling) {
         const sector_t &sector=sectors[i];int flat=ceiling?sector.ceilingpic:sector.floorpic;
+        if(track) {
+            auto &previous=flatMaterials[i][ceiling];
+            if(previous>=0&&previous!=flat) {
+                auto emitting=[](int pic) {
+                    return pic!=skyflatnum&&(lumpImage(firstflat+pic,true).emissionWeight>0||
+                        lumpImage(firstflat+flattranslation[pic],true).emissionWeight>0);
+                };
+                if(emitting(previous)||emitting(flat))materialReplaced();
+            }
+            previous=flat;
+        }
         if(flat==skyflatnum)continue;
         int lump=firstflat+flattranslation[flat];const Image &image=lumpImage(lump,true);
+#ifdef DOOM_TEST_DRIVER
+        if(auditMaterials)++auditedMaterials[&image].surfaces;
+#endif
         if(image.emissionWeight==0)continue;
         float z=sectorHeight(&sector,ceiling)+(ceiling?-8:8);
         for(const auto &sample:flatSamples(i,lump,image))
-            surfaceLight({0,i,ceiling,sample.u,sample.v},i,sample.point.x,sample.point.y,z,image,ceiling,256);
+            surfaceLight({0,i,ceiling,sample.u,sample.v,sample.component},i,sample.point.x,sample.point.y,z,image,ceiling,256,0,1,sample.fraction);
     }
 }
 void collectSurfaceLights() {
+#ifdef DOOM_TEST_DRIVER
+    MaterialAuditFrame report;
+#endif
     uint64_t now=SDL_GetTicksNS();
     float seconds=surfaceLightTime?(now-surfaceLightTime)/1e9f:1.0f/60;
     surfaceLightTime=now;
@@ -382,13 +560,14 @@ void collectSurfaceLights() {
         if(!settings.fog)return;
         const bool sourceDriven=sourceDrivenLighting(settings);
         if(settings.emissive)for(const auto &light:mergedSurfaceLights(surfaceLights)) {
-            float strength=light.strength*(sourceDriven?light.shine:1.f);
+            float strength=sourceDriven?doom_material_light::effectivePower(light.strength,light.shine):light.strength;
             if(sourceDriven&&strength<=0)continue;
             staticFog.push_back({light.x,light.y,light.z,light.radius,strength,light.color});
         }
         std::vector<std::pair<float,size_t>> scored;
         for(size_t n=0;n<staticFog.size();++n) {
             const StaticFog &f=staticFog[n];
+            if(sourceDriven&&!doom_material_light::canEmit(f.strength,f.radius))continue;
             float distance=std::hypot(f.x-surfaceEye[0],f.y-surfaceEye[1]);
             if(distance<=f.radius+512)scored.emplace_back(f.strength/(1+distance/128),n);
         }
@@ -407,8 +586,9 @@ void collectSurfaceLights() {
     uint64_t t0=trace?SDL_GetTicksNS():0;
     std::vector<SurfaceLight> lit=mergedSurfaceLights(surfaceLights);
     uint64_t t1=trace?SDL_GetTicksNS():0;
-    lit.erase(std::remove_if(lit.begin(),lit.end(),[](const SurfaceLight &l){return l.strength<=0;}),lit.end());
-    surfaceSelection.update(lit,surfaceEye,seconds);
+    const bool sourceDriven=sourceDrivenLighting(settings);
+    if(!sourceDriven)lit.erase(std::remove_if(lit.begin(),lit.end(),[](const SurfaceLight &l){return l.strength<=0;}),lit.end());
+    surfaceSelection.update(lit,surfaceEye,seconds,sourceDriven);
     uint64_t t2=trace?SDL_GetTicksNS():0;
     // Surface lights reach a short way, but walls still stop them: the bake
     // subtracts only their flat share, so their gloss would otherwise show on
@@ -416,9 +596,11 @@ void collectSurfaceLights() {
     // A flickering lamp's copy dims and goes out with its baked light.
     for(const auto &slot:surfaceSelection.slots) {
         const auto &p=slot.light;
-        if(p.shine<=0)continue;
+        const float strength=sourceDriven?doom_material_light::effectivePower(p.strength,p.shine)*slot.gain:
+            p.strength*slot.gain*p.shine;
+        if(p.shine<=0||(sourceDriven&&strength<=0))continue;
         auto n=panelNormal(p);
-        appendLight(p.x,p.y,p.z,p.radius,p.strength*slot.gain*p.shine,p.color,nullptr,0.35f,!settings.unoccludedSurfaceLights,
+        appendLight(p.x,p.y,p.z,p.radius,strength,p.color,nullptr,0.35f,!settings.unoccludedSurfaceLights,
                     bakedLightsActive?1.0f:0,{std::min(p.extent,p.radius),n[0],n[1],0});
     }
     if(trace){auto end=SDL_GetTicksNS();if(end-t0>2000000)fprintf(stderr,"Surface spike tic %d: merge %.3f select %.3f blockers %.3f ms\n",gametic,(t1-t0)/1e6,(t2-t1)/1e6,(end-t2)/1e6);}
@@ -497,10 +679,48 @@ static float glowCrowding(float x,float y) {
     return crowd>glowCrowdRef?std::sqrt(glowCrowdRef/crowd):1.0f;
 }
 
+static const std::vector<WallPointSample> &clippedWallPoints(size_t key,int texture,const Image &image,
+        const std::array<float,4> &bounds,int firstU,int lastU,int firstV,int lastV) {
+    auto &cached=wallPointSamples[key];
+    if(cached.texture==texture&&cached.mask==image.explicitEmissionHash&&cached.bounds==bounds)return cached.points;
+    cached={texture,image.explicitEmissionHash,bounds,{}};
+    const auto [left,length,top,bottom]=bounds;
+    const float right=left+length;
+    const int w=image.width,h=image.height,stepU=std::max(1,64/w),stepV=std::max(1,64/h);
+    const bool single=lastU<firstU||lastV<firstV;
+    if(single) {lastU=firstU;lastV=firstV;}
+    const double fullWeight=image.emissionCoverage*w*h*255.0*stepU*stepV;
+    size_t budget=256*1024;
+    for(int u=firstU;u<=lastU;u+=stepU)for(int v=firstV;v<=lastV;v+=stepV) {
+        const float a=u==firstU?left:float(u*w),b=u+stepU>lastU?right:float((u+stepU)*w);
+        const float c=v==firstV?top:float(v*h),d=v+stepV>lastV?bottom:float((v+stepV)*h);
+        const bool complete=a==u*w&&b==(u+stepU)*w&&c==v*h&&d==(v+stepV)*h;
+        if(complete) {
+            const float atV=image.emissionV+v*h;
+            cached.points.push_back({u,v,image.emissionU+u*w,atV,
+                std::max(0.f,std::min({h*stepV*.5f,atV-top,bottom-atV})),1.f});
+        } else if(budget) {
+            const auto emission=doom_material_light::integrateWallEmission(image.emission.data(),w,h,a,c,b,d,budget);
+            if(emission.weight>0) {
+                const auto p=emission.center();
+                cached.points.push_back({u,v,p.x,p.y,std::max(0.f,std::min(p.y-c,d-p.y)),
+                    float(std::min(1.0,emission.weight/fullWeight))});
+            }
+        }
+    }
+    if(!budget&&!clippedWallLimitReported) {
+        fprintf(stderr,"3D material lighting: clipped wall coverage budget reached.\n");
+        clippedWallLimitReported=true;
+    }
+    return cached.points;
+}
 
 void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float top,int tex,float anchor,int span) {
     if(!settings.emissive||tex<=0||top<=bottom)return;
     const Image &image=wallImage(texturetranslation[tex]);
+#ifdef DOOM_TEST_DRIVER
+    if(auditMaterials)++auditedMaterials[&image].surfaces;
+#endif
     float u=units(sides[line.sidenum[side]].textureoffset),len=std::hypot(b.x-a.x,b.y-a.y);
     if(image.emissionWeight<=0||len<=0)return;
     float nx=(b.y-a.y)/len,ny=-(b.x-a.x)/len;
@@ -510,6 +730,17 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
     int firstV=(int)std::ceil((anchor-top-image.emissionV)/image.height);
     int lastV=(int)std::floor((anchor-bottom-image.emissionV)/image.height);
     int stepV=std::max(1,64/image.height);
+    if(sourceDrivenLighting(settings)&&!image.emission.empty()) {
+        const auto &points=clippedWallPoints(size_t(&line-lines)*8+side*4+span,texturetranslation[tex],image,
+            {u,len,anchor-top,anchor-bottom},firstU,lastU,firstV,lastV);
+        for(const auto &point:points) {
+            const float t=std::clamp((point.atU-u)/len,0.f,1.f);
+            const float x=a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET,y=a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET;
+            surfaceLight({1,int(&line-lines),side,point.u,point.v,span},int(sides[line.sidenum[side]].sector-sectors),
+                x,y,anchor-point.atV,image,facing,224,point.extent,glowCrowding(x,y),point.coverage);
+        }
+        return;
+    }
     // A clipped strip may contain glowing pixels without containing the whole
     // texture's emission centroid. Place a light at the visible glow instead.
     if((firstU>lastU||firstV>lastV)&&!image.emission.empty()){
@@ -517,7 +748,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
         auto &cached=wallEmissionIntegrals[&line-lines][side*4+span];
         std::array<float,4> bounds={u,len,anchor-top,anchor-bottom};
         int material=texturetranslation[tex];
-        bool hit=cached.texture==material&&cached.bounds==bounds;
+        bool hit=cached.texture==material&&cached.mask==image.explicitEmissionHash&&cached.bounds==bounds;
         if(!hit||M_CheckParm((char*)"-verifysurfacecache")) {
             double weight=0,centerU=0,centerV=0;
             for(int v=(int)std::floor(anchor-top);v<(int)std::ceil(anchor-bottom);++v)
@@ -531,7 +762,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
 
             if(hit&&(cached.weight!=weight||cached.centerU!=centerU||cached.centerV!=centerV))
                 I_Error((char*)"Cached wall emission differs from pixel integration");
-            cached={material,bounds,weight,centerU,centerV};
+            cached={material,image.explicitEmissionHash,bounds,weight,centerU,centerV};
         }
         double weight=cached.weight,centerU=cached.centerU,centerV=cached.centerV;
         if(weight>0){
@@ -558,7 +789,8 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
 }
 void clearSurfaceLights() {
     switchLights.clear();
-    wallEmissionIntegrals.clear();mergeInputs.clear();mergeResult.clear();mergeMembership.clear();mergeWeights.clear();
+    wallEmissionIntegrals.clear();wallPointSamples.clear();mergeInputs.clear();mergeResult.clear();mergeMembership.clear();mergeWeights.clear();
     surfaceLights.clear();surfaceSelection.clear();flatLightSamples.clear();surfaceGroups.clear();lampRanges.clear();surfaceLightTime=0;
+    flatCoverageBudget=flatCoverageLimit;clippedWallLimitReported=false;wallMaterials.clear();flatMaterials.clear();
 }
 } // namespace doom3d

@@ -490,6 +490,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 if (line.sidenum[side] < 0)
                     continue;
                 const side_t &s = sides[line.sidenum[side]];
+                trackWallLightMaterial(line.sidenum[side],s);
                 const sector_t *front = s.sector, *back = side ? line.frontsector : line.backsector;
                 Point a = {units((side ? line.v2 : line.v1)->x), units((side ? line.v2 : line.v1)->y)};
                 Point b = {units((side ? line.v1 : line.v2)->x), units((side ? line.v1 : line.v2)->y)};

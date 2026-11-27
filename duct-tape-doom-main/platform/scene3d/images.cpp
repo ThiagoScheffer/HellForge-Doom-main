@@ -380,7 +380,7 @@ static PatchEmission correctPatchEmission(const std::vector<ImmersivePatch> &pat
             const Rect bounds=clippedArtwork(patch,region,w,h);
             for(int y=bounds[1];y<bounds[3];++y)for(int x=bounds[0];x<bounds[2];++x) {
                 const size_t i=(size_t)y*w+x;
-                if(owners[i]!=patch.part)continue;
+                if(owners[i]!=patch.part||!pixels[i*2+1])continue;
                 const byte *rgb=palette+pixels[i*2]*3;
                 const int r=rgb[0],g=rgb[1],b=rgb[2];
                 if(art.effect==Effect::Fluorescent) {
@@ -495,17 +495,18 @@ static void setWallImmersion(Image &image,const std::vector<ImmersivePatch> &pat
 }
 
 // Masks live beside graphics.cfg, or in the directory selected by -emissive.
-static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,const byte *pixels,
+static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,const byte *pixels,uint64_t &explicitHash,
         const std::vector<ImmersivePatch> *patches=nullptr,const std::vector<short> *owners=nullptr,
         PatchEmission *emission=nullptr) {
-    std::vector<byte> mask((size_t)w*h,0);
+    std::vector<byte> mask(doom_material_light::maskSize(w,h),0);
     int paletteLump=W_GetNumForName((char*)"PLAYPAL");
     if(W_LumpLength(paletteLump)<768) I_Error((char*)"Invalid emissive palette");
     const byte *palette=(const byte*)W_CacheLumpNum(paletteLump,PU_CACHE);
     int kind=Game_GlowKind(name,flat);
     for(size_t i=0;i<mask.size();++i)
         mask[i]=doom_emissive_pixel(kind,palette+pixels[2*i]*3,pixels[2*i+1]);
-    if(!flat && doom_switch_texture(name)) {
+    const bool off=strstr(name,"OFF")!=nullptr;
+    if(!off&&!flat && doom_switch_texture(name)) {
         char companion[9];strcpy(companion,name);
         companion[2]=name[2]=='1'?'2':'1';
         int other=R_CheckTextureNumForName(companion),ow=0,oh=0;
@@ -518,7 +519,7 @@ static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,con
                     doom_switch_pixel(palette+pixels[2*i]*3,palette+paired[2*i]*3):0;
         }
     }
-    if(patches) *emission=correctPatchEmission(*patches,*owners,w,h,pixels,palette,mask);
+    if(!off&&patches) *emission=correctPatchEmission(*patches,*owners,w,h,pixels,palette,mask);
     std::string root=graphicsConfig;
     size_t slash=root.find_last_of("/\\");
     root=slash==std::string::npos?"Emissive":root.substr(0,slash+1)+"Emissive";
@@ -529,11 +530,12 @@ static std::vector<byte> emissionMask(const char *name,bool flat,int w,int h,con
     if(FILE *probe=fopen(file.c_str(),"rb")) {
         fclose(probe);
         std::vector<float> values;
-        if(!platformReadMask(file.c_str(),w,h,values)) {
+        if(!platformReadMask(file.c_str(),w,h,values)||values.size()!=mask.size()) {
             fprintf(stderr,"Emissive mask must be %dx%d: %s\n",w,h,file.c_str());
         } else {
             for(size_t i=0;i<mask.size();++i)
-                mask[i]=pixels[i*2+1]?(byte)std::clamp(values[i]*255.0f,0.0f,255.0f):0;
+                mask[i]=doom_material_light::explicitTexel(values[i],pixels[i*2+1]);
+            explicitHash=doom_material_light::explicitMaskIdentity(mask.data(),mask.size(),w,h);
             if(emission)*emission={};
             fprintf(stderr,"Loaded emissive mask: %s\n",file.c_str());
         }
@@ -580,6 +582,14 @@ static Image &speckledPanel(Image &image,const char *name,bool flat) {
     if(kind==DOOM_EMISSIVE_GLASS) {image.emissionWeight*=0.2f;image.leaded=!image.emission.empty();}
     if(kind==DOOM_EMISSIVE_DIFFUSE)image.emissionWeight*=0.5f;   // diffuser panels: a dim, broad light
     return image;
+}
+
+static void classifyEmission(Image &image,const char *name,bool flat,uint64_t explicitHash,
+                             PatchEmission corrected={}) {
+    const bool keyLight=!flat&&(!strncmp(name,"DOORBLU",7)||!strncmp(name,"DOORRED",7)||!strncmp(name,"DOORYEL",7));
+    image.explicitEmissionHash=explicitHash;
+    image.lightMaterial=doom_material_light::classify(Game_GlowKind(name,flat),flat,image.switchIndicator||keyLight,
+        explicitHash!=0,corrected.led>0,corrected.diffuse>0,image.emissionWeight);
 }
 // Classify once when a wall or flat is loaded. WAD names are eight bytes,
 // NUL padded, and compared without ASCII case distinctions.
@@ -693,7 +703,8 @@ Image &wallImage(int index) {
     preservePressedSkullFaces(patches,owners,w,h,pixels);
     char name[9]; R_TextureName(index,name);
     PatchEmission patchEmission;
-    auto mask=emissionMask(name,false,w,h,pixels.data(),&patches,&owners,&patchEmission);
+    uint64_t explicitHash=0;
+    auto mask=emissionMask(name,false,w,h,pixels.data(),explicitHash,&patches,&owners,&patchEmission);
     bool glowing=std::any_of(mask.begin(),mask.end(),[](byte p){return p!=0;});
     std::vector<byte> frame;auto glass=screenGlass(name,false,w,h,pixels.data(),frame);
     // Masked walls (bars, fences) show what lies behind instead of tiles;
@@ -714,6 +725,7 @@ Image &wallImage(int index) {
     int frameWidth=w,frameHeight=h;
     setWallImmersion(image,patches,owners,frame,frameWidth,frameHeight);
     image.switchIndicator=doom_switch_texture(name);
+    classifyEmission(image,name,false,explicitHash,patchEmission);
     image.skyArtwork=classifySkyArtwork(image);
     if(image.skyArtwork!=SkyArtwork::Unknown) {
         const int lump=W_GetNumForName((char*)"PLAYPAL");
@@ -749,15 +761,20 @@ Image &lumpImage(int lump,bool flat) {
         std::vector<byte> pixels(64*64*2);
         for(int i=0;i<4096;++i) {pixels[2*i]=data[i];pixels[2*i+1]=255;}
         char name[9];memcpy(name,lumpinfo[lump].name,8);name[8]=0;
-        auto mask=emissionMask(name,true,64,64,pixels.data());
+        uint64_t explicitHash=0;
+        auto mask=emissionMask(name,true,64,64,pixels.data(),explicitHash);
         bool glowing=std::any_of(mask.begin(),mask.end(),[](byte p){return p!=0;});
         std::vector<byte> frame;auto glass=screenGlass(name,true,64,64,pixels.data(),frame);
         // Animated flats (liquids, lights) change their tiles every frame.
         int next;bool animated=P_PicAnimationNext(false,lump-firstflat,&next)>0;
         // Ice: its painted streaks cut grooves twice as deep, in a smooth,
         // glassy surface; no crooked tiles.
-        if(Game_IceFlat(name))
-            return withRelief(images.emplace(key,upload(64,64,pixels.data(),0,0,nullptr,nullptr,nullptr,true)).first->second,nullptr,2.0f,true);
+        if(Game_IceFlat(name)) {
+            auto &image=images.emplace(key,upload(64,64,pixels.data(),0,0,glowing&&explicitHash?mask.data():nullptr,
+                nullptr,nullptr,true)).first->second;
+            classifyEmission(image,name,true,explicitHash);
+            return withRelief(image,nullptr,2.0f,true);
+        }
         Image &result=withRelief(withGlassFrame(speckledPanel(images.emplace(key,upload(64,64,pixels.data(),0,0,glowing?mask.data():nullptr,nullptr,
             glass.empty()?nullptr:glass.data(),true)).first->second,name,true),frame),animated?nullptr:flatTiles);
         int kind=doom_emissive_kind(name,true);
@@ -765,6 +782,7 @@ Image &lumpImage(int lump,bool flat) {
         result.livingProfile=material.profile;result.livingVariant=material.variant;
         if(result.livingProfile!=LS_NONE)result.livingBounds={0,0,64,64};
         result.liquidEmitter=kind==DOOM_EMISSIVE_LAVA||kind==DOOM_EMISSIVE_SLIME;
+        classifyEmission(result,name,true,explicitHash);
         return result;
     }
     if(size<8) I_Error((char*)"Invalid sprite texture");

@@ -162,12 +162,28 @@ bool gpuUpdateTexture(const GpuTextureRef &texture,GpuFormat format,const std::v
 }
 int gpuMaxSamples() {return maxSamples;}
 bool platformReadMask(const char *path,int w,int h,std::vector<float> &values) {
-    SDL_Surface *loaded=SDL_LoadPNG(path);
-    SDL_Surface *surface=loaded?SDL_ConvertSurface(loaded,SDL_PIXELFORMAT_RGBA32):nullptr;
+    const size_t count=doom_material_light::maskSize(w,h);
+    if(!count)return false;
+    SDL_IOStream *stream=SDL_IOFromFile(path,"rb");
+    if(!stream)return false;
+    const byte signature[]={137,'P','N','G',13,10,26,10,0,0,0,13,'I','H','D','R'};
+    byte header[24];
+    const auto dimension=[&](int offset) {
+        uint32_t value=0;
+        for(int i=0;i<4;++i)value=(value<<8)|header[offset+i];
+        return value;
+    };
+    if(SDL_ReadIO(stream,header,sizeof(header))!=sizeof(header)||memcmp(header,signature,sizeof(signature))||
+        dimension(16)!=(uint32_t)w||dimension(20)!=(uint32_t)h||SDL_SeekIO(stream,0,SDL_IO_SEEK_SET)!=0) {
+        SDL_CloseIO(stream);
+        return false;
+    }
+    SDL_Surface *loaded=SDL_LoadPNG_IO(stream,true);
+    SDL_Surface *surface=loaded&&loaded->w==w&&loaded->h==h?SDL_ConvertSurface(loaded,SDL_PIXELFORMAT_RGBA32):nullptr;
     SDL_DestroySurface(loaded);
     bool valid=surface&&surface->w==w&&surface->h==h;
     if(valid) {
-        values.resize((size_t)w*h);
+        values.resize(count);
         for(int y=0;y<h;++y) {
             const byte *row=(const byte*)surface->pixels+(size_t)y*surface->pitch;
             for(int x=0;x<w;++x) {

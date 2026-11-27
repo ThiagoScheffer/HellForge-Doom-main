@@ -1,5 +1,6 @@
 #ifndef DOOM_SURFACE_LIGHTING_H
 #define DOOM_SURFACE_LIGHTING_H
+#include "material_light_policy.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,6 +27,7 @@ struct SurfaceLight {
     int group=0; // Tiles of one merge cell that see each other (surfaceCell).
     int flickerSector=-1; // The flickering sector it switches with (lampOut), merged apart from others.
     float shine=1; // How far its flickering sector has it on this tic (lampShine); 0 out.
+    float radiusLimit=0; // Optional point cap, retained only by groups of capped emitters.
 };
 // The merge cell of a tile: 256-unit cell, surface direction, hue and
 // visibility group. Emissive tiles repeat every 64 units, so one pool or
@@ -45,7 +47,7 @@ inline SurfaceLightKey surfaceCell(const SurfaceLight &light,float cell=256) {
 template<bool Fast=false>
 inline std::vector<SurfaceLight> mergeSurfaceLights(const std::vector<SurfaceLight> &sources,float cell=256) {
     struct Sum {float x=0,y=0,z=0,weight=0,strength=0,radius=0;std::array<float,3> color={};
-                std::array<float,3> low={1e9f,1e9f,1e9f},high={-1e9f,-1e9f,-1e9f};float bottom=1e9f,top=-1e9f;int count=0,flickerSector=-1;float shine=0;};
+                std::array<float,3> low={1e9f,1e9f,1e9f},high={-1e9f,-1e9f,-1e9f};float bottom=1e9f,top=-1e9f;int count=0,flickerSector=-1;float shine=0,radiusLimit=0;bool uncapped=false;};
     std::conditional_t<Fast,std::unordered_map<SurfaceLightKey,Sum,SurfaceLightKeyHash>,std::map<SurfaceLightKey,Sum>> cells;
     if constexpr(Fast)cells.reserve(sources.size());
     for(const auto &light:sources) {
@@ -59,6 +61,8 @@ inline std::vector<SurfaceLight> mergeSurfaceLights(const std::vector<SurfaceLig
         }
         sum.strength=std::max(sum.strength,light.strength);
         sum.radius=std::max(sum.radius,light.radius);
+        sum.radiusLimit=std::max(sum.radiusLimit,light.radiusLimit);
+        sum.uncapped|=light.radiusLimit<=0;
         sum.bottom=std::min(sum.bottom,light.z-light.extent);sum.top=std::max(sum.top,light.z+light.extent);
         ++sum.count;
     }
@@ -68,11 +72,14 @@ inline std::vector<SurfaceLight> mergeSurfaceLights(const std::vector<SurfaceLig
         // Widen with the members' extent so the cell's edges stay lit.
         float spread=std::hypot(sum.high[0]-sum.low[0],sum.high[1]-sum.low[1],sum.high[2]-sum.low[2])*0.5f;
         float z=sum.z/sum.weight;
-        merged.push_back({entry.first,sum.x/sum.weight,sum.y/sum.weight,z,sum.radius+spread*0.5f,
+        float radius=sum.radius+spread*0.5f;
+        if(!sum.uncapped)radius=std::min(radius,sum.radiusLimit);
+        merged.push_back({entry.first,sum.x/sum.weight,sum.y/sum.weight,z,radius,
                           sum.strength*std::clamp(std::sqrt((float)sum.count)*0.5f,1.0f,1.5f),
                           {sum.color[0]/sum.weight,sum.color[1]/sum.weight,sum.color[2]/sum.weight},entry.first[4],
                           entry.first[4]>=2?std::max(sum.top-z,z-sum.bottom):0.0f});
         merged.back().flickerSector=sum.flickerSector;merged.back().shine=sum.shine/sum.weight;
+        merged.back().radiusLimit=sum.uncapped?0:sum.radiusLimit;
     }
     // Accumulation still follows source order. Restore the original ordered
     // map's output order so identities, tie breaking and GPU slots are exact.
@@ -87,7 +94,7 @@ public:
     std::vector<SurfaceLightSlot> slots;
     size_t capacity=24; // Lights kept at once; extra ones fade out.
     void clear() { slots.clear(); }
-    void update(const std::vector<SurfaceLight> &sources,const float *eye,float seconds) {
+    void update(const std::vector<SurfaceLight> &sources,const float *eye,float seconds,bool activeOnly=false) {
         struct Candidate {const SurfaceLight *light;float score,target;};
         std::unordered_set<SurfaceLightKey,SurfaceLightKeyHash> retained;retained.reserve(slots.size());
         for(const auto &slot:slots) retained.insert(slot.light.key);
@@ -95,6 +102,7 @@ public:
         std::unordered_map<SurfaceLightKey,const SurfaceLight *,SurfaceLightKeyHash> current;current.reserve(sources.size());
         for(const auto &light:sources) {
             current[light.key]=&light;
+            if(activeOnly&&doom_material_light::effectivePower(light.strength,light.shine)<=0)continue;
             float dx=light.x-eye[0],dy=light.y-eye[1],dz=light.z-eye[2];
             float distance=std::sqrt(dx*dx+dy*dy+dz*dz);
             // Fade before leaving range; reserve a margin to prevent ranking jitter.
@@ -110,6 +118,10 @@ public:
         std::unordered_map<SurfaceLightKey,float,SurfaceLightKeyHash> targets;targets.reserve(candidates.size());
         for(const auto &candidate:candidates) targets[candidate.light->key]=candidate.target;
         float step=std::clamp(seconds,0.0f,0.05f)/0.2f;
+        if(activeOnly)slots.erase(std::remove_if(slots.begin(),slots.end(),[&](const SurfaceLightSlot &slot) {
+            auto source=current.find(slot.light.key);
+            return source==current.end()||doom_material_light::effectivePower(source->second->strength,source->second->shine)<=0;
+        }),slots.end());
         for(auto &slot:slots) {
             auto source=current.find(slot.light.key);
             if(source!=current.end()) slot.light=*source->second;

@@ -50,6 +50,21 @@ uint64_t resources() {
     }
     digest=h?h:1;return digest;
 }
+static void hashResolvedEmission(uint64_t &h) {
+    if(std::none_of(images.begin(),images.end(),[](const auto &entry){return entry.second.explicitEmissionHash!=0;}))return;
+    std::map<int,uint64_t> used;
+    auto include=[&](int key) {
+        const auto image=images.find(key);
+        if(image!=images.end()&&image->second.explicitEmissionHash)used.emplace(key,image->second.explicitEmissionHash);
+    };
+    for(int i=0;i<numsides;++i)
+        for(int texture:{sides[i].toptexture,sides[i].bottomtexture,sides[i].midtexture})
+            if(texture>0)include(texturetranslation[texture]);
+    for(int i=0;i<numsectors;++i)
+        for(int pic:{sectors[i].floorpic,sectors[i].ceilingpic})
+            if(pic!=skyflatnum)include(-1-firstflat-flattranslation[pic]);
+    for(const auto &[key,mask]:used) {value(h,key);value(h,mask);}
+}
 uint64_t worldKey(const std::string &stage) {
     uint64_t h=resources();value(h,format);
     const char algorithm[]=DOOM_BAKE_CODE_HASH;h=hashBytes(h,algorithm,sizeof(algorithm));
@@ -64,6 +79,7 @@ uint64_t worldKey(const std::string &stage) {
         settings.skyLight,settings.bakedAO,settings.lightFlow,settings.dimLitRooms};
     h=hashBytes(h,options,sizeof(options));value(h,settings.windowStrength);value(h,settings.unlitDarkening);
     value(h,effectiveLightingModel(settings));
+    if(settings.emissive&&(stage=="lights_hf2"||stage=="grid_hf2"||stage=="bounce"))hashResolvedEmission(h);
     for(int i=0;i<numsectors;++i) {
         const auto &s=sectors[i];value(h,s.floorheight);value(h,s.ceilingheight);value(h,s.floorpic);value(h,s.ceilingpic);
         value(h,s.lightlevel);value(h,s.special);value(h,s.tag);
@@ -89,7 +105,11 @@ uint64_t worldKey(const std::string &stage) {
         value(h,a.low);value(h,a.high);value(h,a.radius);value(h,a.strength);value(h,a.color);
         value(h,a.z);value(h,a.clearance);value(h,a.ceiling);value(h,a.directionality);for(const auto &piece:a.pieces)values(h,piece);
     }
-    for(const auto &s:surfaceLights) {value(h,s.key);value(h,s.x);value(h,s.y);value(h,s.z);value(h,s.strength);value(h,s.color);bool broken=tileShotOut(s.key);value(h,broken);}
+    for(const auto &s:surfaceLights) {
+        value(h,s.key);value(h,s.x);value(h,s.y);value(h,s.z);value(h,s.radius);value(h,s.strength);
+        value(h,s.color);value(h,s.extent);value(h,s.flickerSector);
+        bool broken=tileShotOut(s.key);value(h,broken);
+    }
     if(settings.sun&&sunBaked) {value(h,sunLevel);value(h,sunTint);value(h,sunDirection);value(h,sunElevation);}
     return h;
 }
@@ -219,6 +239,24 @@ int BakeCache::selfTest() {
         for(size_t i=0;i<bytes.size();i+=4)bytes[i]=(uint8_t)(i/4);
         auto original=bytes;
         BakeCache test("storage-test",{cacheChannel(bytes,0,512)});require(test.enabled,"cache enabled");
+        {
+            Image &image=lumpImage(firstflat+flattranslation[sectors[0].floorpic],true);
+            struct RestoreMask {
+                Image &image;
+                uint64_t original=image.explicitEmissionHash;
+                ~RestoreMask() {image.explicitEmissionHash=original;}
+            } restore{image};
+            image.explicitEmissionHash=0;
+            const auto missing=worldKey("lights_hf2");
+            std::array<uint8_t,64*64> mask={};
+            image.explicitEmissionHash=doom_material_light::explicitMaskIdentity(mask.data(),mask.size(),64,64);
+            const auto black=worldKey("lights_hf2");
+            mask.front()=255;
+            image.explicitEmissionHash=doom_material_light::explicitMaskIdentity(mask.data(),mask.size(),64,64);
+            const auto bright=worldKey("lights_hf2");
+            require(missing!=black&&black!=bright&&missing!=bright,"resolved mask contents invalidate the same material");
+            require(bright==worldKey("lights_hf2"),"resolved mask identity is deterministic");
+        }
         {
             struct RestoreSettings {
                 Settings original=settings;

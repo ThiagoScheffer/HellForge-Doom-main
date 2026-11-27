@@ -220,6 +220,34 @@ direct light. Some indirect light can remain until a full bake refreshes it.
 Maps that rely on invisible authored lighting can appear darker. Performance
 impact has yet to be established.
 
+### Material light coverage
+
+In Hybrid and Physical, clipped wall spans use the brightness and position of
+their visible emissive texels. Narrow floor and ceiling strips can cast light
+where they overlap a glowing repeat, including when the full repeat's center
+falls outside the sector. BSP pieces share one sample per connected repeat.
+Indicator-only point groups reach up to 88 map units and display-only groups
+up to 128.
+Ordinary fixtures, diffusers, fire, glass and custom masks retain their existing
+point radii. Bake-only pools still use the area-light path. Clipped coverage
+has a work limit, and full-repeat samples remain available after that limit.
+
+Extinguished emitters retain the nominal data needed to light up again.
+Off or destroyed fixtures release live slots immediately in the source-driven
+presets. Powered sources still fade as they go out of range. Decorative light
+and fixture fog copies use their current power. Existing animated texture
+frames update their live output, and permanent emissive material replacements
+refresh the direct bake and its dependents.
+
+For custom artwork, place a same-size PNG in `Emissive/walls/NAME.png` or
+`Emissive/flats/NAME.png` beside `graphics.cfg`, or point `-emissive` at a
+different mask directory. PNG brightness and alpha define emission over opaque
+artwork. A valid black mask disables emission. A wrong-size or unreadable
+mask falls back to the built-in rules. An explicit mask can also enable an
+`OFF` variant, with destroyed instances still taking precedence. Reload the
+renderer resources after editing masks. Bakes include the resolved mask data
+in their cache identity.
+
 ## Feature catalog
 
 The broader feature set includes both recent changes and earlier implementation
