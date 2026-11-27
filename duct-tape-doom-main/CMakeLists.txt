@@ -419,7 +419,8 @@ if(DOOM_BUILD_SDL)
     # Cache identity follows the bake implementation, including shared helpers and game profiles.
     file(GLOB_RECURSE DOOM_BAKE_ID_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.h"
-        "${CMAKE_CURRENT_SOURCE_DIR}/games/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/games/*.h")
+        "${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/heretic/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/heretic/*.h")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${DOOM_BAKE_ID_SOURCES})
     set(DOOM_BAKE_ID_INPUT "")
     foreach(source IN LISTS DOOM_BAKE_ID_SOURCES)
@@ -427,8 +428,50 @@ if(DOOM_BUILD_SDL)
         string(APPEND DOOM_BAKE_ID_INPUT "${source_hash}")
     endforeach()
     string(SHA256 DOOM_BAKE_CODE_HASH "${DOOM_BAKE_ID_INPUT}")
+    # Stages hash resolved inputs separately from the code that consumes them.
+    # Keep the global fallback for any stage without an audited manifest.
+    set(DOOM_BAKE_COMMON
+        platform/baked_lighting.h platform/flash_lighting.h
+        platform/scene3d/internal.h platform/scene3d/bake_atlas.cpp
+        platform/scene3d/bake_cache_key.h)
+    function(doom_bake_fingerprint domain)
+        set(manifest "HELLFORGE_BAKE:${domain}\n")
+        foreach(source IN LISTS DOOM_BAKE_COMMON ARGN)
+            set(path "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+            file(SHA256 "${path}" source_hash)
+            string(APPEND manifest "${source}:${source_hash}\n")
+        endforeach()
+        string(SHA256 fingerprint "${manifest}")
+        set(DOOM_${domain}_BAKE_HASH "${fingerprint}" PARENT_SCOPE)
+    endfunction()
+    doom_bake_fingerprint(SUN platform/scene3d/bake_sun.cpp)
+    doom_bake_fingerprint(DIRECT platform/scene3d/bake_lights.cpp platform/scene3d/glass_light.cpp)
+    doom_bake_fingerprint(GRID
+        platform/scene3d/thing_light.cpp platform/scene3d/bake_lights.cpp platform/shadow_lights.h)
+    doom_bake_fingerprint(BOUNCE platform/scene3d/bake_indirect.cpp)
+    doom_bake_fingerprint(AMBIENT platform/scene3d/bake_indirect.cpp)
+    doom_bake_fingerprint(FLOW platform/scene3d/bake_indirect.cpp
+        linuxdoom-1.10/r_main.c linuxdoom-1.10/m_fixed.c linuxdoom-1.10/m_fixed.h
+        heretic/r_main.c heretic/doomdef.h)
+    # CPU bakes are backend-independent. Keep native payloads and floating
+    # point results isolated by compiler, target and active compiler flags.
+    set(bake_abi "${CMAKE_SYSTEM_NAME}:${CMAKE_SYSTEM_PROCESSOR}:${CMAKE_GENERATOR_PLATFORM}:${CMAKE_SIZEOF_VOID_P}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_C_COMPILER_ID}:${CMAKE_C_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${CMAKE_C_FLAGS}")
     set_source_files_properties(platform/scene3d/bake_cache.cpp PROPERTIES
         COMPILE_DEFINITIONS "DOOM_BAKE_CODE_HASH=\"${DOOM_BAKE_CODE_HASH}\"")
+    foreach(domain IN ITEMS SUN DIRECT GRID BOUNCE AMBIENT FLOW)
+        set_property(SOURCE platform/scene3d/bake_cache.cpp platform/scene3d/bake_indirect.cpp APPEND PROPERTY
+            COMPILE_DEFINITIONS "DOOM_${domain}_BAKE_HASH=\"${DOOM_${domain}_BAKE_HASH}\"")
+    endforeach()
+    foreach(config IN ITEMS Release Debug MinSizeRel RelWithDebInfo)
+        string(TOUPPER "${config}" upper)
+        string(SHA256 numeric_abi "${bake_abi}:${config}:${CMAKE_CXX_FLAGS_${upper}}:${CMAKE_C_FLAGS_${upper}}")
+        set_property(SOURCE platform/scene3d/bake_cache.cpp APPEND PROPERTY
+            COMPILE_DEFINITIONS "$<$<CONFIG:${config}>:DOOM_BAKE_NUMERIC_ABI=\"${numeric_abi}\">")
+    endforeach()
+    string(SHA256 numeric_abi "${bake_abi}")
+    set_property(SOURCE platform/scene3d/bake_cache.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS "$<$<NOT:$<OR:$<CONFIG:Release>,$<CONFIG:Debug>,$<CONFIG:MinSizeRel>,$<CONFIG:RelWithDebInfo>>>:DOOM_BAKE_NUMERIC_ABI=\"${numeric_abi}\">")
     function(doom_add_renderer target enabled)
         if(NOT enabled)
             return()

@@ -120,33 +120,35 @@ void bakeSun() {
     sunAzimuth[0]=sunX;sunAzimuth[1]=sunY;
     for(int c=0;c<3;++c)sunDirection[c]=direction[c];
     sunLevel=levelMood().sun?level:0;
-    std::atomic<size_t> lit{0};
     BakeCache cache("sun",{cacheChannel(contactCells,2,(size_t)mapWidth*mapHeight),
         cacheWallChannel(wallBakeCells,atlasHeight,3,1)});
     if(!cache.restore()) {
 
+    cache.dispatch(mapHeight);
     parallelFor(mapHeight,[&](int y) {
         for(int x=0;x<mapWidth;++x) {
             size_t i=(size_t)y*mapWidth+x;
             int visible=sunCell(bakeMap,i,direction);
             if(visible<0)continue;
             contactCells[4*i+2]=(uint8_t)visible;
-            if(visible>0)++lit;
         }
     });
+    cache.dispatch((int)bakeOrder.size());
     parallelFor((int)bakeOrder.size(),[&](int n) {sunStrip(bakeMap,bakeStrips[bakeOrder[n]],direction);});
     cache.store();
     }
+    cache.beginUpload();
     contactTexture=gpuCreateTexture(GpuFormat::RGBA8,mapWidth,mapHeight,contactCells.data(),mapWidth*4);
     if(!contactTexture)I_Error((char*)"Could not allocate surface maps");
     uploadWallBake();
+    cache.endUpload();
     for(int c=0;c<3;++c)sunDirection[c]=direction[c];
     // Hidden by the episode's mood: no sunlight, only its direction (which
     // way the rain blows) is kept.
     if(levelMood().sun)bakeShafts();else sunShafts.clear();
     sunLevel=levelMood().sun?level:0;
-    fprintf(stderr,"3D sun: yaw %.0f degrees, %.0f up, %zu sunlit cells, %zu sunbeams, %zu wall strips in %dx%d, baked in %.0f ms.\n",
-        yaw*180/doomPi,elevation*180/doomPi,lit.load(),sunShafts.size(),bakeOrder.size(),atlasWidth,atlasHeight,(SDL_GetTicksNS()-start)/1e6);
+    fprintf(stderr,"3D sun: yaw %.0f degrees, %.0f up, %zu sunbeams, %zu wall strips in %dx%d, %s; stage %.0f ms.\n",
+        yaw*180/doomPi,elevation*180/doomPi,sunShafts.size(),bakeOrder.size(),atlasWidth,atlasHeight,cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 // Sunbeams: about one per 24 units of sunlit floor in beam air (beamAir),
 // jittered within its block so the beams never line up in rows. Each runs

@@ -31,11 +31,8 @@ void bakeBounce() {
     bounceKey=bounceInputs();
     if(flatLightCells.empty()||wallBakeCells.empty())return;
     uint64_t start=SDL_GetTicksNS();
-    BakeCache cache("bounce",{cacheChannel(flatLightCells,(size_t)mapWidth*mapHeight*8,(size_t)mapWidth*mapHeight*2,3),
-        cacheWallChannel(wallBakeCells,atlasHeight,0,3,true)});
-    bool sun=bounceKey&2,lights=bounceKey&4;
-    int step=std::max(1,(int)std::lround(16/mapCell));
-    if(!cache.restore()) {
+    const bool sun=bounceKey&2,lights=bounceKey&4;
+    const int step=std::max(1,(int)std::lround(16/mapCell));
     std::array<float,3> sunEnergy={};
     if(sun)for(int c=0;c<3;++c)sunEnergy[c]=sunTint[c]*sunLevel;
     std::vector<std::array<float,3>> flatAlbedo((size_t)numsectors*2,{0.5f,0.5f,0.5f});
@@ -59,6 +56,24 @@ void bakeBounce() {
         float grey=0.299f*a[0]+0.587f*a[1]+0.114f*a[2];
         for(float &c:a)c=grey+0.25f*(c-grey);
     }
+    BakeCache cache("bounce",{cacheChannel(flatLightCells,(size_t)mapWidth*mapHeight*8,(size_t)mapWidth*mapHeight*2,3),
+        cacheWallChannel(wallBakeCells,atlasHeight,0,3,true)},[&](BakeKeyHash &hash) {
+        hash.fields(sun,lights,sunEnergy);
+        auto albedo=[&](const auto &colors) {
+            hash.length(colors.size());
+            for(const auto &color:colors)hash.value(color);
+        };
+        albedo(flatAlbedo);albedo(sideAlbedo);
+        // Use the exact upstream numeric channels after any completed
+        // moving-sector or shot-lamp relight job, reusing validated digests
+        // from this preparation pass where possible.
+        if(sun) {hash.text(DOOM_SUN_BAKE_HASH);hash.component(bakeUpstreamIdentity(true));}
+        if(lights) {
+            hash.text(DOOM_DIRECT_BAKE_HASH);hash.component(bakeUpstreamIdentity(false));
+            for(int i=0;i<numsectors;++i)hash.value(lighting(&sectors[i]));
+        }
+    });
+    if(!cache.restore()) {
     auto radiance=[&](const BakeHit &hit,float out[3]) {
         if(hit.kind==BakeHit::thing)return; // Decorations stay dark.
         const uint8_t *light=nullptr;float visible=0;const std::array<float,3> *albedo=nullptr;
@@ -120,6 +135,7 @@ void bakeBounce() {
         gather(sector,mapOrigin[0]+(x+0.5f)*mapCell,mapOrigin[1]+(y+0.5f)*mapCell,ceiling?s.ceiling-1:s.floor+1,
                ceiling?down:up,(uint32_t)(y*mapWidth+x)*2+ceiling,out);
     };
+    cache.dispatch(blocksY);
     parallelFor(blocksY,[&](int by) {
         for(int bx=0;bx<blocksX;++bx) {
             int x=std::min(bx*step+step/2,mapWidth-1),y=std::min(by*step+step/2,mapHeight-1);
@@ -128,6 +144,7 @@ void bakeBounce() {
             for(int ceiling=0;ceiling<2;++ceiling)flatSample(sector,x,y,ceiling,samples[b*2+ceiling].data());
         }
     });
+    cache.dispatch(mapHeight);
     parallelFor(mapHeight,[&](int y) {
         for(int x=0;x<mapWidth;++x) {
             size_t i=(size_t)y*mapWidth+x;int sector=seamCells[i].own;
@@ -152,6 +169,7 @@ void bakeBounce() {
         }
     });
     // Walls: samples every step texels inside each strip, blended bilinearly.
+    cache.dispatch((int)bakeOrder.size());
     parallelFor((int)bakeOrder.size(),[&](int n) {
         const BakeStrip &strip=bakeStrips[bakeOrder[n]];
         const float normal[3]={strip.dy,-strip.dx,0};
@@ -176,11 +194,13 @@ void bakeBounce() {
     });
     cache.store();
     }
+    cache.beginUpload();
     uploadFlatLight();
     uploadWallBake();
+    cache.endUpload();
     bounceLightSerial=lightBakeSerial;
-    fprintf(stderr,"3D bounce: %s%s, every %d cells, baked in %.0f ms.\n",sun?"sun":"no sun",lights?" and lights":"",
-        step,(SDL_GetTicksNS()-start)/1e6);
+    fprintf(stderr,"3D bounce: %s%s, every %d cells, %s; stage %.0f ms.\n",sun?"sun":"no sun",lights?" and lights":"",
+        step,cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 // Decorations in the bakes: static, non-glowing things that stand on the
 // floor or hang from the ceiling (columns, trees, hanging bodies) occlude
@@ -226,11 +246,12 @@ void syncBakeThings() {
 // write(cell,ceiling,value) per cell. Walls: sample(strip,x,y,z,out) and
 // write(atlas texel,value).
 template<int Channels,class FlatSample,class FlatWrite,class WallSample,class WallWrite>
-static void bakeSpread(int step,FlatSample flatSample,FlatWrite flatWrite,WallSample wallSample,WallWrite wallWrite) {
+static void bakeSpread(BakeCache &cache,int step,FlatSample flatSample,FlatWrite flatWrite,WallSample wallSample,WallWrite wallWrite) {
     using Value=std::array<float,Channels>;
     int blocksX=(mapWidth+step-1)/step,blocksY=(mapHeight+step-1)/step;
     std::vector<Value> samples((size_t)blocksX*blocksY*2);
     std::vector<int> sampleSector((size_t)blocksX*blocksY,noSector);
+    cache.dispatch(blocksY);
     parallelFor(blocksY,[&](int by) {
         for(int bx=0;bx<blocksX;++bx) {
             int x=std::min(bx*step+step/2,mapWidth-1),y=std::min(by*step+step/2,mapHeight-1);
@@ -239,6 +260,7 @@ static void bakeSpread(int step,FlatSample flatSample,FlatWrite flatWrite,WallSa
             for(int ceiling=0;ceiling<2;++ceiling)flatSample(sector,x,y,ceiling!=0,samples[b*2+ceiling]);
         }
     });
+    cache.dispatch(mapHeight);
     parallelFor(mapHeight,[&](int y) {
         for(int x=0;x<mapWidth;++x) {
             size_t i=(size_t)y*mapWidth+x;int sector=seamCells[i].own;
@@ -262,6 +284,7 @@ static void bakeSpread(int step,FlatSample flatSample,FlatWrite flatWrite,WallSa
             }
         }
     });
+    cache.dispatch((int)bakeOrder.size());
     parallelFor((int)bakeOrder.size(),[&](int n) {
         const BakeStrip &strip=bakeStrips[bakeOrder[n]];
         int columns=(strip.width+step-1)/step,rows=(strip.height+step-1)/step;
@@ -309,7 +332,7 @@ void bakeAmbient() {
     uint64_t start=SDL_GetTicksNS();
     const bool hasSky=refreshSkyLevel();
     BakeCache cache("ambient",{cacheChannel(flatLightCells,(size_t)mapWidth*mapHeight*8+3,(size_t)mapWidth*mapHeight*2),
-        cacheWallChannel(wallBakeCells,atlasHeight,3,1,true)});
+        cacheWallChannel(wallBakeCells,atlasHeight,3,1,true)},[&](BakeKeyHash &hash) {hash.value(hasSky);});
     if(!cache.restore()) {
     // Occlusion counts only hits within 64 units; rays run on only to find
     // the sky, so on maps without one they stop there, open either way.
@@ -330,7 +353,7 @@ void bakeAmbient() {
         return (uint8_t)((std::lround(std::clamp(sky,0.0f,1.0f)*15)<<4)|std::lround(std::clamp(open,0.0f,1.0f)*15));
     };
     static const float up[3]={0,0,1},down[3]={0,0,-1};
-    bakeSpread<2>(std::max(1,(int)std::lround(8/mapCell)),
+    bakeSpread<2>(cache,std::max(1,(int)std::lround(8/mapCell)),
         [&](int sector,int x,int y,bool ceiling,std::array<float,2> &out) {
             out={0,1};
             int pic=ceiling?sectors[sector].ceilingpic:sectors[sector].floorpic;
@@ -347,9 +370,11 @@ void bakeAmbient() {
         [&](size_t texel,const std::array<float,2> &value) {wallBakeCells[4*(texel+atlasWidth)+3]=pack(value[0],value[1]);});
     cache.store();
     }
+    cache.beginUpload();
     uploadFlatLight();
     uploadWallBake();
-    fprintf(stderr,"3D sky light and occlusion: sky level %.2f, baked in %.0f ms.\n",skyLevel,(SDL_GetTicksNS()-start)/1e6);
+    cache.endUpload();
+    fprintf(stderr,"3D sky light and occlusion: sky level %.2f, %s; stage %.0f ms.\n",skyLevel,cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 // Sector light flow: from points every ~16 units, at chest height, 12 level
 // rays check which other sectors are in plain view at 48, 96 and 160 units.
@@ -366,7 +391,7 @@ void bakeFlow() {
     uint64_t start=SDL_GetTicksNS();
     int step=std::max(1,(int)std::lround(16/mapCell));
     BakeCache cache("flow",{{&seamCells[0].flow,seamCells.size(),sizeof(SeamCell),sizeof(uint16_t)},
-        cacheChannel(contactCells,3,(size_t)mapWidth*mapHeight)});
+        cacheChannel(contactCells,3,(size_t)mapWidth*mapHeight)},[&](BakeKeyHash &hash) {hash.value(windows);});
     if(!cache.restore()) {
     for(auto &cell:seamCells)cell.flow=noSector;
     struct Flow { int neighbor=noSector;float weight=0; };
@@ -374,6 +399,7 @@ void bakeFlow() {
     int blocksX=(mapWidth+step-1)/step,blocksY=(mapHeight+step-1)/step;
     std::vector<Flow> blocks((size_t)blocksX*blocksY);
     std::vector<int> blockSector((size_t)blocksX*blocksY,noSector);
+    cache.dispatch(blocksY);
     parallelFor(blocksY,[&](int by) {
         std::vector<std::pair<int,float>> score;
         for(int bx=0;bx<blocksX;++bx) {
@@ -404,6 +430,7 @@ void bakeFlow() {
     });
     // Cells blend the weights of nearby same-sector blocks that share the
     // strongest one's neighbor.
+    cache.dispatch(mapHeight);
     parallelFor(mapHeight,[&](int y) {
         for(int x=0;x<mapWidth;++x) {
             size_t i=(size_t)y*mapWidth+x;int sector=seamCells[i].own;
@@ -428,10 +455,12 @@ void bakeFlow() {
     });
     cache.store();
     }
+    cache.beginUpload();
     seamTexture=gpuCreateTexture(GpuFormat::RGBA16Uint,mapWidth,mapHeight,seamCells.data(),mapWidth*8);
     contactTexture=gpuCreateTexture(GpuFormat::RGBA8,mapWidth,mapHeight,contactCells.data(),mapWidth*4);
     if(!seamTexture||!contactTexture)I_Error((char*)"Could not allocate surface maps");
-    fprintf(stderr,"3D light flow: every %d cells, baked in %.0f ms.\n",step,(SDL_GetTicksNS()-start)/1e6);
+    cache.endUpload();
+    fprintf(stderr,"3D light flow: every %d cells, %s; stage %.0f ms.\n",step,cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 // CPU twin of flowLight in world.frag, for sprites and the weapon.
 float flowLightAt(float x,float y,const sector_t *sector,float light) {

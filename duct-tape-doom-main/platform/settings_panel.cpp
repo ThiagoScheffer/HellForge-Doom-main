@@ -38,7 +38,7 @@ const char *effectCost(const char *key) {
         {"window_light","CPU / LOAD COST: maps with many openings can create many window emitters, increasing sprite lookup and re-lighting work."},
         {"moving_relight","CPU COST: local updates run in the background; large affected regions can still cause frame-time spikes."},
         {"grid_sprite_light","LOAD / MEMORY COST: precomputes interpolated samples to reduce per-frame sprite-light tracing."},
-        {"map_light_cache","DISK CACHE: speeds matching map loads. Per-frame light lookups and moving-sector updates still run."},
+        {"map_light_cache","DISK CACHE: reuses compatible lighting stages during level loads. Moving-sector updates still run."},
         {"chain_collapses","BOUNDED GAMEPLAY COST: one local support check every four tics; at most two secondary generations."},
         {"environment_budget","BOUNDED COST: 64 / 128 / 256 extra dust particles."},
         {"electrical_damage","BOUNDED COST: 16 faults, at most two flashes per tic."},
@@ -521,7 +521,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 slider("fluid_shade_blue","Shadow blue",&s.fluidShadeBlue,0,255,1,"Custom glove shadow color.",[](const Settings&d){return d.fluidGloves==7;})}}}},
         {"Lighting",{
             {"Baked at level load",{
-                check("map_light_cache","Cache map lighting",&s.mapLightCache,"Reuse baked lighting from disk when map, resources, settings and static world state match. Live effects remain dynamic. Cache is limited to 1 GiB."),
+                check("map_light_cache","Cache map lighting",&s.mapLightCache,"Restore compatible lighting stages from disk on restart, save load or revisit. Changed stages recalculate and live lighting still updates. Cache limit: 1 GiB."),
                   check("baked_lights","Baked static lights",&s.bakedLights,
                     "Torches, lamps and glowing textures light the whole level, baked at level load; nearby ones still flicker."),
                 choice("lighting_model","Illumination model",&s.lightingModel,

@@ -22,11 +22,11 @@ feature reports are available for developers interested in how the engine works.
 > Why? Because we love DOOM. I wanted to build something personal, shaped by
 > my own taste. — Thiago Scheffer
 
-**Development update — 27 November 2026:** Kinetic Horror, Physical Bodies M1/M2
-and the latest Deep Wounds / visceral giblet development batch have received
-successful developer-reported testing. See the [combat immersion update](#kinetic-horror-and-physical-bodies)
-for verified features and remaining source-verification limits. This is a source
-update, not an announcement of a new packaged release.
+**Source update — 28 November 2026.** The latest source includes Smart
+Persistent Lighting Cache 2.0 (M1), outdoor fog coverage for sprites and
+voxels, clearer lightning bolts, and acid and lava reactions for corpses
+and fragments. See [what's new](#whats-new-in-hellforge) for controls and
+verification. The documented build identifier is unchanged.
 
 **Documented source baseline: `2026.11.15.6`** · [Build instructions](BUILDING.md) ·
 [Documentation](docs/README.md) · [Change history](docs/changes) · [Bug and debugging log](Log-Status.md)
@@ -51,13 +51,17 @@ launcher in `Screenshots`.
 
 ## What's new in HELLFORGE
 
-The latest work brings together three layers of combat immersion: visible hit
-feedback, physical body movement and environmental aftermath. The goal is stronger
-presentation using original-style sprites, not a new damage model or a replacement
-physics engine.
+Recent updates improve level reloads, storm visibility, and the way bodies,
+fragments, and hazardous liquids interact. F4 controls the disk cache, visible
+lightning, and corpse reactions.
 
 | Highlight | What changes in the game |
 | :--- | :--- |
+| **[Smart Persistent Lighting Cache 2.0](#smart-persistent-lighting-cache-20--m1)** | Compatible lighting stages restore on restart, save load, and map revisit. The loading screen distinguishes cache restoration from baking. |
+| **[Universal Atmospheric Fog](#universal-atmospheric-fog--sprite-and-voxel-coverage)** | Outdoor sprites and voxels receive the active haze at their world position. Indoor exposure follows the same sector rules as nearby geometry. |
+| **[Lightning Bolt Visibility 1.1](#lightning-bolt-visibility-11)** | Branching bolts stay readable across two pulses and a short fade, including when the diffuse flash subsides. |
+| **[Environmental Corpse Reactions](#environmental-corpse-reactions-10)** | Corpses, supported ragdolls, and gore fragments can dissolve in acid or char and collapse in lava. |
+| **[Incendiary Barrels](#incendiary-barrels-10)** | Optional destructible burning barrels leak oil when hit and leave damaging flames when ruptured. |
 | **[Kinetic Horror](#kinetic-horror-and-physical-bodies)** | More expressive impacts, physical fragments, temporary wall adhesion, soft material movement, wet deposits and positional impact audio. |
 | **[Physical Bodies](#physical-bodies-10--environmental-contacts-and-stable-ragdolls)** | Supported monster sprites become physically posed bodies that react to walls and floors, settle and retain their generated pixel-art appearance. |
 | **[Deep Wounds & Visceral Giblets](#deep-wounds-and-visceral-giblets)** | Latest developer-tested cosmetic batch: shaded wound presentation and more recognizable fragment artwork, without new gameplay injury rules. |
@@ -210,7 +214,7 @@ and disables the Enhanced room-darkening controls while a source-driven mode is
 active. The launcher's generated catalogue lists the choices without enforcing
 their runtime dependencies. The classic software renderer keeps its existing
 lighting. Switching modes refreshes direct light, bounce and the baked sprite
-grid when enabled. Each effective mode has its own map-light cache identity.
+grid when enabled. Map-lighting stages use the effective mode where it changes their inputs.
 
 Outdoor ambient policy and existing sun, sky and window-light algorithms
 continue to apply. Outdoor lamp classification still reads the saved
@@ -245,8 +249,31 @@ different mask directory. PNG brightness and alpha define emission over opaque
 artwork. A valid black mask disables emission. A wrong-size or unreadable
 mask falls back to the built-in rules. An explicit mask can also enable an
 `OFF` variant, with destroyed instances still taking precedence. Reload the
-renderer resources after editing masks. Bakes include the resolved mask data
-in their cache identity.
+renderer resources after editing masks. Cache identity follows any changes
+to the generated light sources and the resolved mask data used for
+stained-glass tracing.
+
+### Smart Persistent Lighting Cache 2.0 — M1
+
+**F4 → Lighting → Baked at level load → Cache map lighting** is on by default.
+The disk cache can restore sunlight coverage, direct light, the static sprite
+grid, bounce light, ambient occlusion and sky visibility, and sector light
+flow. Each stage checks the map, material, and lighting data it actually uses.
+Level preparation still builds the geometry, stages GPU uploads, and applies
+live changes such as doors and broken lamps.
+
+The first load after upgrading fills the new cache entries. The Windows
+launcher and direct engine use
+`%LOCALAPPDATA%\DOOM-HellforgeLauncher\Cache\Maps` by default. The cache keeps
+its 1 GiB disk budget and its 64 MiB uncompressed limit per entry. Oversized
+stages calculate normally while other compatible stages can restore.
+
+In Release/Vulkan tests, E1M1 restored all six stages on death restart with zero
+bake dispatches. In Doom II MAP01, ten warm restarts and ten warm save reloads
+each restored all six stages every time. The MAP01 warm preparation medians
+rose from 705 to 771 ms for restart and from 698 to 757 ms for save reload.
+Sunder MAP02 restored five stages and recalculated direct light, whose output
+exceeded the entry limit. [Dependency audit, benchmarks, and test results](docs/changes/RELOAD-LIGHTING-CACHE.md#smart-persistent-lighting-cache-20--m1)
 
 ## Feature catalog
 
@@ -291,7 +318,11 @@ reports. Historical validation results below retain their original test scope.
 | **[Selected Texture Immersion](docs/changes/SELECTED_TEXTURE_IMMERSION_REPORT.md)** | Opt-in motion and material effects bring selected flesh, faces, gates, eye switches, blood pipes, fire walls and Doom II skies to life using original WAD artwork. | Curated patch regions, shader masks and bounded animation; no replacement textures or gameplay changes. Windows/Vulkan gallery checks passed; Metal runtime coverage remains pending. |
 | **Natural critical bloodspill** | Critical monsters can produce forceful, irregular blood jets, detached droplets, wall splashes and floor pools. | Bounded spray budget and blood-color profiles; effect remains optional and is separate from the critical-hit notification. |
 | **Weapon Discovery** | Optional monster-drop modes replace dropped weapons with ammo, including a scarce-ammo option. | Uses native ammo/skill limits and persists the selected drop tier without changing the save-record layout. [Test report](docs/changes/WEAPON_DISCOVERY_TEST_REPORT.md) |
-| **[Reload stability & lighting cache](docs/changes/RELOAD-LIGHTING-CACHE.md)** | Safer restarts and reuse of static lighting across sessions. | Render-resource lifecycle cleanup and versioned, validated disk entries; live effects remain outside the cache. |
+| **[Smart Persistent Lighting Cache 2.0 — M1](#smart-persistent-lighting-cache-20--m1)** | Reuse compatible static lighting on restart, save load, and map revisit. | Stage-specific keys, checksummed storage, cache-aware loading labels, and corruption recovery. |
+| **[Universal Atmospheric Fog](#universal-atmospheric-fog--sprite-and-voxel-coverage)** | Sprites and voxels receive the appropriate outdoor haze at their position. | Shared world-position sector exposure with Vulkan and Metal shader variants. |
+| **[Lightning Bolt Visibility 1.1](#lightning-bolt-visibility-11)** | Distant lightning has a readable two-pulse flash and fade. | A ten-tic sky-bolt envelope with independent environmental flash timing. |
+| **[Environmental Corpse Reactions](#environmental-corpse-reactions-10)** | Bodies and fragments react to physical contact with acid and lava. | Contact-based progress, hazardous floor blood suppression, and native resurrection support. |
+| **[Incendiary Barrels](#incendiary-barrels-10)** | Optional destructible burning barrels leak oil and ignite damaging pools. | Native blast damage, staged chain reactions, and save/load support for active hazards. |
 | **[Large moving-platform protection](docs/changes/LARGE-PLATFORM-SHIELD.md)** | Keep breakable surfaces enabled while protecting large floor movers from excavation damage. | Rejects protected cuts before remeshing; small platforms and ordinary surfaces retain destruction. Manual lag confirmation remains pending in the linked report. |
 | **[Monster visibility performance](docs/changes/AMBUSH-SIGHT-F4.md)** | Toggle ambush sight reuse from F4 without changing hearing or encounter activation. | Reuses only an unchanged false sight result within one action; no cross-tic LOS cache. |
 | **[Conservative sprite filtering](docs/changes/SPRITE-FRUSTUM-FILTERING.md)** | Reduce off-camera monster rendering work when safely outside view. | Artwork and shadow bounds, with fallbacks for mirrors, wounds, voxels and uncertain poses. |
@@ -413,6 +444,17 @@ state. [Implementation and verification](docs/changes/EYE-INJURIES.md).
   feature-specific test result and performance capture were not supplied in
   this update. No measured CPU/GPU savings or exhaustive visual coverage is claimed.
 
+#### Incendiary Barrels 1.0
+
+Enable **F4 → Combat → Barrels → Incendiary Barrels** to make stock burning
+barrels destructible in single-player. Hits spray oil and widen an inert spill.
+A rupture uses the stock five-frame explosion, spills burning oil, and can set
+off nearby barrels in later chain waves. Active oil damages players and monsters
+on contact and is saved with the game. The accelerated renderer draws the oil
+film, flames, sparks, and smoke. The option defaults off and can be used alongside
+Corrosive Barrels. [Design](docs/changes/INCENDIARY_BARRELS_DESIGN.md) ·
+[Native and Vulkan verification](docs/changes/INCENDIARY_BARRELS_TEST_REPORT.md)
+
 #### Rain and blood effects
 
 - The existing cosmetic rain effect lightens exposed blood, spreads floor
@@ -509,6 +551,27 @@ They do not introduce new gameplay damage or modify classic WAD content.
 Corpse Decomposition Milestones 1–2 have since received user-reported Windows
 build and gameplay acceptance after their visual-activation and linker repairs.
 The relevant user-run verification is distinguished below from source-only tests.
+
+#### Universal Atmospheric Fog — Sprite and Voxel Coverage
+
+Burning City, Blood Hell, Starport, Inferno, and Deimos now apply their outdoor
+haze to monsters, decorations, pickups, and other world sprites using the same
+position and sector rules as nearby geometry. Deimos keeps its whiteout look.
+Vulkan comparisons confirmed the indoor and outdoor separation at a doorway
+and checked a Blood Hell voxel. The held weapon and HUD matched the baseline.
+The Metal shaders were regenerated. Metal runtime remains unverified, and
+separate bloom and flat debris passes have their own fog coverage.
+[Verification and remaining coverage](Log-Status.md#universal-atmospheric-fog--sprite-coverage-fix)
+
+#### Lightning Bolt Visibility 1.1
+
+With **Visible distant lightning bolts** enabled in F4 → Atmosphere, eligible
+sky bolts use a ten-tic sequence with a bright first pulse, a visible interval,
+a second pulse, and a short fade. The bolt has its own timing, so it remains
+readable after the diffuse environmental flash dims. Storm activation, thunder,
+and ground-strike timing follow the existing storm rules. Focused tests and
+Windows/Vulkan captures checked the pulse and fade.
+[Storm timing and visibility rules](duct-tape-doom-main/platform/storm_rules.h)
 
 #### Immersive Sky Environment (Milestones A–C)
 
@@ -629,6 +692,21 @@ The relevant user-run verification is distinguished below from source-only tests
   runtime pass also covers Stage 2 scavenger suppression; a separate exhaustive
   visual acceptance report for every individual creature variant is not recorded.
 
+#### Environmental Corpse Reactions 1.0
+
+In accelerated single-player, the death presentation settings let acid and
+lava consume corpses, supported ragdolls, and physical gore fragments on contact.
+Lava chars and collapses bodies, and acid dissolution uses the existing
+**Acid Corpse Dissolution** option, which defaults off. Lava combustion,
+hazardous floor blood suppression, and fragment reactions default on. Reaction
+speed is configurable. The corpse remains available to native gameplay,
+including Arch-vile resurrection, and cosmetic reaction progress is rebuilt
+from current contact on save reload.
+
+Native tests covered body and fragment contact, wall versus floor blood,
+resurrection, and save/load. In-game particle appearance and large-map
+performance remain unverified. [Settings, behavior, and verification](docs/changes/ENVIRONMENTAL-CORPSE-REACTIONS.md)
+
 #### Corpse Decomposition & Organic Decay (Milestones 1–2)
 
 - **F4 → Atmosphere → Decoration Immersion → Corpse decomposition:** an independent
@@ -732,8 +810,8 @@ the extensions highlighted above.
   destruction geometry.
 - Multithreaded lighting bake, spatial ray traversal, selective relighting,
   reusable geometry, and bounded light/shadow caches.
-- Persistent map-lighting cache keyed by resource content, map inputs, world
-  state, lighting settings, and bake format. F4 controls caching; the launcher
+- Persistent map-lighting cache keyed per stage by resolved map, material and
+  lighting inputs, plus the bake algorithm and output layout. F4 controls caching; the launcher
   can clear it. GPU handles, pointers, actors, blood, particles, and live
   effects are never serialized.
 - Safe level-transition teardown, worker barriers, first-frame diagnostics,
@@ -822,8 +900,9 @@ sprite-specific anatomy or deformation. Multiplayer, demos, and several
 renderer-only features intentionally bypass single-player sprite combat rules.
 
 Performance depends on map complexity, hardware, resolution, lighting settings,
-and accumulated destruction. The lighting cache reduces repeated bake work but
-does not avoid map reconstruction, geometry preparation, or GPU uploads.
+and accumulated destruction. The lighting cache skips compatible static bake
+work. Level reconstruction, geometry preparation, GPU uploads, and oversized
+stages still run where needed.
 Decoration ambience and corpse decomposition are automatically disabled at
 200 or more spawned kill-count monsters, but this is not a measured FPS
 or memory-saving guarantee. Sprite skin injuries are deliberately limited to
@@ -945,6 +1024,11 @@ under GPLv3. Distributing the executable alone omits these accompanying files.
   Notifications independently of the spray toggle.
 
 Recent source updates for this build family:
+
+- **28 November 2026.** See [what's new](#whats-new-in-hellforge) for M1
+  lighting cache, world-sprite fog, lightning visibility, and hazardous
+  liquid contact reactions. The reports distinguish Release builds, native
+  regressions, Vulkan captures, and pending checks.
 
 - **Recent combat immersion batch (27 November 2026):** Kinetic Horror and
   Physical Bodies M1/M2 received developer-reported gameplay acceptance; the

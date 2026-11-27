@@ -2,12 +2,15 @@
    source lists, masks, lamp groups, sky metadata and GPU uploads still run. */
 #include "internal.h"
 #ifndef DOOM_BAKE_CODE_HASH
-#define DOOM_BAKE_CODE_HASH __DATE__ " " __TIME__
+#error The bake cache requires a configured numerical fingerprint
 #endif
 #include <filesystem>
 #include <fstream>
 #include <system_error>
 #include <limits>
+#include <random>
+#include <optional>
+#include <tuple>
 
 namespace doom3d {
 namespace {
@@ -16,6 +19,7 @@ constexpr uint64_t seed=14695981039346656037ull;
 constexpr uint64_t limit=1024ull*1024*1024;
 constexpr uint64_t entryLimit=64ull*1024*1024;
 constexpr uint32_t format=1;
+constexpr uint32_t keySchema=2;
 #ifdef DOOM_TEST_DRIVER
 bool injectWriteFailure=false;
 #endif
@@ -24,105 +28,169 @@ uint64_t hashBytes(uint64_t h,const void *data,size_t size) {
     for(size_t i=0;i<size;++i)h=(h^p[i])*1099511628211ull;
     return h;
 }
-template<class T> void value(uint64_t &h,const T &v) {h=hashBytes(h,&v,sizeof(v));}
-template<class T> void values(uint64_t &h,const std::vector<T> &v) {
-    static_assert(std::is_trivially_copyable<T>::value,"No pointers or containers in cache inputs");
-    value(h,v.size());h=hashBytes(h,v.data(),v.size()*sizeof(T));
-}
 std::string hex(uint64_t h) {char b[17];snprintf(b,sizeof(b),"%016llx",(unsigned long long)h);return b;}
-fs::path root() {
-    if(const char *p=SDL_getenv("HELLFORGE_MAP_CACHE"))return fs::u8path(p);
-    if(const char *p=SDL_getenv("TUIN_MAP_CACHE"))return fs::u8path(p);
+fs::path configuredRoot() {
+    if(const char *p=SDL_getenv("HELLFORGE_MAP_CACHE");p&&*p)return fs::u8path(p);
+    if(const char *p=SDL_getenv("TUIN_MAP_CACHE");p&&*p)return fs::u8path(p);
+#ifdef _WIN32
+    // The stable launcher and direct Windows launches share Local AppData.
+    // The experimental launcher supplies its own root through the override.
+    if(const char *p=SDL_getenv("LOCALAPPDATA");p&&*p)
+        return fs::u8path(p)/"DOOM-HellforgeLauncher"/"Cache"/"Maps";
+#endif
     char *p=SDL_GetPrefPath(nullptr,"DOOM-HellforgeLauncher");
     if(!p)return {};
     fs::path result=fs::u8path(p)/"Cache"/"Maps";SDL_free(p);return result;
 }
-uint64_t resources() {
-    static uint64_t digest=0;
-    if(digest)return digest;
-    uint64_t h=seed;
-    // Ordered resolved resource directory, not filenames/timestamps or map name.
-    std::vector<uint8_t> bytes;
-    for(int i=0;i<numlumps;++i) {
-        h=hashBytes(h,lumpinfo[i].name,8);int size=W_LumpLength(i);value(h,size);
-        if(size<0)throw std::runtime_error("invalid resource length");
-        bytes.resize(size);if(size)W_ReadLump(i,bytes.data());h=hashBytes(h,bytes.data(),bytes.size());
-    }
-    digest=h?h:1;return digest;
+const fs::path &root() {
+    // Resolve explicit relative overrides once, at engine use, before any level reload.
+    static const fs::path resolved=[] {
+        try {
+            auto path=configuredRoot();
+            return path.empty()?path:fs::absolute(path).lexically_normal();
+        } catch(const std::exception &) {return fs::path{};}
+    }();
+    return resolved;
 }
-static void hashResolvedEmission(uint64_t &h) {
-    if(std::none_of(images.begin(),images.end(),[](const auto &entry){return entry.second.explicitEmissionHash!=0;}))return;
-    std::map<int,uint64_t> used;
-    auto include=[&](int key) {
-        const auto image=images.find(key);
-        if(image!=images.end()&&image->second.explicitEmissionHash)used.emplace(key,image->second.explicitEmissionHash);
-    };
-    for(int i=0;i<numsides;++i)
-        for(int texture:{sides[i].toptexture,sides[i].bottomtexture,sides[i].midtexture})
-            if(texture>0)include(texturetranslation[texture]);
-    for(int i=0;i<numsectors;++i)
-        for(int pic:{sectors[i].floorpic,sectors[i].ceilingpic})
-            if(pic!=skyflatnum)include(-1-firstflat-flattranslation[pic]);
-    for(const auto &[key,mask]:used) {value(h,key);value(h,mask);}
+bool cacheEnabled() {
+    return settings.mapLightCache&&!M_CheckParm((char*)"-nobakecache");
 }
-uint64_t worldKey(const std::string &stage) {
-    uint64_t h=resources();value(h,format);
-    const char algorithm[]=DOOM_BAKE_CODE_HASH;h=hashBytes(h,algorithm,sizeof(algorithm));
-    h=hashBytes(h,stage.data(),stage.size());value(h,gameepisode);value(h,gamemap);
-    const auto &mood=levelMood();value(h,mood.outdoor);value(h,mood.sun);value(h,mood.shineOut);value(h,mood.skyTint);
-    value(h,sunElevation);value(h,skytexture);value(h,skyflatnum);
-    h=hashBytes(h,flattranslation,(size_t)numflats*sizeof(*flattranslation));
-    h=hashBytes(h,texturetranslation,(size_t)numtextures*sizeof(*texturetranslation));
-    value(h,mapWidth);value(h,mapHeight);value(h,mapCell);value(h,mapOrigin);value(h,atlasHeight);
-    const int options[]={settings.sun,settings.bakedLights,settings.emissive,settings.windowLight,
-        settings.bakeOnlyLights,settings.gridSpriteLight,settings.thingShadows,settings.bounce,
-        settings.skyLight,settings.bakedAO,settings.lightFlow,settings.dimLitRooms};
-    h=hashBytes(h,options,sizeof(options));value(h,settings.windowStrength);value(h,settings.unlitDarkening);
-    value(h,effectiveLightingModel(settings));
-    if(settings.emissive&&(stage=="lights_hf2"||stage=="grid_hf2"||stage=="bounce"))hashResolvedEmission(h);
-    for(int i=0;i<numsectors;++i) {
-        const auto &s=sectors[i];value(h,s.floorheight);value(h,s.ceilingheight);value(h,s.floorpic);value(h,s.ceilingpic);
-        value(h,s.lightlevel);value(h,s.special);value(h,s.tag);
+std::string mapName() {
+    char map[24];
+    if(gamemode==commercial)snprintf(map,sizeof(map),"MAP%02d",gamemap);
+    else snprintf(map,sizeof(map),"E%dM%d",gameepisode,gamemap);
+    return map;
+}
+struct CacheSession {
+    size_t id=0,eligible=0,restored=0,calculated=0,uploaded=0,failures=0,verified=0;
+    uint64_t dispatches=0,bytes=0;
+    std::optional<uint64_t> geometry,atlas,sources,sunOutput,directOutput;
+    bool wrote=false;
+    double geometryMs=0,reconcileMs=0;
+    size_t evicted=0;
+    double keyMs=0,lookupMs=0,readMs=0,calculateMs=0,writeMs=0,uploadMs=0;
+} report;
+double elapsed(uint64_t start) {return (SDL_GetTicksNS()-start)/1e6;}
+const char *algorithmFor(const std::string &stage) {
+    if(stage=="sun")return DOOM_SUN_BAKE_HASH;
+    if(stage=="lights_hf2")return DOOM_DIRECT_BAKE_HASH;
+    if(stage=="grid_hf2")return DOOM_GRID_BAKE_HASH;
+    if(stage=="bounce")return DOOM_BOUNCE_BAKE_HASH;
+    if(stage=="ambient")return DOOM_AMBIENT_BAKE_HASH;
+    if(stage=="flow")return DOOM_FLOW_BAKE_HASH;
+    return DOOM_BAKE_CODE_HASH;
+}
+template<class Build> uint64_t component(std::optional<uint64_t> &memo,Build build) {
+    if(report.id&&memo)return *memo;
+    BakeKeyHash hash;
+    build(hash);
+    if(report.id)memo=hash.result();
+    return hash.result();
+}
+uint64_t geometryKey() {
+    return component(report.geometry,[](BakeKeyHash &h) {
+        h.fields(mapWidth,mapHeight,mapCell,mapOrigin);
+        h.length(seamCells.size());
+        for(const auto &cell:seamCells)h.value(cell.own);
+        h.length(bakeMap.sectors.size());
+        for(size_t i=0;i<bakeMap.sectors.size();++i) {
+            const auto &s=bakeMap.sectors[i];
+            h.fields(s.floor,s.ceiling,s.sky,sectors[i].floorpic==skyflatnum,sectors[i].ceilingpic==skyflatnum);
+            h.length(s.lines.size());
+            for(int line:s.lines)h.value(line);
+            h.length(s.things.size());
+            for(int thing:s.things)h.value(thing);
+        }
+        // Images shared by several lines/things need only be scanned once.
+        // Pointer reuse is local to this call. Only image content enters the key.
+        std::map<std::tuple<const unsigned char *,int,int>,uint64_t> images;
+        auto mask=[&](const unsigned char *pixels,int width,int height) {
+            h.value(pixels!=nullptr);
+            if(!pixels)return;
+            if(width<=0||height<=0||size_t(width)>std::numeric_limits<size_t>::max()/size_t(height)/2)
+                throw std::runtime_error("invalid cache mask");
+            const auto image=std::make_tuple(pixels,width,height);
+            auto [it,inserted]=images.try_emplace(image);
+            if(inserted) {
+                BakeKeyHash coverage;
+                const size_t size=size_t(width)*height*2;
+                for(size_t i=1;i<size;i+=2)coverage.byte(pixels[i]);
+                it->second=coverage.result();
+            }
+            h.component(it->second);
+        };
+        h.length(bakeMap.lines.size());
+        for(const auto &line:bakeMap.lines) {
+            const auto &m=line.mask;
+            h.fields(line.ax,line.ay,line.bx,line.by,line.front,line.back);
+            h.fields(m.width,m.height,m.u,m.direction,m.anchor,m.bottom,m.top);
+            mask(m.pixels,m.width,m.height);
+        }
+        h.length(bakeMap.things.size());
+        for(const auto &thing:bakeMap.things) {
+            h.fields(thing.x,thing.y,thing.top,thing.left,thing.width,thing.height);
+            mask(thing.pixels,thing.width,thing.height);
+        }
+    });
+}
+uint64_t atlasKey() {
+    return component(report.atlas,[](BakeKeyHash &h) {
+        h.fields(atlasWidth,atlasHeight,atlasStride);
+        h.length(bakeStrips.size());
+        for(const auto &s:bakeStrips)
+            h.fields(s.x,s.y,s.width,s.height,s.sector,s.low,s.high,s.scale,s.ax,s.ay,s.dx,s.dy,s.length);
+        h.length(bakeOrder.size());
+        for(int strip:bakeOrder)h.value(strip);
+    });
+}
+uint64_t sourceKey() {
+    return component(report.sources,[](BakeKeyHash &h) {
+        h.fields(firstWindowSource,effectiveLightingModel(settings));
+        h.length(bakeSources.size());
+        for(const auto &light:bakeSources)
+            h.fields(light.x,light.y,light.z,light.radius,light.strength,light.directionality,
+                     light.color,light.extent,light.nx,light.ny,light.beam);
+        h.length(sourceGroups.size());
+        for(auto group:sourceGroups)h.byte(group);
+        h.length(bakeAreas.size());
+        for(const auto &a:bakeAreas) {
+            h.fields(a.low,a.high,a.radius,a.strength,a.color,a.z,a.clearance,a.ceiling,a.directionality);
+            h.length(a.pieces.size());
+            for(const auto &piece:a.pieces) {
+                h.length(piece.size());
+                for(const auto &vertex:piece)h.value(vertex);
+            }
+        }
+    });
+}
+void flowBspKey(BakeKeyHash &h) {
+    // R_PointInSubsector walks the loaded BSP and returns its leaf's sector.
+    h.value(numnodes);
+    for(int i=0;i<numnodes;++i) {
+        const auto &node=nodes[i];
+        h.fields(node.x,node.y,node.dx,node.dy,node.children);
     }
-    for(int i=0;i<numsides;++i) {
-        const auto &s=sides[i];value(h,s.textureoffset);value(h,s.rowoffset);
-        value(h,s.toptexture);value(h,s.bottomtexture);value(h,s.midtexture);
-    }
-    for(const auto &s:bakeMap.sectors) {value(h,s.floor);value(h,s.ceiling);value(h,s.sky);}
-    for(const auto &l:bakeMap.lines) {
-        value(h,l.ax);value(h,l.ay);value(h,l.bx);value(h,l.by);value(h,l.front);value(h,l.back);
-        const auto &m=l.mask;value(h,m.width);value(h,m.height);value(h,m.u);value(h,m.direction);
-        value(h,m.anchor);value(h,m.bottom);value(h,m.top);
-        if(m.pixels)h=hashBytes(h,m.pixels,(size_t)m.width*m.height*2);
-    }
-    for(const auto &t:bakeMap.things) {
-        value(h,t.x);value(h,t.y);value(h,t.top);value(h,t.left);value(h,t.width);value(h,t.height);
-        h=hashBytes(h,t.pixels,(size_t)t.width*t.height*2);
-    }
-    values(h,bakeSources);values(h,sourceGroups);values(h,bakeSourceKeys);
-    // Areas contain polygon vectors, so serialize their numeric members explicitly.
-    for(const auto &a:bakeAreas) {
-        value(h,a.low);value(h,a.high);value(h,a.radius);value(h,a.strength);value(h,a.color);
-        value(h,a.z);value(h,a.clearance);value(h,a.ceiling);value(h,a.directionality);for(const auto &piece:a.pieces)values(h,piece);
-    }
-    for(const auto &s:surfaceLights) {
-        value(h,s.key);value(h,s.x);value(h,s.y);value(h,s.z);value(h,s.radius);value(h,s.strength);
-        value(h,s.color);value(h,s.extent);value(h,s.flickerSector);
-        bool broken=tileShotOut(s.key);value(h,broken);
-    }
-    if(settings.sun&&sunBaked) {value(h,sunLevel);value(h,sunTint);value(h,sunDirection);value(h,sunElevation);}
-    return h;
+    h.value(numsubsectors);
+    for(int i=0;i<numsubsectors;++i)h.value(int(subsectors[i].sector-sectors));
 }
 uint64_t sizeOf(const std::vector<CacheField> &fields) {
     uint64_t size=0;
+    constexpr auto max=std::numeric_limits<size_t>::max();
     for(auto f:fields) {
-        if(f.width>f.stride||f.count>entryLimit/std::max(size_t(1),f.width))throw std::runtime_error("cache field exceeds budget");
-        size+=f.count*f.width;if(size>entryLimit)throw std::runtime_error("cache entry exceeds budget");
+        if(!f.width||f.width>f.stride||(f.count&&!f.data)||(f.gap&&!f.row))
+            throw std::runtime_error("invalid cache field");
+        if(!f.count)continue;
+        const auto last=f.count-1;
+        if(last>(max-f.width)/f.stride||
+           (f.gap&&last/f.row>(max-f.width-last*f.stride)/f.gap)||
+           f.count>(std::numeric_limits<uint64_t>::max()-size)/f.width)
+            throw std::overflow_error("cache field size overflow");
+        size+=f.count*f.width;
     }
     return size;
 }
-std::vector<uint8_t> pack(const std::vector<CacheField> &fields) {
-    std::vector<uint8_t> data;data.reserve((size_t)sizeOf(fields));
+std::vector<uint8_t> pack(const std::vector<CacheField> &fields,size_t size) {
+    std::vector<uint8_t> data;data.reserve(size);
     for(auto f:fields) {
         auto *p=static_cast<const uint8_t*>(f.data);
         if(f.stride==f.width&&!f.gap) {if(f.count)data.insert(data.end(),p,p+f.count*f.width);}
@@ -155,7 +223,7 @@ bool decode(const std::vector<uint8_t> &in,std::vector<uint8_t> &out,size_t expe
     }
     return out.size()==expected;
 }
-void evict(const fs::path &folder,uint64_t budget=limit) {
+size_t evict(const fs::path &folder,uint64_t budget=limit) {
     struct Entry {fs::path path;fs::file_time_type time;uint64_t size;};std::vector<Entry> entries;uint64_t total=0;
     std::error_code ec;
     for(fs::recursive_directory_iterator i(folder,fs::directory_options::skip_permission_denied,ec),end;i!=end;i.increment(ec)) {
@@ -167,67 +235,277 @@ void evict(const fs::path &folder,uint64_t budget=limit) {
         total+=size;entries.push_back({i->path(),time,size});
     }
     std::sort(entries.begin(),entries.end(),[](const Entry&a,const Entry&b){return a.time<b.time;});
-    for(const auto &e:entries) {if(total<=budget)break;if(fs::remove(e.path,ec))total-=e.size;ec.clear();}
+    size_t removed=0;
+    for(const auto &e:entries) {
+        if(total<=budget)break;
+        if(fs::last_write_time(e.path,ec)==e.time&&!ec&&fs::remove(e.path,ec)) {total-=e.size;++removed;}
+        ec.clear();
+    }
+    return removed;
 }
 }
 CacheField cacheWallChannel(std::vector<uint8_t> &cells,int height,int channel,size_t width,bool bounce) {
     return {cells.data()+(bounce?atlasWidth*4:0)+channel,(size_t)atlasWidth*height,4,width,(size_t)atlasWidth,(size_t)atlasWidth*4};
 }
-BakeCache::BakeCache(const char *name,std::initializer_list<CacheField> output):stage(name),fields(output) {
-    if(!settings.mapLightCache||M_CheckParm((char*)"-nobakecache"))return;
+void beginBakeCacheSession(bool level) {
+    static size_t generation=0;
+    report={};
+    report.id=++generation;
+    fprintf(stderr,"[LIGHT CACHE] event=map_prepare map=%s enabled=%d format=%u key_schema=%u trigger=%s root=\"%s\"\n",
+        mapName().c_str(),cacheEnabled(),format,keySchema,level?"level_setup":"lighting_update",
+        cacheEnabled()?root().u8string().c_str():"");
+}
+void recordBakeGeometry(uint64_t start) {if(report.id)report.geometryMs+=elapsed(start);}
+void recordBakeReconcile(uint64_t start) {if(report.id)report.reconcileMs+=elapsed(start);}
+void endBakeCacheSession(uint64_t preparationStart,double mapMs) {
+    if(!report.id)return;
+    if(report.wrote)try {report.evicted=evict(root());}
+    catch(const std::exception &e) {fprintf(stderr,"[LIGHT CACHE] event=eviction_error detail=\"%s\"\n",e.what());}
+    fprintf(stderr,"[LIGHT CACHE] event=summary eligible=%zu restored=%zu calculated=%zu compute_dispatches=%llu uploaded=%zu hit_rate=%.1f stored_bytes=%llu write_failures=%zu verified=%zu evicted=%zu key_ms=%.3f lookup_ms=%.3f read_ms=%.3f calculate_ms=%.3f write_ms=%.3f upload_ms=%.3f geometry_ms=%.3f reconcile_ms=%.3f total_ms=%.3f\n",
+        report.eligible,report.restored,report.calculated,(unsigned long long)report.dispatches,report.uploaded,
+        report.eligible?100.*report.restored/report.eligible:0.,(unsigned long long)report.bytes,
+        report.failures,report.verified,report.evicted,report.keyMs,report.lookupMs,report.readMs,
+        report.calculateMs,report.writeMs,report.uploadMs,mapMs+report.geometryMs,report.reconcileMs,elapsed(preparationStart));
+    report.id=0;
+}
+uint64_t bakeUpstreamIdentity(bool sunlight) {
+    const auto &memo=sunlight?report.sunOutput:report.directOutput;
+    if(report.id&&memo)return *memo;
+    const size_t cells=(size_t)mapWidth*mapHeight;
+    // Match the leading cache fields exactly when an upstream stage was
+    // not just restored/calculated by this preparation pass.
+    auto flat=sunlight?cacheChannel(contactCells,2,cells):cacheChannel(flatLightCells,0,cells*2,3);
+    auto wall=sunlight?cacheWallChannel(wallBakeCells,atlasHeight,3,1):cacheWallChannel(wallBakeCells,atlasHeight,0,3);
+    uint64_t digest=seed;
+    const auto *data=static_cast<const uint8_t*>(flat.data);
+    for(size_t i=0;i<flat.count;++i)digest=hashBytes(digest,data+i*flat.stride,flat.width);
+    data=static_cast<const uint8_t*>(wall.data);
+    for(int y=0;y<atlasHeight;++y)for(int x=0;x<atlasWidth;++x)
+        digest=hashBytes(digest,data+4*((size_t)y*atlasStride+x),wall.width);
+    return digest;
+}
+uint64_t BakeCache::payloadChecksum(const std::vector<uint8_t> &data,uint64_t &upstream) const {
+    if((stage!="sun"&&stage!="lights_hf2")||fields.size()<2||data.empty())
+        return hashBytes(seed,data.data(),data.size());
+    const size_t prefix=fields[0].count*fields[0].width+fields[1].count*fields[1].width;
+    upstream=hashBytes(seed,data.data(),prefix);
+    return hashBytes(upstream,data.data()+prefix,data.size()-prefix);
+}
+BakeCache::BakeCache(const char *name,std::initializer_list<CacheField> output,
+    const std::function<void(BakeKeyHash &)> &stageInputs)
+    :stage(name),fields(output),session(report.id) {
+    const auto start=SDL_GetTicksNS();
     try {
-        start=SDL_GetTicksNS();key=worldKey(stage);
-        // The reconstructed layout determines lengths before any disk allocation.
-        for(auto f:fields){value(key,f.count);value(key,f.stride);value(key,f.width);value(key,f.row);value(key,f.gap);}
-        sizeOf(fields);
-        char map[24];if(gamemode==commercial)snprintf(map,sizeof(map),"MAP%02d",gamemap);else snprintf(map,sizeof(map),"E%dM%d",gameepisode,gamemap);
-        fs::path folder=root();if(folder.empty())return;
-        path=(folder/(std::string(map)+"-"+hex(resources()))/(stage+"-"+hex(key)+".bake")).u8string();enabled=true;
-    } catch(const std::exception &e) {fprintf(stderr,"3D cache: %s unavailable: %s\n",name,e.what());}
+        expected=sizeOf(fields);
+        if(!cacheEnabled()) {readResult=writeResult="CACHE_DISABLED";return;}
+        if(expected>entryLimit) {readResult=writeResult="BYPASS_ENTRY_TOO_LARGE";return;}
+        if(root().empty()) {readResult="READ_FAILED";writeResult="WRITE_FAILED";return;}
+        geometry=geometryKey();
+        if(stage!="grid_hf2"&&stage!="flow")atlas=atlasKey();
+        if(stage=="lights_hf2"||stage=="grid_hf2")sources=sourceKey();
+        BakeKeyHash extra;
+        if(stage=="sun")extra.value(sunDirection);
+        if(stage=="lights_hf2")hashGlassBakeInputs(extra);
+        if(stage=="flow")flowBspKey(extra);
+        if(stageInputs)stageInputs(extra);
+        inputs=extra.result();
+
+        BakeKeyHash outputLayout;
+        outputLayout.length(fields.size());
+        for(auto f:fields) {
+            outputLayout.length(f.count);outputLayout.length(f.stride);outputLayout.length(f.width);
+            outputLayout.length(f.row);outputLayout.length(f.gap);
+        }
+        layout=outputLayout.result();
+        algorithm=algorithmFor(stage);
+        BakeKeyHash identity;
+        identity.text("HELLFORGE_CPU_BAKE");
+        identity.fields(format,keySchema,gameepisode,gamemap,int(gamemode));
+        identity.text(stage);
+        identity.text(algorithm);
+        identity.text(DOOM_BAKE_NUMERIC_ABI);
+        const uint16_t endian=1;
+        identity.byte(*reinterpret_cast<const uint8_t*>(&endian));
+        identity.component(geometry);identity.component(atlas);identity.component(sources);
+        identity.component(inputs);identity.component(layout);
+        key=identity.result();
+        path=(root()/(mapName()+"-m1")/(stage+"-"+hex(key)+".bake")).u8string();
+        enabled=true;
+        keyMs=elapsed(start);
+    } catch(const std::bad_alloc &) {readResult=writeResult="RESOURCE_LIMIT";}
+      catch(const std::overflow_error &) {readResult=writeResult="RESOURCE_LIMIT";}
+      catch(const std::exception &) {readResult=writeResult="INVALID_INPUT";}
+}
+BakeCache::~BakeCache() {
+    fprintf(stderr,"[LIGHT CACHE] stage=%s result=%s write=%s key=%016llx checksum=%016llx geometry=%016llx atlas=%016llx sources=%016llx inputs=%016llx layout=%016llx algorithm=%s expected_bytes=%llu stored_bytes=%llu entry_limit_bytes=%llu restored=%d calculated=%d uploaded=%d dispatches=%llu verification_dispatches=%llu key_ms=%.3f lookup_ms=%.3f read_ms=%.3f calculate_ms=%.3f write_ms=%.3f upload_ms=%.3f\n",
+        stage.c_str(),readResult,writeResult,(unsigned long long)key,(unsigned long long)checksum,
+        (unsigned long long)geometry,(unsigned long long)atlas,(unsigned long long)sources,
+        (unsigned long long)inputs,(unsigned long long)layout,algorithm,
+        (unsigned long long)expected,(unsigned long long)stored,(unsigned long long)entryLimit,
+        hit&&!verifying,calculated&&!verifying,uploaded,(unsigned long long)(verifying?0:dispatches),
+        (unsigned long long)(verifying?dispatches:0),keyMs,lookupMs,readMs,calculateMs,writeMs,uploadMs);
+    if(!session||session!=report.id)return;
+    if(hasOutputIdentity) {
+        if(stage=="sun")report.sunOutput=outputIdentity;
+        else if(stage=="lights_hf2")report.directOutput=outputIdentity;
+    }
+    ++report.eligible;
+    report.restored+=hit&&!verifying;report.calculated+=calculated&&!verifying;
+    report.uploaded+=uploaded;report.dispatches+=verifying?0:dispatches;
+    report.verified+=verifying&&hit;
+    report.bytes+=stored;
+    report.failures+=strcmp(writeResult,"STORED")&&strcmp(writeResult,"NOT_ATTEMPTED")&&
+        strcmp(writeResult,"CACHE_DISABLED")&&strcmp(writeResult,"BYPASS_ENTRY_TOO_LARGE");
+    report.keyMs+=keyMs;report.lookupMs+=lookupMs;report.readMs+=readMs;
+    report.calculateMs+=verifying?0:calculateMs;report.writeMs+=writeMs;report.uploadMs+=uploadMs;
+}
+namespace {
+struct StageLabels {const char *restore,*calculate;};
+StageLabels labels(const std::string &stage) {
+    if(stage=="sun")return {"Restoring cached sunlight","Baking sunlight"};
+    if(stage=="lights_hf2")return {"Restoring cached static lighting","Baking static lighting"};
+    if(stage=="grid_hf2")return {"Restoring cached sprite lighting","Calculating sprite lighting"};
+    if(stage=="bounce")return {"Restoring cached bounce lighting","Calculating bounce lighting"};
+    if(stage=="ambient")return {"Restoring cached ambient lighting","Calculating ambient occlusion"};
+    return {"Restoring cached sector light flow","Calculating sector light flow"};
+}
 }
 bool BakeCache::restore() {
-    if(!enabled)return false;
-    try {
-        std::ifstream in(fs::u8path(path),std::ios::binary);
-        if(!in){fprintf(stderr,"3D cache: %s miss (no matching entry).\n",stage.c_str());return false;}
-        uint64_t header[6]={};in.read((char*)header,sizeof(header));
-        uint64_t expected=sizeOf(fields);
-        if(!in||header[0]!=0x3145484341435444ull||header[1]!=format||header[2]!=key||header[3]!=expected||header[4]>expected+expected/128+16)
-            throw std::runtime_error("header/version/layout mismatch");
-        in.seekg(0,std::ios::end);if(in.tellg()!=std::streamoff(sizeof(header)+header[4]))throw std::runtime_error("file length mismatch");
-        in.seekg(sizeof(header));std::vector<uint8_t> compressed((size_t)header[4]),data;
-        in.read((char*)compressed.data(),(std::streamsize)compressed.size());
-        if(!in||!decode(compressed,data,(size_t)expected)||hashBytes(seed,data.data(),data.size())!=header[5])throw std::runtime_error("payload/checksum mismatch");
-        // Publish only after the entire entry validates. No partial restoration.
-        size_t at=0;
-        for(auto f:fields) {
-            auto *p=static_cast<uint8_t*>(f.data);
-            if(f.stride==f.width&&!f.gap){if(f.count)memcpy(p,data.data()+at,f.count*f.width);at+=f.count*f.width;}
-            else for(size_t i=0;i<f.count;++i){memcpy(p+i*f.stride+(f.row?i/f.row*f.gap:0),data.data()+at,f.width);at+=f.width;}
-        }
-        std::error_code ec;fs::last_write_time(fs::u8path(path),fs::file_time_type::clock::now(),ec);
-        hit=true;fprintf(stderr,"3D cache: %s hit; checksum %s; restored in %.1f ms.\n",stage.c_str(),hex(header[5]).c_str(),(SDL_GetTicksNS()-start)/1e6);return true;
-    } catch(const std::exception &e) {fprintf(stderr,"3D cache: %s rejected (%s); baking normally.\n",stage.c_str(),e.what());return false;}
+    hit=verifying=hasOutputIdentity=false;
+    if(enabled)loadingLabel("Checking lighting cache");
+    const auto start=SDL_GetTicksNS();
+    if(enabled)hit=readEntry();
+    readMs=enabled?std::max(0.,elapsed(start)-lookupMs):0;
+    if(!hit||verifying) {
+        loadingLabel(verifying?"Verifying cached lighting":labels(stage).calculate);
+        loadingTick();
+    }
+    clock=SDL_GetTicksNS();
+    return hit&&!verifying;
 }
-void BakeCache::store() {
-    if(!enabled||hit)return;
-    fs::path temporary;
+bool BakeCache::readEntry() {
     try {
-        double bakeMs=(SDL_GetTicksNS()-start)/1e6;uint64_t writeStart=SDL_GetTicksNS();
-        auto data=pack(fields),compressed=encode(data);
-        uint64_t header[]={0x3145484341435444ull,format,key,data.size(),compressed.size(),hashBytes(seed,data.data(),data.size())};
-        fs::path destination=fs::u8path(path);fs::create_directories(destination.parent_path());
-        temporary=destination;temporary+=std::string(".")+std::to_string(SDL_GetPerformanceCounter())+".tmp";
-        std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.write((char*)header,sizeof(header));out.write((char*)compressed.data(),(std::streamsize)compressed.size());out.flush();
+        const auto start=SDL_GetTicksNS();
+        const auto file=fs::u8path(path);
+        std::ifstream in(file,std::ios::binary);
+        lookupMs=elapsed(start);
+        if(!in) {
+            std::error_code ec;
+            const auto status=fs::status(file,ec);
+            readResult=status.type()==fs::file_type::not_found&&
+                (!ec||ec==std::errc::no_such_file_or_directory)?"MISS_NO_FILE":"READ_FAILED";
+            return false;
+        }
+        uint64_t header[6]={};
+        in.read((char*)header,sizeof(header));
+        if(!in||header[0]!=0x3145484341435444ull) {readResult="REJECTED_INVALID_HEADER";return false;}
+        if(header[1]!=format) {readResult="REJECTED_FORMAT_MISMATCH";return false;}
+        if(header[2]!=key) {readResult="REJECTED_KEY_MISMATCH";return false;}
+        if(header[3]!=expected||header[4]>expected+expected/128+16) {readResult="REJECTED_SIZE_MISMATCH";return false;}
+        in.seekg(0,std::ios::end);
+        if(!in) {readResult="READ_FAILED";return false;}
+        if(in.tellg()!=std::streamoff(sizeof(header)+header[4])) {readResult="REJECTED_SIZE_MISMATCH";return false;}
+        loadingLabel(labels(stage).restore);
+        loadingTick();
+        in.seekg(sizeof(header));
+        std::vector<uint8_t> compressed((size_t)header[4]),data;
+        in.read((char*)compressed.data(),(std::streamsize)compressed.size());
+        if(!in) {readResult="READ_FAILED";return false;}
+        if(!decode(compressed,data,(size_t)expected)) {readResult="DECODE_FAILED";return false;}
+        if(payloadChecksum(data,outputIdentity)!=header[5]) {readResult="REJECTED_CHECKSUM";return false;}
+        // Publish only after the entire entry validates. No partial restoration.
+        verifying=M_CheckParm((char*)"-verifybakecache")!=0;
+        if(verifying)verification=std::move(data);
+        else {
+            size_t at=0;
+            for(auto f:fields) {
+                auto *p=static_cast<uint8_t*>(f.data);
+                if(f.stride==f.width&&!f.gap) {
+                    if(f.count)memcpy(p,data.data()+at,f.count*f.width);
+                    at+=f.width*f.count;
+                } else for(size_t i=0;i<f.count;++i) {
+                    memcpy(p+i*f.stride+(f.row?i/f.row*f.gap:0),data.data()+at,f.width);
+                    at+=f.width;
+                }
+            }
+        }
+        hasOutputIdentity=!verifying;
+        std::error_code ec;
+        fs::last_write_time(file,fs::file_time_type::clock::now(),ec);
+        stored=sizeof(header)+header[4];checksum=header[5];readResult="HIT";
+        return true;
+    } catch(const std::bad_alloc &) {readResult="RESOURCE_LIMIT";}
+      catch(const std::exception &) {readResult="READ_FAILED";}
+    return false;
+}
+void BakeCache::beginUpload() {
+    loadingLabel("Uploading lighting resources");
+    loadingTick();
+    clock=SDL_GetTicksNS();
+}
+void BakeCache::endUpload() {uploadMs=elapsed(clock);uploaded=true;}
+void BakeCache::store() {
+    calculated=dispatches!=0;
+    calculateMs=clock?elapsed(clock):0;
+    if(!enabled||(hit&&!verifying))return;
+    fs::path temporary;
+    const auto start=SDL_GetTicksNS();
+    const char *failure="ENCODE_FAILED";
+    try {
+        auto data=pack(fields,(size_t)expected);
+        if(verifying) {
+            size_t offset=0,channel=0;
+            for(auto field:fields) {
+                size_t bytes=field.count*field.width;
+                auto diff=std::mismatch(data.begin()+offset,data.begin()+offset+bytes,verification.begin()+offset);
+                if(diff.first!=data.begin()+offset+bytes) {
+                    fprintf(stderr,"[LIGHT CACHE] event=verify stage=%s key=%s result=MISMATCH channel=%zu element=%zu byte=%zu\n",
+                        stage.c_str(),hex(key).c_str(),channel,(size_t)(diff.first-data.begin()-offset)/field.width,
+                        (size_t)(diff.first-data.begin()-offset)%field.width);
+                    hit=false;readResult="REJECTED_NUMERIC_MISMATCH";break;
+                }
+                offset+=bytes;++channel;
+            }
+            std::vector<uint8_t>().swap(verification);
+            if(hit) {
+                hasOutputIdentity=true;
+                fprintf(stderr,"[LIGHT CACHE] event=verify stage=%s key=%s result=MATCH\n",stage.c_str(),hex(key).c_str());
+                return;
+            }
+        }
+        checksum=payloadChecksum(data,outputIdentity);
+        hasOutputIdentity=true;
+        auto compressed=encode(data);
+        uint64_t header[]={0x3145484341435444ull,format,key,data.size(),compressed.size(),checksum};
+        failure="WRITE_FAILED";
+        fs::path destination=fs::u8path(path);
+        fs::create_directories(destination.parent_path());
+        std::random_device nonce;
+        temporary=destination;
+        temporary+="."+std::to_string(SDL_GetPerformanceCounter())+"."+std::to_string(nonce())+".tmp";
+        std::ofstream out(temporary,std::ios::binary|std::ios::trunc);
+        out.write((char*)header,sizeof(header));
+        out.write((char*)compressed.data(),(std::streamsize)compressed.size());
+        out.flush();
 #ifdef DOOM_TEST_DRIVER
         if(injectWriteFailure)out.setstate(std::ios::badbit);
 #endif
-        if(!out)throw std::runtime_error("write/flush failed");out.close();if(out.fail())throw std::runtime_error("close failed");
+        if(!out)throw std::runtime_error("write/flush failed");
+        out.close();
+        if(out.fail())throw std::runtime_error("close failed");
+        failure="ATOMIC_PUBLISH_FAILED";
         if(!SDL_RenamePath(temporary.u8string().c_str(),path.c_str()))throw std::runtime_error(SDL_GetError());
-        evict(root());
-        fprintf(stderr,"3D cache: %s stored; checksum %s; bake %.1f ms, write %.1f ms, %zu bytes.\n",stage.c_str(),hex(header[5]).c_str(),bakeMs,(SDL_GetTicksNS()-writeStart)/1e6,compressed.size());
-    } catch(const std::exception &e) {std::error_code ec;if(!temporary.empty())fs::remove(temporary,ec);fprintf(stderr,"3D cache: %s write skipped (%s).\n",stage.c_str(),e.what());}
-    fflush(stderr);
+        stored=sizeof(header)+compressed.size();writeResult="STORED";
+        if(session&&session==report.id)report.wrote=true;
+        else evict(root());
+    } catch(const std::exception &e) {
+        if(verifying) {hit=false;hasOutputIdentity=false;}
+        std::error_code ec;
+        if(!temporary.empty())fs::remove(temporary,ec);
+        if(strcmp(writeResult,"STORED"))writeResult=failure;
+        fprintf(stderr,"[LIGHT CACHE] event=storage_error stage=%s detail=\"%s\"\n",stage.c_str(),e.what());
+    }
+    writeMs=elapsed(start);
 }
 
 #ifdef DOOM_TEST_DRIVER
@@ -239,49 +517,50 @@ int BakeCache::selfTest() {
         for(size_t i=0;i<bytes.size();i+=4)bytes[i]=(uint8_t)(i/4);
         auto original=bytes;
         BakeCache test("storage-test",{cacheChannel(bytes,0,512)});require(test.enabled,"cache enabled");
-        {
-            Image &image=lumpImage(firstflat+flattranslation[sectors[0].floorpic],true);
-            struct RestoreMask {
-                Image &image;
-                uint64_t original=image.explicitEmissionHash;
-                ~RestoreMask() {image.explicitEmissionHash=original;}
-            } restore{image};
-            image.explicitEmissionHash=0;
-            const auto missing=worldKey("lights_hf2");
-            std::array<uint8_t,64*64> mask={};
-            image.explicitEmissionHash=doom_material_light::explicitMaskIdentity(mask.data(),mask.size(),64,64);
-            const auto black=worldKey("lights_hf2");
-            mask.front()=255;
-            image.explicitEmissionHash=doom_material_light::explicitMaskIdentity(mask.data(),mask.size(),64,64);
-            const auto bright=worldKey("lights_hf2");
-            require(missing!=black&&black!=bright&&missing!=bright,"resolved mask contents invalidate the same material");
-            require(bright==worldKey("lights_hf2"),"resolved mask identity is deterministic");
-        }
-        {
-            struct RestoreSettings {
-                Settings original=settings;
-                ~RestoreSettings() {settings=original;}
-            } restore;
-            settings.accelerated=settings.bakedLights=settings.emissive=1;
-            settings.lightingModel=doom_lighting_model::Enhanced;
-            const auto enhanced=worldKey("lighting-model-test");
-            settings.lightingModel=doom_lighting_model::Hybrid;
-            const auto hybrid=worldKey("lighting-model-test");
-            settings.lightingModel=doom_lighting_model::Physical;
-            const auto physical=worldKey("lighting-model-test");
-            require(enhanced!=hybrid&&enhanced!=physical&&hybrid!=physical,
-                "effective illumination models have distinct cache keys");
-            settings.bakedLights=0;
-            const auto fallback=worldKey("lighting-model-test");
-            settings.lightingModel=doom_lighting_model::Enhanced;
-            require(fallback==worldKey("lighting-model-test"),"lighting prerequisites determine cache identity");
-        }
-        float strength=settings.windowStrength;settings.windowStrength+=0.25f;
-        BakeCache settingChange("storage-test",{cacheChannel(bytes,0,512)});
-        require(settingChange.key!=test.key,"settings invalidate identity");settings.windowStrength=strength;
-        auto height=sectors[0].ceilingheight;sectors[0].ceilingheight+=FRACUNIT;
-        BakeCache worldChange("storage-test",{cacheChannel(bytes,0,512)});
-        require(worldChange.key!=test.key,"saved world heights invalidate identity");sectors[0].ceilingheight=height;
+        auto make=[&](const char *name,const std::function<void(BakeKeyHash &)> &extra={}) {
+            return BakeCache(name,{cacheChannel(bytes,0,512)},extra);
+        };
+        const auto ambient=make("ambient").key;
+        const auto sun=make("sun").key;
+        const auto flow=make("flow").key;
+        auto height=bakeMap.sectors[0].ceiling;
+        bakeMap.sectors[0].ceiling+=1;
+        require(make("ambient").key!=ambient&&make("sun").key!=sun&&make("flow").key!=flow,
+            "changed saved ray geometry invalidates geometry consumers");
+        bakeMap.sectors[0].ceiling=height;
+        require(make("ambient").key==ambient,"geometry key stable after restoring height");
+        const auto azimuth=sunDirection[0];
+        sunDirection[0]+=0.01f;
+        require(make("sun").key!=sun&&make("ambient").key==ambient,"sun direction invalidates sun only");
+        sunDirection[0]=azimuth;
+        auto texture=texturetranslation[0];
+        texturetranslation[0]^=1;
+        require(make("sun").key==sun&&make("ambient").key==ambient&&make("flow").key==flow,
+            "unused translation state does not invalidate resolved inputs");
+        texturetranslation[0]=texture;
+        auto direct=make("lights_hf2").key;
+        auto grid=make("grid_hf2").key;
+        const auto sourceCount=bakeSources.size();
+        bakeSources.reserve(sourceCount+32);
+        require(make("lights_hf2").key==direct,"vector capacity is not a semantic input");
+        bakeSources.push_back({1,2,3,100,.5f,.4f,{1,.5f,.25f}});
+        require(make("lights_hf2").key!=direct&&make("grid_hf2").key!=grid&&make("ambient").key==ambient,
+            "source change invalidates direct and grid independently of ambient");
+        auto withLight=make("lights_hf2").key;
+        bakeSources.back().strength+=0.25f;
+        require(make("lights_hf2").key!=withLight,"source strength enters production key");
+        bakeSources.resize(sourceCount);
+        auto bounceA=make("bounce",[](BakeKeyHash &h){h.component(1);}).key;
+        auto bounceB=make("bounce",[](BakeKeyHash &h){h.component(2);}).key;
+        require(bounceA!=bounceB,"upstream bytes enter bounce key");
+        require(std::string(algorithmFor("sun"))!=algorithmFor("lights_hf2"),"algorithm domains separated");
+        require(BakeCache("storage-test",{cacheChannel(bytes,0,511)}).key!=test.key,"output layout enters key");
+        uint8_t dummy=0;
+        BakeCache oversized("storage-test",{{&dummy,size_t(entryLimit+1),1,1}});
+        require(!oversized.restore()&&oversized.expected==entryLimit+1&&
+            !strcmp(oversized.readResult,"BYPASS_ENTRY_TOO_LARGE"),"oversized bypass");
+        BakeCache overflowing("storage-test",{{&dummy,std::numeric_limits<size_t>::max(),4,1}});
+        require(!overflowing.restore()&&!strcmp(overflowing.readResult,"RESOURCE_LIMIT"),"strided field overflow");
         int map=gamemap;++gamemap;BakeCache mapChange("storage-test",{cacheChannel(bytes,0,512)});
         require(mapChange.key!=test.key,"map identity");gamemap=map;
         test.store();std::ifstream input(fs::u8path(test.path),std::ios::binary);
@@ -292,17 +571,23 @@ int BakeCache::selfTest() {
         require(test.restore(),"round trip restore");require(bytes==original,"strided channels and untouched channels");
         auto unchanged=bytes;
         auto damaged=valid;damaged.back()^=7;replace(damaged);
-        require(!test.restore()&&bytes==unchanged,"checksum rejection is transactional");
+        require(!test.restore()&&bytes==unchanged&&!strcmp(test.readResult,"REJECTED_CHECKSUM"),
+            "checksum rejection is transactional");
         damaged=valid;damaged.resize(20);replace(damaged);
-        require(!test.restore()&&bytes==unchanged,"truncated header");
+        require(!test.restore()&&bytes==unchanged&&!strcmp(test.readResult,"REJECTED_INVALID_HEADER"),"truncated header");
         damaged=valid;damaged.pop_back();replace(damaged);
-        require(!test.restore()&&bytes==unchanged,"truncated payload");
+        require(!test.restore()&&bytes==unchanged&&!strcmp(test.readResult,"REJECTED_SIZE_MISMATCH"),"truncated payload");
         damaged=valid;damaged[8]^=1;replace(damaged);
         require(!test.restore()&&bytes==unchanged,"obsolete version");
         damaged=valid;damaged[16]^=1;replace(damaged);
         require(!test.restore()&&bytes==unchanged,"wrong identity");
         damaged=valid;for(int i=32;i<40;++i)damaged[i]=char(0xff);replace(damaged);
         require(!test.restore()&&bytes==unchanged,"oversized allocation blocked");
+        damaged=valid;damaged[24]^=1;replace(damaged);
+        require(!test.restore()&&bytes==unchanged&&!strcmp(test.readResult,"REJECTED_SIZE_MISMATCH"),"wrong decoded length");
+        damaged=valid;damaged.resize(49);uint64_t encodedLength=1;
+        memcpy(damaged.data()+32,&encodedLength,sizeof(encodedLength));damaged[48]=char(0xff);replace(damaged);
+        require(!test.restore()&&bytes==unchanged&&!strcmp(test.readResult,"DECODE_FAILED"),"decode failure is transactional");
         replace(valid);require(test.restore(),"recovery from corruption");
         BakeCache aborted("storage-test",{cacheChannel(bytes,0,512)});
         bytes[0]^=1;injectWriteFailure=true;aborted.store();injectWriteFailure=false;
@@ -326,7 +611,34 @@ int BakeCache::selfTest() {
         fs::last_write_time(lru/"old.bake",fs::file_time_type::clock::now()-std::chrono::hours(1));
         {std::ofstream out(lru/"new.bake");out<<std::string(80,'b');}
         evict(lru,100);require(!fs::exists(lru/"old.bake")&&fs::exists(lru/"new.bake"),"LRU budget");
-        fs::remove(lru/"new.bake");fs::remove(lru);fs::remove(fs::u8path(test.path));
+        fs::remove(lru/"new.bake");fs::remove(lru);
+
+        // Competing writers use the same key while a reader tries the file.
+        // Every accepted snapshot must be an entire valid publication.
+        auto first=original,second=original;
+        first[0]^=0x31;second[0]^=0x73;
+        BakeCache writerA("storage-test",{cacheChannel(first,0,512)});
+        BakeCache writerB("storage-test",{cacheChannel(second,0,512)});
+        BakeCache reader("storage-test",{cacheChannel(bytes,0,512)});
+        std::atomic<bool> start{false};
+        auto publish=[&](BakeCache &writer) {
+            while(!start.load())SDL_Delay(1);
+            for(int i=0;i<4;++i)writer.store();
+        };
+        std::thread a(publish,std::ref(writerA));
+        std::thread b;
+        try {b=std::thread(publish,std::ref(writerB));}
+        catch(...) {start=true;a.join();throw;}
+        start=true;
+        bool validSnapshots=true;
+        for(int i=0;i<8;++i) {
+            if(reader.restore()&&bytes!=original&&bytes!=first&&bytes!=second)validSnapshots=false;
+            SDL_Delay(1);
+        }
+        a.join();b.join();
+        require(validSnapshots,"concurrent readers only publish complete snapshots");
+        require(reader.restore()&&(bytes==first||bytes==second),"concurrent publication produces a valid entry");
+        fs::remove(fs::u8path(test.path));
         fprintf(stderr,"CACHE STORAGE PASS %d checks\n",checks);return 1;
     } catch(const std::exception &e){fprintf(stderr,"CACHE STORAGE FAIL after %d checks: %s\n",checks,e.what());return 0;}
 }

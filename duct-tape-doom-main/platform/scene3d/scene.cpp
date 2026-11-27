@@ -823,6 +823,8 @@ FrameView prepareFrame(int w,int h) {
     float fraction=1;
     if(worldPending) {
         bool level=levelPending();
+        const bool loading=loadingOnThisThread();
+        if(loading)beginBakeCacheSession(level);
         if(level) {planStages(true);startLevel();}
         syncBakeThings();
         if(!level)planStages(false);
@@ -832,7 +834,10 @@ FrameView prepareFrame(int w,int h) {
         // keep the old source-driven bake current for when it is re-enabled.
         if(!settings.bakedLights&&doom_lighting_model::sourceDriven(previousLightingModel))lightBakeKey=-1;
         previousLightingModel=model;
+        if(loading)loadingLabel("Applying world lighting state");
+        const uint64_t reconcileStart=loading?SDL_GetTicksNS():0;
         relightMovingSectors();
+        if(loading)recordBakeReconcile(reconcileStart);
         stamp(0);
         if(settings.sun&&!sunBaked)bakeSun();
         bool sun=settings.sun&&sunLevel>0;
@@ -950,7 +955,9 @@ FrameView prepareFrame(int w,int h) {
             // Prepare the default sky even when sky color bakes are off.
             if(gamemode==commercial)wallImage(skytexture);
         }
+        const uint64_t bakeGeometryStart=loading?SDL_GetTicksNS():0;
         geometry(camera,fraction);
+        if(loading)recordBakeGeometry(bakeGeometryStart);
         stamp(2);
         profileAdd(profile.frame.geometryMs,geometryStart);
         if(profile.enabled)skipProfiledLights();

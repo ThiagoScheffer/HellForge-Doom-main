@@ -62,6 +62,29 @@ void findGlassWindows() {
     }
 }
 
+void hashGlassBakeInputs(BakeKeyHash &hash) {
+    hash.length(glassWindows.size());
+    if(glassWindows.empty())return;
+    hash.value(sunElevation);
+    const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);
+    hash.blob(palette,256*3);
+    std::map<const Image *,uint64_t> materials;
+    for(const auto &window:glassWindows) {
+        hash.fields(window.line,window.part,window.sector,window.ax,window.ay,window.ux,window.uy,
+                    window.nx,window.ny,window.length,window.bottom,window.top,window.u,window.anchor);
+        const auto &image=*window.image;
+        auto [it,inserted]=materials.try_emplace(&image);
+        if(inserted) {
+            BakeKeyHash material;
+            material.fields(image.width,image.height);
+            material.blob(image.pixels.data(),image.pixels.size());
+            material.blob(image.emission.data(),image.emission.size());
+            it->second=material.result();
+        }
+        hash.component(it->second);
+    }
+}
+
 void addGlassLight(const BakeMap &map,int sector,float x,float y,float z,const float normal[3],float out[3]) {
     if(glassWindows.empty())return;
     const byte *palette=(const byte*)W_CacheLumpName((char*)"PLAYPAL",PU_CACHE);

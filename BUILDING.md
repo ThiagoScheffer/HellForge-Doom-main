@@ -94,14 +94,16 @@ classic-frame and save/load check. See
 [the compatibility report](docs/changes/BIG-WAD-COMPATIBILITY.md) for commands and
 the distinction between smoke coverage and campaign completion.
 
-Reload stability and persistent map-lighting cache checks use only original Doom II:
+Reload stability and persistent map-lighting cache checks use an original Doom II IWAD.
+Run the same command with the original Doom IWAD in a separate output directory to exercise E1M1 restart.
 
 ```powershell
 cmake --build build --config Release --target doom doom-reload-smoke --parallel 8
-python duct-tape-doom-main/tests/reload_cache.py --iwad test-references/DOOM2.WAD --engine build/Release/doom-reload-smoke.exe --out build/reload-release-verification --cycles 10
+python duct-tape-doom-main/tests/reload_cache.py --iwad test-references/DOOM2.WAD --engine build/Release/doom-reload-smoke.exe --out build/reload-release-verification --cycles 10 --samples 5
 ctest --test-dir build -C Release -E "^bigmap-" --output-on-failure
 ```
 
+Use `-verifybakecache` with an isolated cache to compare restored channels to a reference bake.
 Keep `build/Release/doom.pdb` with the matching engine build for crash analysis. See [reload/cache details](docs/changes/RELOAD-LIGHTING-CACHE.md).
 
 ## Monster performance diagnostics and current controls

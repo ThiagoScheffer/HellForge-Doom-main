@@ -17,6 +17,14 @@ This is the project’s running record of bugs, investigations, and fixes. Use t
 | HF-009 | Launcher release output omits upstream notices | Notice copies verified |
 | HF-010 | Burning City smoke has rectangular edges | Fix committed. In-game visual check open |
 
+## Smart Persistent Lighting Cache 2.0 — M1
+
+Original Doom E1M1 repeated all six static calculations on death restart and produced the same numeric results. The old key included unrelated animation-table state. Doom II MAP01 also showed misleading baking labels on actual cache hits. M1 uses stage-specific numerical inputs and reports lookup, restoration, calculation and GPU staging independently.
+
+The Release build and all 48 configured CTests passed. E1M1 restored six stages with zero ordinary bake dispatches. MAP01 passed ten warm restarts, ten warm save reloads, and a return from MAP02. The Sunder MAP02 direct-light entry exceeded 64 MiB and was reported separately while the other stages restored.
+
+[Dependency audit, benchmarks and regression coverage](docs/changes/RELOAD-LIGHTING-CACHE.md#smart-persistent-lighting-cache-20--m1)
+
 ## Universal Atmospheric Fog — Sprite Coverage Fix
 
 The world shader now resolves sprite exposure from the world-position sector lookup for every active haze profile. Monsters, decorations, pickups, and other world sprite draws use the same outdoor exposure and view-depth fog equations as nearby geometry. Deimos retains its whiteout equation.

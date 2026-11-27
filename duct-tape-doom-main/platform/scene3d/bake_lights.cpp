@@ -601,10 +601,13 @@ void bakeLights() {
     BakeCache cache("lights_hf2",{cacheChannel(flatLightCells,0,(size_t)mapWidth*mapHeight*2,3),
         cacheWallChannel(wallBakeCells,atlasHeight,0,3),cacheField(wallDirectionCells),cacheField(flatDirectionCells)});
     if(!cache.restore()) {
+    cache.dispatch(mapHeight);
     parallelFor(mapHeight,[&](int y) {for(int x=0;x<mapWidth;++x)lightCell(bakeMap,(size_t)y*mapWidth+x,directed);});
+    cache.dispatch((int)bakeOrder.size());
     parallelFor((int)bakeOrder.size(),[&](int n) {lightStrip(bakeMap,bakeStrips[bakeOrder[n]],directed);});
     cache.store();
     }
+    cache.beginUpload();
     uploadFlatLight();
     uploadWallBake();
     wallDirectionTexture=nullptr;flatDirectionTexture=nullptr;
@@ -613,9 +616,10 @@ void bakeLights() {
         flatDirectionTexture=gpuCreateTexture(GpuFormat::RGBA8,mapWidth,mapHeight*2,flatDirectionCells.data(),mapWidth*4);
         if(!wallDirectionTexture||!flatDirectionTexture)I_Error((char*)"Could not allocate surface maps");
     }
+    cache.endUpload();
     classifyLampSectors();
-    fprintf(stderr,"3D lights: %zu static lights (%zu window panels)%s baked in %.0f ms.\n",sources.size(),sources.size()-firstWindowSource,
-        only?(", "+std::to_string(bakeAreas.size())+" pools, bake-only").c_str():"",(SDL_GetTicksNS()-start)/1e6);
+    fprintf(stderr,"3D lights: %zu static lights (%zu window panels)%s %s; stage %.0f ms.\n",sources.size(),sources.size()-firstWindowSource,
+        only?(", "+std::to_string(bakeAreas.size())+" pools, bake-only").c_str():"",cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 void lightBakeNewLevel() {
     lightBakeKey=-1;

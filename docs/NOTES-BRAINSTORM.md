@@ -174,7 +174,7 @@ teleports - from gate1 to  gate4 textures - give a moving and pulsating effect a
  w65b_1 w65b_2 - a fire and blue like plasma - create depth and immersion as it the wall is pulsing and hot the blue plasma is melting.
  
  from (w73a_1 to w74b_1 + also this  from wall22_1 to wall23_2) textures of a fire like wall - create a indepth feeling of a wall that is alive and burning, as a dense fire is consuming it infite fire effect.
- 
+ ---------------------------------------------------
  
  
  
@@ -382,8 +382,13 @@ imps will not trigger attacking anymore if there are other imps in from of them,
 
 bigmedkits: will break out into small ones of player health is full after it got it and still have some value left: example: player is 90 of life, pass and get a bigmedikt health go 100 and the medkit still have health points on it, it will drop a smallpack of left health, or a small pack of the ingame small medkit on ground, so player can use it later.
 
-texture immersion:
+texture immersion: = need review
 on acid and lava textures grounds, create options to show small bubles forming and poping up - to increase immerison when player lookt at it.
+
+Bloodpool on dead body -after a body is static and start the blood pool, if its near stairs or pits,create the same blood effect as when a monster get shoot near walls, so the blood will drip down, from the textures, this is to create a more realist approach to blood pools on ground, so it simulate like the blood is liquid and is flowing down pits or stairs, and not look likea flat static like. 
+for performance keep blood pool low than 50, if map has less then 300 monster
+
+
 
 
 Hud speedrun improvements:
@@ -405,7 +410,7 @@ adjust acid and lava bubbles size much bigger - current cannot be seem - too sma
 
 
 sames as commit 9083cb569c926dc271cca3f7fd7d250f6e05c970: Deimos fog now covers outdoor decorations and monsters at the same depth as the surrounding walls.
-Other foggy atmosphere like Burning city or Hell - need same fix.
+what need to fix: Other foggy atmosphere like Burning city or Hell - need same fix, so any foggy ambient can make immersive monster and items.
 
 
 
@@ -430,7 +435,13 @@ current gibs assets all dark no light, some assets looks like have a dark stroke
 
 
 
+when player dies, a bloody melt effect appears on screen
 
+
+immersion - when player steps on water,blood,mud pools textures - similar to blood effect can be used, to display a short footsteps effect on ground.
+
+
+update near-miss bullet sounds and other fx
 
 notes to ideas:
 
@@ -443,6 +454,9 @@ can we add items a small grounded shadow? avoiding it shadow to look weird or fl
 
 
 Logical lights only?
+
+
+
 
 
 

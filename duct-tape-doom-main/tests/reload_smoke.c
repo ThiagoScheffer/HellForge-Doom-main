@@ -26,7 +26,9 @@ extern void I_TestMaterialDestruction(bool verify);
 extern int I_TestRelightRunning(void);
 extern void I_TestNativeCrash(void);
 static int storageMode,crashMode,autoLoadMode,startupMode,relightQuitMode;
-static int lightingModelsMode;
+static int lightingModelsMode,cacheSavedWorld,revisitMode;
+static int savedSector,savedLight;
+static fixed_t savedCeiling;
 static int materialAuditMode,materialFlickerMode,materialDestructionMode;
 extern int g_death_load_last_save;
 static int stage,begin,initialSerial,frames,cycles,goal=10,saveMode;
@@ -73,6 +75,21 @@ void I_TestFrame(void) {
         if(frames>300){fprintf(stderr,"RELIGHT QUIT FAIL: no active worker\n");exit(6);}
         return;
     }
+    if(revisitMode) {
+        if(stage==0&&frames>=4) {
+            G_DeferedInitNew(gameskill,gameepisode,2);
+            stage=1;
+        } else if(stage==1&&gamemap==2) {
+            G_DeferedInitNew(gameskill,gameepisode,1);
+            stage=2;
+        } else if(stage==2&&gamemap==1) {
+            stage=3;
+        } else if(stage==3) {
+            fprintf(stderr,"CACHE REVISIT PASS\n");
+            I_Quit();
+        }
+        return;
+    }
     if(startupMode) {
         if(frames>=4){fprintf(stderr,"STARTUP PASS 4 frames; normal quit\n");I_Quit();}
         return;
@@ -87,6 +104,14 @@ void I_TestFrame(void) {
         if(storageMode){if(!I_TestBakeCacheStorage())exit(5);I_Quit();}
         effects();begin=gametic;stage=2;
         if((saveMode||autoLoadMode)&&cycles==0){
+            if(cacheSavedWorld) {
+                sector_t *sector=players[0].mo->subsector->sector;
+                savedSector=(int)(sector-sectors);
+                sector->ceilingheight+=16*FRACUNIT;
+                sector->lightlevel^=16;
+                savedCeiling=sector->ceilingheight;
+                savedLight=sector->lightlevel;
+            }
             players[0].armorpoints=77;
             G_SaveGame(7,"RELOAD REGRESSION");
         }
@@ -127,6 +152,12 @@ void I_TestFrame(void) {
         event_t key={ev_keydown,key_use,0,0};D_PostEvent(&key);stage=4;
     }
     if(stage==4&&r_levelserial!=initialSerial) {
+        if(cacheSavedWorld) {
+            if(sectors[savedSector].ceilingheight!=savedCeiling||sectors[savedSector].lightlevel!=savedLight) {
+                fprintf(stderr,"CACHE SAVED WORLD FAIL\n");exit(10);
+            }
+            fprintf(stderr,"CACHE SAVED WORLD PASS sector=%d ceiling=%d light=%d\n",savedSector,savedCeiling,savedLight);
+        }
         event_t key={ev_keyup,key_use,0,0};D_PostEvent(&key);stage=5;begin=gametic;
     }
     if(stage==5&&gametic>begin+15) {
@@ -144,6 +175,7 @@ int main(int argc,char **argv) {
     if(argc<5)return 2;
     autoLoadMode=!strcmp(argv[3],"autoload");
     startupMode=!strcmp(argv[3],"startup");
+    revisitMode=!strcmp(argv[3],"revisit");
     lightingModelsMode=!strcmp(argv[3],"lighting-models");
     materialAuditMode=!strcmp(argv[3],"material-audit");
     materialFlickerMode=!strcmp(argv[3],"material-flicker");
@@ -165,6 +197,8 @@ int main(int argc,char **argv) {
         "-width","960","-height","540"};
     for(size_t i=0;i<sizeof(defaults)/sizeof(*defaults);++i)args[count++]=defaults[i];
     for(int i=5;i<argc&&count<127;++i)args[count++]=argv[i];
-    myargc=count;myargv=args;I_RunEngine(D_DoomMain);return 0;
+    myargc=count;myargv=args;
+    cacheSavedWorld=saveMode&&M_CheckParm((char*)"-cache-saved-world");
+    I_RunEngine(D_DoomMain);return 0;
 }
 

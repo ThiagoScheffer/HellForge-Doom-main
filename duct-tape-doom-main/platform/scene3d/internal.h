@@ -962,6 +962,7 @@ inline void profileAdd(double &total,uint64_t start) {if(profile.enabled)total+=
 enum class LoadStage { Map, Textures, Sun, Lights, Grid, Bounce, Ambient, Flow, Count };
 void planLoading(LoadStage stage,bool planned);
 void loadingStage(LoadStage stage);
+void loadingLabel(const char *label);
 void loadingTick(float part=-1);
 bool loadingOnThisThread();
 // Whether the next world frame builds a level or bakes (scene.cpp).

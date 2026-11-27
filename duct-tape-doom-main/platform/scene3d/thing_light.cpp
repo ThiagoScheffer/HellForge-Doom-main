@@ -99,19 +99,18 @@ void bakeStaticGrid() {
     BakeCache cache("grid_hf2",{{&staticGrid[0].used,staticGrid.size(),sizeof(StaticCell),1},
         {&staticGrid[0].low,staticGrid.size(),sizeof(StaticCell),2*sizeof(float)},
         {&staticGrid[0].at,staticGrid.size(),sizeof(StaticCell),2*sizeof(StaticSample)}});
-    std::atomic<size_t> used{0};
     if(!cache.restore()) {
+    cache.dispatch(staticHeight);
     parallelFor(staticHeight,[&](int gy) {
         for(int gx=0;gx<staticWidth;++gx) {
             StaticCell &cell=staticGrid[(size_t)gy*staticWidth+gx];
             cell=staticCellAt(bakeMap,gx,gy);
-            if(cell.used)++used;
         }
     });
     cache.store();
     }
-    used=std::count_if(staticGrid.begin(),staticGrid.end(),[](const StaticCell &cell){return cell.used;});
-    fprintf(stderr,"3D light grid: %zu cells of %dx%d, baked in %.0f ms.\n",used.load(),staticWidth,staticHeight,(SDL_GetTicksNS()-start)/1e6);
+    const auto used=std::count_if(staticGrid.begin(),staticGrid.end(),[](const StaticCell &cell){return cell.used;});
+    fprintf(stderr,"3D light grid: %zu cells of %dx%d, %s; stage %.0f ms.\n",(size_t)used,staticWidth,staticHeight,cache.outputSource(),(SDL_GetTicksNS()-start)/1e6);
 }
 // The grid's blend at (x,y,z): bilinear over used cells, between each
 // cell's two heights. The flicker group is the heaviest cell's; the shadow

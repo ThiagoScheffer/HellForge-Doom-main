@@ -11,8 +11,8 @@ extern "C" {
 namespace doom3d {
 namespace {
 constexpr int stageCount=(int)LoadStage::Count;
-const char *const stageNames[stageCount]={"Building the map","Preparing textures","Baking sunlight","Baking lights",
-    "Lighting things","Bouncing light","Baking sky light","Tracing light flow"};
+const char *const stageNames[stageCount]={"Preparing world","Preparing textures","Sunlight","Static lighting",
+    "Sprite lighting","Bounce lighting","Ambient lighting","Sector light flow"};
 // Each stage's share of the bar, in milliseconds: the last load's times,
 // first these (Freedoom's E1M1 with the default options).
 double stageMs[stageCount]={60,400,100,2000,30,120,250,25};
@@ -22,7 +22,8 @@ struct Pass {
     LoadingShow show=nullptr;
     std::thread::id thread;
     bool planned[stageCount]={},level=false;
-    int stage=-1,loop=0;
+    int stage=-1,loop=0,shownStage=-1;
+    const char *label=nullptr;
     float part=0,loopPart=0;
     uint64_t start=0,stageStart=0,shown=0;
     double took[stageCount]={};
@@ -47,10 +48,15 @@ void loadingStage(LoadStage stage) {
     if(!pass.show)return;
     uint64_t now=SDL_GetTicksNS();
     endStage(now);
-    fprintf(stderr,"3D loading stage: %s\n",stageNames[(int)stage]);fflush(stderr);
+    pass.label=(int)stage<(int)LoadStage::Sun?stageNames[(int)stage]:"Preparing lighting";
+    fprintf(stderr,"3D loading stage: %s\n",pass.label);fflush(stderr);
     pass.stage=(int)stage;pass.part=0;pass.loop=0;pass.loopPart=0;pass.stageStart=now;
     if(stage==LoadStage::Map)pass.level=true;
-    loadingTick();
+    if(stage==LoadStage::Map||stage==LoadStage::Textures)loadingTick();
+}
+void loadingLabel(const char *label) {
+    if(!loadingOnThisThread())return;
+    pass.label=label;
 }
 bool loadingOnThisThread() {return pass.show&&std::this_thread::get_id()==pass.thread;}
 static const char *title() {
@@ -70,9 +76,12 @@ void loadingTick(float part) {
         pass.part=std::max(pass.part,base+(1-base)*0.5f*std::min(part,1.0f));
     }
     else if(pass.stage>=0)pass.part=std::max(pass.part,(float)std::min(0.9,(now-pass.stageStart)/1e6/stageMs[pass.stage]));
+    // Each bake stage gets one standalone update at most, as before.
+    // The actual calculation keeps its normal worker progress updates.
+    if(part<0&&pass.stage>=(int)LoadStage::Sun&&pass.shownStage==pass.stage)return;
     if(now-pass.start<showAfter||now-pass.shown<redrawEvery)return;
-    pass.shown=now;
-    pass.show(title(),pass.stage>=0?stageNames[pass.stage]:"",fraction());
+    pass.shown=now;pass.shownStage=pass.stage;
+    pass.show(title(),pass.label?pass.label:"",fraction());
 }
 void runLoading(int width,int height,LoadingShow show) {
     pass=Pass{};
@@ -80,6 +89,7 @@ void runLoading(int width,int height,LoadingShow show) {
     prepareFrame(width,height);
     uint64_t now=SDL_GetTicksNS();
     endStage(now);
+    endBakeCacheSession(pass.start,pass.took[(int)LoadStage::Map]);
     // A full bar to finish, if the screen was up, so it does not vanish part way.
     if(pass.shown)pass.show(title(),"",1);
     std::string times;
