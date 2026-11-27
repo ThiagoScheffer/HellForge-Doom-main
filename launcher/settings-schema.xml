@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="70b3e5e25a6663e0367247296a0aa5d69c8869ea172db8f1a04ceb1ea5de2a82">
+<settings source="platform/settings_panel.cpp" source_sha256="1a93cee8b20236a89218ff6ab48f94fe73eab977612348a9d1dde70f3b9ba0f9">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -215,6 +215,7 @@
   <option key="footprint_mud" title="Muddy footprints" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="footprint_persistence" title="Footprint persistence" category="Atmosphere" kind="choice" choices="0=Short|1=Normal|2=Long" />
   <option key="fog" title="Atmospheric fog" category="Atmosphere" kind="check" choices="0=Off|1=On" />
+  <option key="fog_light_budget" title="Local fog lights" category="Atmosphere" kind="choice" choices="1=Performance|2=Balanced|4=High (Legacy)" />
   <option key="sun_shafts" title="Sunbeams" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="sun_scatter" title="Sunbeam scattering" category="Atmosphere" kind="check" choices="0=Off|1=On" />
   <option key="immersive_sky" title="Immersive sky environment" category="Atmosphere" kind="choice" choices="0=Off (original sky)|1=Auto (DOOM episodes)|2=Rocky mountains|3=Ice mountains|4=Inferno|5=Burning city" />

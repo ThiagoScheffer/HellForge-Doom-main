@@ -8,7 +8,8 @@
 extern "C" {
 #include "p_local.h"
 #include "doomstat.h"
-extern int wp_test_sight;
+extern int wp_test_sight,wp_test_block_visits,wp_test_block_cells;
+extern mobj_t *wp_test_hidden;
 extern mobj_t *wp_test_last_source;
 extern int wp_test_rng_value,wp_test_rng_calls,wp_test_damage_calls;
 }
@@ -18,14 +19,38 @@ static void check(bool ok,const char *why){if(!ok){std::fprintf(stderr,"FAIL %s\
 static mobjinfo_t info{};
 static player_t player{};
 static mobj_t source{},target{};
+static mobj_t *testBlocks[16*16];
+static mobj_t **blockHead(const mobj_t *m) {
+    const auto x=(int64_t(m->x)-bmaporgx)>>MAPBLOCKSHIFT;
+    const auto y=(int64_t(m->y)-bmaporgy)>>MAPBLOCKSHIFT;
+    if(!blocklinks||(m->flags&MF_NOBLOCKMAP)||x<0||x>=bmapwidth||y<0||y>=bmapheight)return nullptr;
+    return &blocklinks[y*bmapwidth+x];
+}
+static void unlinkBlock(mobj_t *m) {
+    auto **head=blockHead(m);
+    if(!head)return;
+    if(m->bprev)m->bprev->bnext=m->bnext;
+    else *head=m->bnext;
+    if(m->bnext)m->bnext->bprev=m->bprev;
+    m->bnext=m->bprev=nullptr;
+}
 static void link(mobj_t *m) {
     m->thinker.function.acp1=(actionf_p1)P_MobjThinker;
     m->thinker.prev=thinkercap.prev;m->thinker.next=&thinkercap;thinkercap.prev->next=&m->thinker;thinkercap.prev=&m->thinker;
+    if(auto **head=blockHead(m)) {
+        m->bprev=nullptr;
+        m->bnext=*head;
+        if(*head)(*head)->bprev=m;
+        *head=m;
+    }
 }
 static void reset(int type=MT_TROOP) {
     P_WeakpointClear();P_CombatConfigureDot(0);P_HudConfigure(0);P_SessionReset();P_CombatConfigure(0,0);P_CombatCompatible=nullptr;P_CombatStagger=nullptr;P_CombatDonor=nullptr;P_WeakpointConfigureEyes(0);P_WeakpointConfigureFeeding(0);P_WeakpointConfigureExtras(0,0);
     P_WeakpointFoodPath=nullptr;P_WeakpointFoodMove=nullptr;P_WeakpointFoodRetreat=nullptr;P_WeakpointFoodAnimate=nullptr;P_WeakpointFoodWake=nullptr;P_WeakpointFoodConsume=nullptr;P_WeakpointPainVoice=nullptr;
     for(auto &p:players)p={};wp_test_sight=1;thinkercap.next=thinkercap.prev=&thinkercap;
+    for(auto &head:testBlocks)head=nullptr;
+    blocklinks=testBlocks;bmapwidth=bmapheight=16;bmaporgx=bmaporgy=0;
+    wp_test_block_visits=wp_test_block_cells=0;wp_test_hidden=nullptr;
     source={};target={};info={};player={};source.player=&player;
     target.type=(mobjtype_t)type;target.flags=MF_SHOOTABLE;target.health=1000;info.spawnhealth=1000;target.info=&info;
     leveltime=10;wp_test_rng_calls=wp_test_damage_calls=0;wp_test_rng_value=0;
@@ -213,8 +238,8 @@ static void bleedingAndFrenzy() {
     }
     for(auto type:{MT_FATSO,MT_KNIGHT,MT_BRUISER})for(int scenario=0;scenario<7;++scenario) {
         reset(type);P_WeakpointConfigureExtras(0,1);p_wp_balance.frenzyChance=40;wp_test_rng_value=scenario==1?103:102;
-        mobj_t other{};other.type=target.type;other.flags=MF_SHOOTABLE|MF_COUNTKILL;other.health=100;other.x=100*FRACUNIT;link(&other);
-        if(scenario==4)wp_test_sight=0;if(scenario==5)other.x=513*FRACUNIT;
+        mobj_t other{};other.type=target.type;other.flags=MF_SHOOTABLE|MF_COUNTKILL;other.health=100;other.x=(scenario==5?513:100)*FRACUNIT;link(&other);
+        if(scenario==4)wp_test_sight=0;
         auto weapon=scenario==2?wp_shotgun:wp_supershotgun;P_WeakpointBeginShot(&source,weapon);
         for(int i=0;i<4;++i){e=event(WP_SHOTGUN_PELLET,WP_HEAD,1);e.impact.distance=scenario==3?128.1f:128;
             if(scenario==6)e.impact.confidence=0;P_WeakpointApply(&e);}
@@ -271,6 +296,96 @@ static void bleedingAndFrenzy() {
 #include "eye_injury_rules.inc"
 #include "elemental_rules.inc"
 #include "elemental2_rules.inc"
+static void spatialAcquisition() {
+    const auto balance=p_wp_balance;
+    mobjinfo_t preyInfo{};
+    preyInfo.flags=MF_COUNTKILL;
+    auto prey=[&](mobj_t &m,int x,int y=0) {
+        m={};m.type=MT_TROOP;m.flags=MF_SHOOTABLE|MF_COUNTKILL;m.health=100;
+        m.info=&preyInfo;m.x=x*FRACUNIT;m.y=y*FRACUNIT;
+        link(&m);
+    };
+
+    feedingFixture();
+    std::vector<mobj_t> distant(300);
+    for(auto &m:distant){m.x=1024*FRACUNIT;link(&m);}
+    mobj_t near{};
+    prey(near,130);
+    p_wp_balance.feedRadius=130;
+    P_WeakpointFeedingTick(&target);
+    check(target.target==&near&&wp_test_block_visits==3&&wp_test_block_cells==4,
+          "edge search includes prey exactly at radius after 300 distant thinkers");
+
+    feedingFixture();
+    prey(near,130,1);
+    P_WeakpointFeedingTick(&target);
+    check(!target.target&&wp_test_block_visits==3,"food in a queried cell but outside configured radius is rejected");
+
+    feedingFixture();
+    std::vector<mobj_t> dense(270);
+    for(auto &m:dense)prey(m,4);
+    static int pathCalls=0;
+    pathCalls=0;P_WeakpointFoodPath=+[](mobj_t*,mobj_t*)->int{++pathCalls;return 0;};
+    P_WeakpointFeedingTick(&target);
+    check(!target.target&&wp_test_block_visits==256&&wp_test_block_cells==1&&pathCalls==8,
+          "feeding stops at 256 local things and validates at most eight routes");
+
+    feedingFixture();
+    prey(near,4);
+    mobj_t predators[4];
+    for(auto &m:predators){m=target;link(&m);}
+    P_WeakpointFeedingTick(&target);
+    for(auto &m:predators)P_WeakpointFeedingTick(&m);
+    check(target.target==&near&&predators[0].target==&near&&predators[1].target==&near&&
+          predators[2].target==&near&&!predators[3].target,"four new feeding searches per tic");
+    ++leveltime;P_WeakpointFeedingTick(&predators[3]);
+    check(predators[3].target==&near,"deferred predator can search next tic");
+
+    for(int invalid=0;invalid<4;++invalid) {
+        feedingFixture();
+        prey(near,4);
+        if(invalid==0)blocklinks=nullptr;
+        if(invalid==1)bmapheight=0;
+        if(invalid==2)bmapwidth=INT_MAX;
+        if(invalid==3){target.x=INT_MIN;bmaporgx=INT_MAX;}
+        P_WeakpointFeedingTick(&target);
+        check(!target.target&&!wp_test_block_cells,"invalid or disjoint BLOCKMAP skips iteration");
+    }
+
+    reset(MT_KNIGHT);
+    P_WeakpointConfigureExtras(0,1);p_wp_balance.frenzyChance=100;p_wp_balance.frenzySearch=200;
+    prey(near,150);
+    mobj_t far{},outside{},dead{},unshootable{},hidden{};
+    prey(far,180);prey(outside,201);prey(dead,2);prey(unshootable,3);prey(hidden,4);
+    dead.health=0;unshootable.flags&=~MF_SHOOTABLE;wp_test_hidden=&hidden;
+    for(auto &m:dense){m={};link(&m);}
+    P_WeakpointBeginShot(&source,wp_supershotgun);
+    auto hit=event(WP_SHOTGUN_PELLET,WP_HEAD,1);P_WeakpointApply(&hit);P_WeakpointEndShot();
+    check(target.target==&near&&target.threshold==100&&wp_test_block_visits>256,
+          "frenzy searches past dense cells for the nearest valid visible target");
+    P_WeakpointForget(&near);unlinkBlock(&near);
+    P_WeakpointFrenzyTarget(&target);
+    check(target.target==&far,"frenzy reacquires after target removal");
+    P_WeakpointForget(&far);unlinkBlock(&far);
+    P_WeakpointFrenzyTarget(&target);
+    check(!target.target&&!P_WeakpointFrenzied(&target),"out-of-radius and invalid frenzy candidates stay excluded");
+
+    reset(MT_SPIDER);
+    P_WeakpointConfigureEyes(1);p_wp_balance.eyeChance=100;p_wp_balance.eyeSearchRange=140;
+    prey(outside,141);
+    P_WeakpointBeginShot(&source,wp_pistol);
+    hit=event(WP_BULLET,WP_BODY,1);hit.impact.eyeContact=1;P_WeakpointApply(&hit);P_WeakpointEndShot();
+    P_WeakpointFrenzyTarget(&target);
+    check(P_WeakpointEyeRage(&target)&&!target.target&&wp_test_block_cells==4,
+          "Eye Rage uses its configured BLOCKMAP and exact distance bounds");
+    prey(near,140);
+    leveltime+=TICRATE-1;P_WeakpointFrenzyTarget(&target);
+    check(!target.target&&wp_test_block_cells==4,"Eye Rage retains its one-second retry interval");
+    ++leveltime;P_WeakpointFrenzyTarget(&target);
+    check(target.target==&near&&target.threshold==100,"Eye Rage acquires a victim at its configured radius");
+    p_wp_balance=balance;
+    reset();
+}
 static void severeCriticalRules() {
     static int bursts;
     static wp_severe_burst_t last;
@@ -347,7 +462,7 @@ static void severeCriticalRules() {
     P_SevereBloodTint=nullptr;totalkills=0;
 }
 int main() {
-    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();elementalRules();elemental2Rules();
+    matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();elementalRules();elemental2Rules();spatialAcquisition();
     severeCriticalRules();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");

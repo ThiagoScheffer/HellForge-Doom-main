@@ -68,6 +68,11 @@ pair/provenance before applying ordinary same-species immunity. Shooter immunity
 missile ownership, ordinary damage and unrelated same-species immunity remain intact.
 The native Knight/Baron family rule is supported alongside exact species matches.
 
+Frenzy and Spider Mastermind Eye Rage reacquire the nearest valid visible target
+from local BLOCKMAP cells within their respective configured search radii.
+Equal-distance candidates are resolved in BLOCKMAP traversal order. Eye Rage
+keeps its one-second retry interval.
+
 Frenzy expiry retains an established hostile opponent instead of forcibly clearing
 it; subsequent ordinary AI can still acquire another target normally. Turning off
 new frenzy triggers does not make an already-established duel invulnerable again.
@@ -91,13 +96,16 @@ overall window. New validated graphics keys are:
 | `wp_feed_vile_damage` | 24 HP | 1–100 |
 | `wp_feed_vile_reach` | 96 units | 32–128 |
 
-New searches still share the four-search-per-tic budget, 256 thinker-visit limit,
-eight route-candidate limit and periodic search interval. Successful live bites
-reuse their surviving prey; corpse completion returns to the budgeted search path.
+New feeding searches visit local BLOCKMAP cells from the predator's cell outward
+within the configured radius. The same four-search-per-tic budget, 256 BLOCKMAP
+thing visits per search, eight route checks per search and periodic interval apply.
+Successful live bites reuse their surviving prey. Consuming a corpse returns the
+predator to the budgeted search.
 Retreat tries at most five directions away from a threat, or eight directions while
 searching without one. This is local collision-aware steering, not a maze pathfinder
-or general projectile-dodging AI. The bounded scan can miss food outside its candidate
-window; a missed/unreachable meal correctly falls back to combat after the timeout.
+or general projectile-dodging AI. Dense cells can exhaust the visit budget before
+every eligible candidate is considered. If no meal is found, the predator returns
+to combat after the timeout.
 
 ## Persistence and focused verification
 

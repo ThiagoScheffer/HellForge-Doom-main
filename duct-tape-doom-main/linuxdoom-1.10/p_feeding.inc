@@ -38,14 +38,21 @@ void feedHeal(mobj_t *actor,int amount) {
 }
 mobj_t *findFood(mobj_t *actor) {
     MP_AUTO(MP_FEED);
-    MP_COLLECT;
     struct Candidate {mobj_t *actor;double distance;bool corpse;};
-    std::vector<Candidate> choices;choices.reserve(16);int visited=0;
+    std::vector<Candidate> choices;choices.reserve(16);
     auto* danger=foodDanger(actor,std::max(p_wp_balance.feedRadius,p_wp_balance.feedThreat));
-    for(auto *t=thinkercap.next;t!=&thinkercap&&visited<256;t=t->next,++visited){
-        if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
-        MP_LOCAL_COUNT(MP_FEED_CANDIDATE,1);auto *other=(mobj_t*)t;if(foodValid(actor,other)&&(!danger||foodDistance(other,danger)>p_wp_balance.feedThreat))choices.push_back({other,foodDistance(actor,other)+(danger?std::max(0.,foodDistance(actor,danger)-foodDistance(other,danger))*2:0),other->health<=0});
-    }
+    struct Search {mobj_t *actor,*danger;std::vector<Candidate> &choices;};
+    Search search{actor,danger,choices};
+    queryLocalThings(actor,p_wp_balance.feedRadius,[](mobj_t *other,void *context){
+        MP_COLLECT;
+        MP_LOCAL_COUNT(MP_FEED_CANDIDATE,1);
+        auto &search=*static_cast<Search*>(context);
+        auto *actor=search.actor,*danger=search.danger;
+        if(foodValid(actor,other)&&(!danger||foodDistance(other,danger)>p_wp_balance.feedThreat)){
+            const double penalty=danger?std::max(0.,foodDistance(actor,danger)-foodDistance(other,danger))*2:0;
+            search.choices.push_back({other,foodDistance(actor,other)+penalty,other->health<=0});
+        }
+    },&search,256);
     std::stable_sort(choices.begin(),choices.end(),[](const auto &a,const auto &b){return a.corpse!=b.corpse?a.corpse>b.corpse:a.distance<b.distance;});
     int tested=0;for(const auto &choice:choices){if(++tested>8)break;if(P_WeakpointFoodPath&&P_WeakpointFoodPath(actor,choice.actor))return choice.actor;}
     return nullptr;

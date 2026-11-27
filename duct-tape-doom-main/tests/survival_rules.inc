@@ -6,7 +6,7 @@ static void feedingFixture(int type=MT_SERGEANT) {
     P_WeakpointFoodPath=+[](mobj_t*,mobj_t*)->int{return foodPath;};
     P_WeakpointFoodMove=+[](mobj_t*)->int{++foodMoves;return 1;};
     P_WeakpointFoodAnimate=+[](mobj_t*){++foodAnimations;};
-    P_WeakpointFoodConsume=+[](mobj_t *m){++foodConsumed;m->flags=0;m->thinker.prev->next=m->thinker.next;m->thinker.next->prev=m->thinker.prev;P_WeakpointForget(m);};
+    P_WeakpointFoodConsume=+[](mobj_t *m){++foodConsumed;unlinkBlock(m);m->flags=0;m->thinker.prev->next=m->thinker.next;m->thinker.next->prev=m->thinker.prev;P_WeakpointForget(m);};
     P_WeakpointPainVoice=+[](mobj_t*){++painVoices;};
     P_WeakpointConfigureFeeding(1);
 }
@@ -38,9 +38,9 @@ static void survivalRules() {
     }
     for(auto species:{MT_SERGEANT,MT_HEAD})for(int scenario=0;scenario<8;++scenario){
         feedingFixture(species);mobjinfo_t preyInfo{};preyInfo.flags=MF_COUNTKILL;
-        mobj_t prey{};prey.info=&preyInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.x=16*FRACUNIT;prey.height=56*FRACUNIT;link(&prey);
+        mobj_t prey{};prey.info=&preyInfo;prey.type=MT_TROOP;prey.health=100;prey.flags=MF_SHOOTABLE;prey.x=(scenario==4?385:16)*FRACUNIT;prey.height=56*FRACUNIT;link(&prey);
         if(scenario==1)++target.health;if(scenario==2)foodPath=0;if(scenario==3)wp_test_sight=0;
-        if(scenario==4)prey.x=385*FRACUNIT;if(scenario==5)prey.type=MT_BRUISER;
+        if(scenario==5)prey.type=MT_BRUISER;
         if(scenario==6){players[0].mo=&source;source.health=100;}if(scenario==7)P_WeakpointConfigureFeeding(0);
         P_WeakpointTick(&target);check((bool)P_WeakpointFeeding(&target)==(scenario!=1&&scenario!=7),"low-health search survives missing food, blockers and threat; health/toggle gates remain");
         if(scenario==0){

@@ -407,7 +407,7 @@ focus on implementation and correct guided details here so vscode codex will wri
 
 adjust acid and lava bubbles size much bigger - current cannot be seem - too small
 
-
+acid bubbles and lava bubbles ->
 
 sames as commit 9083cb569c926dc271cca3f7fd7d250f6e05c970: Deimos fog now covers outdoor decorations and monsters at the same depth as the surrounding walls.
 what need to fix: Other foggy atmosphere like Burning city or Hell - need same fix, so any foggy ambient can make immersive monster and items.
@@ -442,6 +442,11 @@ when player dies, a bloody melt effect appears on screen
 
 
 immersion - when player steps on water,blood,mud pools textures - similar to blood effect can be used, to display a short footsteps effect on ground.
+
+
+performance problem: need check: when player go on top of the acid texture  and look direct at it with camera only focused to the acid pool, fps drop from 60 to 40 - only specific spot: a savegame named: lowfps with the correct position added for checking.
+
+
 
 
 update near-miss bullet sounds and other fx

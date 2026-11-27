@@ -36,6 +36,63 @@ int (*P_WeakpointLocate)(mobj_t*,mobj_t*,wp_impact_t*)=nullptr;
 int (*P_SevereBloodTint)(const mobj_t*)=nullptr;
 void (*P_SevereBloodBurst)(const wp_severe_burst_t*)=nullptr;
 namespace {
+struct LocalThingsQuery {
+    void (*process)(mobj_t*, void*);
+    void *context;
+    unsigned visitsLeft;
+    bool limited;
+};
+LocalThingsQuery *activeThingsQuery=nullptr;
+
+boolean visitLocalThing(mobj_t *other) {
+    auto &query=*activeThingsQuery;
+    if(other->thinker.function.acp1==(actionf_p1)P_MobjThinker)
+        query.process(other,query.context);
+    return !query.limited||--query.visitsLeft!=0;
+}
+
+void queryLocalThings(const mobj_t *actor,int radius,void (*process)(mobj_t*,void*),
+                      void *context,unsigned maxVisits=0) {
+    // The engine iterator indexes blocklinks with signed int arithmetic.
+    if(!blocklinks||bmapwidth<=0||bmapheight<=0||radius<0||
+       int64_t(bmapwidth)*bmapheight-1>INT_MAX)return;
+
+    const int64_t x=int64_t(actor->x)-bmaporgx,y=int64_t(actor->y)-bmaporgy;
+    const int64_t reach=int64_t(radius)*FRACUNIT;
+    const int xl=int(std::max<int64_t>(0,(x-reach)>>MAPBLOCKSHIFT));
+    const int xh=int(std::min<int64_t>(bmapwidth-1,(x+reach)>>MAPBLOCKSHIFT));
+    const int yl=int(std::max<int64_t>(0,(y-reach)>>MAPBLOCKSHIFT));
+    const int yh=int(std::min<int64_t>(bmapheight-1,(y+reach)>>MAPBLOCKSHIFT));
+    if(xl>xh||yl>yh)return;
+
+    const int cx=std::clamp(int(x>>MAPBLOCKSHIFT),xl,xh);
+    const int cy=std::clamp(int(y>>MAPBLOCKSHIFT),yl,yh);
+    const int lastRing=std::max({cx-xl,xh-cx,cy-yl,yh-cy});
+
+    LocalThingsQuery query{process,context,maxVisits,maxVisits!=0};
+    struct RestoreQuery {
+        LocalThingsQuery *previous;
+        ~RestoreQuery(){activeThingsQuery=previous;}
+    } restore{activeThingsQuery};
+    activeThingsQuery=&query;
+
+    // Visit each ring once, starting at the closest cell to the actor.
+    if(!P_BlockThingsIterator(cx,cy,visitLocalThing))return;
+    for(int ring=1;ring<=lastRing;++ring) {
+        const int left=cx-ring,right=cx+ring,top=cy-ring,bottom=cy+ring;
+        for(int by:{top,bottom}) {
+            if(by<yl||by>yh)continue;
+            for(int bx=std::max(xl,left);bx<=std::min(xh,right);++bx)
+                if(!P_BlockThingsIterator(bx,by,visitLocalThing))return;
+        }
+        for(int bx:{left,right}) {
+            if(bx<xl||bx>xh)continue;
+            for(int by=std::max(yl,top+1);by<=std::min(yh,bottom-1);++by)
+                if(!P_BlockThingsIterator(bx,by,visitLocalThing))return;
+        }
+    }
+}
+
 struct Runtime {
     hazard_kind_t hazardDeath=HAZARD_NONE;
     int hazardDeathTic=0;
@@ -493,6 +550,21 @@ static bool frenzyVictim(mobj_t *actor,mobj_t *other) {
     double range=(double)(P_WeakpointEyeRage(actor)?p_wp_balance.eyeSearchRange:p_wp_balance.frenzySearch)*FRACUNIT;
     return dx*dx+dy*dy<=range*range&&P_CheckSight(actor,other);
 }
+static mobj_t *findFrenzyVictim(mobj_t *actor,int radius) {
+    struct Search {mobj_t *actor,*best;double nearest;};
+    Search search{actor,nullptr,INFINITY};
+    queryLocalThings(actor,radius,[](mobj_t *other,void *context){
+        MP_COLLECT;
+        MP_LOCAL_COUNT(MP_FRENZY_CANDIDATE,1);
+        auto &search=*static_cast<Search*>(context);
+        const double dx=(double)other->x-search.actor->x,dy=(double)other->y-search.actor->y;
+        const double d=dx*dx+dy*dy;
+        if(d<search.nearest&&frenzyVictim(search.actor,other)){
+            search.nearest=d;search.best=other;
+        }
+    },&search);
+    return search.best;
+}
 void P_WeakpointFrenzyTarget(mobj_t *actor) {
     MP_AUTO(MP_FRENZY);
     auto it=runtime.find(actor);if(it==runtime.end())return;auto &r=it->second;
@@ -500,12 +572,8 @@ void P_WeakpointFrenzyTarget(mobj_t *actor) {
         if(!frenzyVictim(actor,r.eyeTarget)) {
             r.eyeTarget=nullptr;
             if(leveltime>=r.eyeSearch){
-                r.eyeSearch=leveltime+TICRATE;double nearest=INFINITY;
-                for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next){
-                    if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
-                    auto *other=(mobj_t*)t;double dx=(double)other->x-actor->x,dy=(double)other->y-actor->y,d=dx*dx+dy*dy;
-                    if(d<nearest&&frenzyVictim(actor,other)){nearest=d;r.eyeTarget=other;}
-                }
+                r.eyeSearch=leveltime+TICRATE;
+                r.eyeTarget=findFrenzyVictim(actor,p_wp_balance.eyeSearchRange);
             }
         }
         actor->target=r.eyeTarget;actor->threshold=r.eyeTarget?100:0;return;
@@ -515,16 +583,8 @@ void P_WeakpointFrenzyTarget(mobj_t *actor) {
         if(r.frenzyUntil){if(actor->target==r.frenzyTarget&&!retaliationPair(actor,actor->target))actor->target=nullptr;actor->threshold=actor->target?100:0;}
         r.frenzyUntil=0;r.frenzyTarget=nullptr;return;
     }
-    if(!frenzyVictim(actor,r.frenzyTarget)) {
-        MP_COLLECT;
-        r.frenzyTarget=nullptr;double nearest=INFINITY;
-        for(auto *t=thinkercap.next;t!=&thinkercap;t=t->next) {
-            if(t->function.acp1!=(actionf_p1)P_MobjThinker)continue;
-            MP_LOCAL_COUNT(MP_FRENZY_CANDIDATE,1);auto *other=(mobj_t*)t;
-            double dx=(double)other->x-actor->x,dy=(double)other->y-actor->y,d=dx*dx+dy*dy;
-            if(d<nearest&&frenzyVictim(actor,other)){nearest=d;r.frenzyTarget=other;}
-        }
-    }
+    if(!frenzyVictim(actor,r.frenzyTarget))
+        r.frenzyTarget=findFrenzyVictim(actor,p_wp_balance.frenzySearch);
     if(!r.frenzyTarget){r.frenzyUntil=0;actor->target=nullptr;actor->threshold=0;return;}
     actor->target=r.frenzyTarget;actor->threshold=100;
 }
