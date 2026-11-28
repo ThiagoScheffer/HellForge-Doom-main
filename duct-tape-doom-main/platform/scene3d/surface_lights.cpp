@@ -210,7 +210,10 @@ std::vector<SurfaceLight> mergedSurfaceLights(std::vector<SurfaceLight> tiles) {
         if(fresh.size()!=mergeResult.size())I_Error((char*)"Cached surface light count differs");
         for(size_t i=0;i<fresh.size();++i)if(!sameSurface(fresh[i],mergeResult[i]))I_Error((char*)"Cached surface light merge differs");
     }
-    return mergeResult;
+    auto result=mergeResult;
+    if(settings.performanceTrace&&settings.performanceTraceDetail)
+        for(size_t i=0;i<tiles.size();++i)result[mergeMembership[i]].origin.merge(tiles[i].origin);
+    return result;
 }
 // How strongly a sector's glowing textures light, from its light level:
 // the mapper's stand-in for the strength of its lamps. The old 35% minimum
@@ -338,7 +341,7 @@ void lampGlow(std::vector<Vertex> &out,size_t first,const sector_t *sector,const
     unsigned alpha=(unsigned)std::lround(shine*255);
     for(size_t n=first;n<out.size();++n)out[n].lampTint=(out[n].lampTint&0xFFFFFFu)|alpha<<24;
 }
-static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,float z,const Image &image,int facing,float radius=224,float extent=0,
+static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,float z,const Image &image,int material,int facing,float radius=224,float extent=0,
                          float crowd=1,float coverage=1) {
     const bool sourceDriven=sourceDrivenLighting(settings);
     if(!settings.emissive||image.emissionWeight==0)return;
@@ -351,6 +354,8 @@ static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,f
     // Lamps too dim to light stay listed (strength 0), and so do lamps
     // switched off: shots still find them.
     SurfaceLight light={key,x,y,z,radius,1.65f*image.emissionWeight*lampLevel(sector)*crowd*coverage,image.emissionColor,facing,extent};
+    if(settings.performanceTrace&&settings.performanceTraceDetail)
+        light.origin={material,sector,key[0]==1?key[1]:-1,key[0]==1?key[2]:-1,1};
     if(image.switchIndicator) {
         // Switches change state dynamically and must not enter the static
         // bake. Unlike the old fixed 1.2 light, their contribution follows
@@ -519,7 +524,7 @@ void collectFlatLights() {
         if(image.emissionWeight==0)continue;
         float z=sectorHeight(&sector,ceiling)+(ceiling?-8:8);
         for(const auto &sample:flatSamples(i,lump,image))
-            surfaceLight({0,i,ceiling,sample.u,sample.v,sample.component},i,sample.point.x,sample.point.y,z,image,ceiling,256,0,1,sample.fraction);
+            surfaceLight({0,i,ceiling,sample.u,sample.v,sample.component},i,sample.point.x,sample.point.y,z,image,-1-lump,ceiling,256,0,1,sample.fraction);
     }
 }
 void collectSurfaceLights() {
@@ -548,7 +553,9 @@ void collectSurfaceLights() {
             float fade=std::clamp((1024-nearby[i].first)/256.0f,0.0f,1.0f);
             float strength=std::min(p.strength*fade,switchBudget);
             if(strength<.01f)continue;
+            const auto slot=flashes.count;
             appendLight(p.x,p.y,p.z,p.radius,strength,p.color,nullptr,0.35f,true,0,{0,n[0],n[1],0});
+            if(slot<flashes.count&&settings.performanceTrace&&settings.performanceTraceDetail)traceLightOrigins[slot]=p.origin;
             switchBudget-=strength;
         }
     }
@@ -600,8 +607,10 @@ void collectSurfaceLights() {
             p.strength*slot.gain*p.shine;
         if(p.shine<=0||(sourceDriven&&strength<=0))continue;
         auto n=panelNormal(p);
+        const auto index=flashes.count;
         appendLight(p.x,p.y,p.z,p.radius,strength,p.color,nullptr,0.35f,!settings.unoccludedSurfaceLights,
                     bakedLightsActive?1.0f:0,{std::min(p.extent,p.radius),n[0],n[1],0});
+        if(index<flashes.count&&settings.performanceTrace&&settings.performanceTraceDetail)traceLightOrigins[index]=p.origin;
     }
     if(trace){auto end=SDL_GetTicksNS();if(end-t0>2000000)fprintf(stderr,"Surface spike tic %d: merge %.3f select %.3f blockers %.3f ms\n",gametic,(t1-t0)/1e6,(t2-t1)/1e6,(end-t2)/1e6);}
 }
@@ -737,7 +746,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
             const float t=std::clamp((point.atU-u)/len,0.f,1.f);
             const float x=a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET,y=a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET;
             surfaceLight({1,int(&line-lines),side,point.u,point.v,span},int(sides[line.sidenum[side]].sector-sectors),
-                x,y,anchor-point.atV,image,facing,224,point.extent,glowCrowding(x,y),point.coverage);
+                x,y,anchor-point.atV,image,texturetranslation[tex],facing,224,point.extent,glowCrowding(x,y),point.coverage);
         }
         return;
     }
@@ -770,7 +779,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
             float px=a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET;
             float py=a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET;
             surfaceLight({1,(int)(&line-lines),side,firstU,firstV,span},int(sides[line.sidenum[side]].sector-sectors),
-                px,py,z,image,facing,224,std::min(top-z,z-bottom),glowCrowding(px,py));
+                px,py,z,image,texturetranslation[tex],facing,224,std::min(top-z,z-bottom),glowCrowding(px,py));
         }
         return;
     }
@@ -783,7 +792,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
             float x=a.x+(b.x-a.x)*t+nx*DOOM_PANEL_OFFSET,y=a.y+(b.y-a.y)*t+ny*DOOM_PANEL_OFFSET;
 
             surfaceLight({1,(int)(&line-lines),side,tileU,tileV,span},int(sides[line.sidenum[side]].sector-sectors),
-                x,y,z,image,facing,224,extent,glowCrowding(x,y));
+                x,y,z,image,texturetranslation[tex],facing,224,extent,glowCrowding(x,y));
         }
     }
 }

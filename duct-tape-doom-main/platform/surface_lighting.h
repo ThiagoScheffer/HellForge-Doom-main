@@ -18,6 +18,18 @@ struct SurfaceLightKeyHash {
         size_t h=2166136261u;for(int v:key){h^=(unsigned)v;h*=16777619u;}return h;
     }
 };
+struct SurfaceOrigin {
+    static constexpr int unknown=(-2147483647-1);
+    int material=unknown,sector=-1,line=-1,side=-1;
+    unsigned contributors=0;
+    void merge(const SurfaceOrigin &origin) {
+        if(!contributors){*this=origin;return;}
+        if(material!=origin.material)material=unknown;
+        if(sector!=origin.sector)sector=-1;
+        if(line!=origin.line||side!=origin.side){line=-1;side=-1;}
+        contributors+=origin.contributors;
+    }
+};
 struct SurfaceLight {
     SurfaceLightKey key;
     float x,y,z,radius,strength;
@@ -28,6 +40,7 @@ struct SurfaceLight {
     int flickerSector=-1; // The flickering sector it switches with (lampOut), merged apart from others.
     float shine=1; // How far its flickering sector has it on this tic (lampShine); 0 out.
     float radiusLimit=0; // Optional point cap, retained only by groups of capped emitters.
+    SurfaceOrigin origin{};
 };
 // The merge cell of a tile: 256-unit cell, surface direction, hue and
 // visibility group. Emissive tiles repeat every 64 units, so one pool or

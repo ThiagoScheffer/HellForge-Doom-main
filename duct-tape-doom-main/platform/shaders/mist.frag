@@ -13,10 +13,12 @@ float heightFogTau(float oz,float pz,float distance,float density,float falloff,
 void main() {
     float d=texelFetch(depth,ivec2(gl_FragCoord.xy),0).r;
     float sceneZ=c.projection.z*c.projection.w/(c.projection.w-d*(c.projection.w-c.projection.z));
-    float layerZ=dot(vWorld-c.eye.xyz,c.forward.xyz);
     vec3 delta=vWorld-c.eye.xyz;
+    float layerZ=dot(delta,c.forward.xyz);
+    // Both branches already reject fragments at or behind opaque depth.
+    // Reject before evaluating the distance, extinction or noise.
+    if(sceneZ<=layerZ)discard;
     float distance=length(delta);
-    float transmission=exp(-heightFogTau(c.eye.z,vWorld.z,distance,c.fog.x,c.fog.y,c.fog.z));
     if((vMode&MODE_SUNBEAM)!=0u) {
         // Smooth, continuous sunbeam ribbon (buildShafts). UV.x spans the
         // width (-1..1); UV.y runs from the floor (0) past the opening (1).
@@ -29,6 +31,7 @@ void main() {
         float near=smoothstep(16.0,80.0,distance)*smoothstep(0.0,36.0,sceneZ-layerZ);
         // Zero alpha adds no light and the shaft pipeline has no depth target.
         if(across<=0.0||along<=0.0||near<=0.0)discard;
+        float transmission=exp(-heightFogTau(c.eye.z,vWorld.z,distance,c.fog.x,c.fog.y,c.fog.z));
         // Animate continuously at the prior average speed (35 tics/s *
         // 0.35 world units/tic), rather than jumping on whole game tics.
         float noise=textureLod(cloud,
@@ -45,6 +48,7 @@ void main() {
     soft*=smoothstep(0.0,3.0,abs(delta.z));
     // Zero alpha preserves both color and alpha in the mist blend.
     if(soft<=0.0)discard;
+    float transmission=exp(-heightFogTau(c.eye.z,vWorld.z,distance,c.fog.x,c.fog.y,c.fog.z));
     vec2 uv=vWorld.xy/160.0+vec2(c.fog.w*0.009,c.fog.w*0.005)+vUV;
     float noise=textureLod(cloud,uv,0.0).r;
     float alpha=vLight*(0.25+noise*0.75)*soft;

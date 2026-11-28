@@ -115,8 +115,10 @@ retained incidents and recent frames, including any incident in progress.
 Reports are in `Diagnostics/Performance` under the game's working directory,
 normally the Hellforge settings and save folder.
 
-The tracer records CPU timings and swapchain waits. GPU execution time is
-unavailable in the bundled SDL GPU API. Run the focused synthetic test with
+The tracer records CPU timings, swapchain waits, visibility and light-mask
+workload. Detailed capture retains incident light evidence and samples focused
+materials. See the [tracer schema and diagnostics](docs/changes/PERFORMANCE-HOTSPOT-TRACER.md).
+GPU execution time is unavailable in the bundled SDL GPU API. Run the focused synthetic test with
 `ctest --test-dir build -C Release -R "^performance-trace$" --output-on-failure`.
 
 ## Monster performance diagnostics and current controls

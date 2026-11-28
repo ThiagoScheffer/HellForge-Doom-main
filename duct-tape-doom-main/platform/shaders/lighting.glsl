@@ -148,9 +148,14 @@ float beamSteps(float amount) {return floor(saturate(amount)*BEAM_STEPS+0.5)/BEA
 // otherwise fog solid. Below that the ray sees the capped density.
 float heightFogTau(float oz,float pz,float distance,float density,float falloff,float reference) {
     float lowest=reference-96.0,lo=min(oz,pz),hi=max(oz,pz);
-    float below=hi-lo<1e-3?(lo<lowest?1.0:0.0):clamp((lowest-lo)/(hi-lo),0.0,1.0);
     float start=max(lo,lowest),x=falloff*(max(hi,lowest)-start);
     float f=x<1e-3?1.0-x*0.5+x*x/6.0:(1.0-exp(-x))/x;
+    // Most rays never enter the capped layer. Avoid the fraction and capped
+    // density exponential when the original below fraction is exactly zero.
+    if(lo>=lowest)
+        return density*distance*(exp(clamp(-falloff*(start-reference),-80.0,80.0))*f);
+    // Preserve the original small-height and crossing cases below the cap.
+    float below=hi-lo<1e-3?1.0:clamp((lowest-lo)/(hi-lo),0.0,1.0);
     return density*distance*(below*exp(falloff*96.0)+
         (1.0-below)*exp(clamp(-falloff*(start-reference),-80.0,80.0))*f);
 }
@@ -159,16 +164,38 @@ float fogBeamIntegral(float distance,float radius) {
     return radius*(u-u*u*u+0.5*u*u*u*u);
 }
 uint fogLight(uint n) {return n==0u?fogA.y:n==1u?fogA.z:n==2u?fogA.w:fogB.x;}
+#ifndef NO_LOCAL_FOG
+// Same open-light sample as flashAtOpen(point,i), with no receiver normal.
+// Non-conical panels share one length for radial falloff and emission.
+// Keep the generic path for cones, including cones far from the camera.
+float fogSampleAt(vec3 point,uint i) {
+    if(lights[i].direction.w>0.0) return flashAtOpen(point,i);
+    vec3 delta=point-lights[i].position.xyz;
+    float distance=length(delta);
+    float falloff=max(0.0,1.0-distance/lights[i].position.w);
+    if(falloff<=0.0) return 0.0;
+    vec2 n=lights[i].direction.yz;
+    float emission=1.0;
+    if(n.x!=0.0||n.y!=0.0) {
+        float ahead=dot(delta.xy,n)+4.0;
+        emission=smoothstep(0.0,0.5,ahead/max(distance,1.0));
+    }
+    return lights[i].strength*falloff*falloff*(3.0-2.0*falloff)*emission;
+}
+#endif
 vec4 fogAlong(vec3 end) {
-    float distance=length(end-c.eye.xyz);
-    if(c.materials.z<=0.0||c.effects.z!=0.0||distance<0.01) return vec4(0,0,0,1);
-    vec3 ray=(end-c.eye.xyz)/distance;
+    if(c.materials.z<=0.0||c.effects.z!=0.0) return vec4(0,0,0,1);
+    vec3 delta=end-c.eye.xyz;
+    float distance=length(delta);
+    if(distance<0.01) return vec4(0,0,0,1);
+    vec3 ray=delta/distance;
     float transmission=exp(-heightFogTau(c.eye.z,end.z,distance,c.fog.x,c.fog.y,c.fog.z));
     distance=min(distance,2000.0); // Bound only the approximate light-glow work.
     vec3 glow=fogHaze(c.fx.yzw)*(1.0-transmission);
 #ifndef NO_LOCAL_FOG
     for(uint n=0u;n<fogA.x;++n) {
         uint i=fogLight(n);
+        if(lights[i].strength==0.0) continue;
         vec3 offset=lights[i].position.xyz-c.eye.xyz;
         float radius=lights[i].position.w,energy=0.0,center=0.0;
         if(lights[i].direction.w>0.0&&dot(offset,offset)<1600.0) {
@@ -192,9 +219,12 @@ vec4 fogAlong(vec3 end) {
             center=clamp(along,near,far);
             // Unoccluded on purpose: a portal test per pixel and fog light
             // doubled the fog cost. Geometry still ends each ray at walls.
-            float amount=flashAtOpen(c.eye.xyz+ray*center,i);
+            float amount=fogSampleAt(c.eye.xyz+ray*center,i);
             energy=amount*(far-near)*0.5;
         }
+        // A missed cone or panel with zero emission adds no light. Do not
+        // integrate height extinction for a provably zero contribution.
+        if(energy==0.0) continue;
         glow+=lights[i].color.rgb*energy*(0.00035*0.38)*exp(-heightFogTau(c.eye.z,c.eye.z+ray.z*center,center,c.fog.x,c.fog.y,c.fog.z));
     }
 #endif

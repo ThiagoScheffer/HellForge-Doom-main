@@ -694,10 +694,17 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
 #endif
         if(!focused)sample->state|=performance::Unfocused;
         if(!swapchain)sample->state|=performance::NoSwapchain;
+        const uint64_t collectionStart=SDL_GetTicksNS();
         capturePerformanceView(*sample,camera);
+        sample->traceCollection=elapsed(collectionStart);
         if(!sample->hasView)sample->state|=performance::NoWorld;
-        performance::submit(*sample,sample->level==g_saveLoadLevelSerial);
-        capturePerformanceLights(*sample);
+        if(sample->hasView&&!sample->state&&performance::detailed()) {
+            performance::Evidence evidence;
+            const uint64_t snapshotStart=SDL_GetTicksNS();
+            capturePerformanceEvidence(*sample,camera,evidence);
+            sample->traceSnapshot=elapsed(snapshotStart);
+            performance::submit(*sample,sample->level==g_saveLoadLevelSerial,&evidence);
+        } else performance::submit(*sample,sample->level==g_saveLoadLevelSerial);
     }
 }
 

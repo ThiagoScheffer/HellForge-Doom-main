@@ -23,6 +23,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
     void reportStaticSamples();
     static doom_world_frustum::Frustum worldFrustum;
     static bool cullWorld=false;
+    static performance::Visibility *traceVisibility=nullptr;
     static unsigned processedLeaves=0,rejectedLeaves=0,processedLines=0,rejectedLines=0;
 
     bool customGunPuff(const mobj_t *puff);
@@ -63,7 +64,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Span heights are the ones used below to emit vertices. Emitter
         // collection above also runs for spans outside the camera.
         if (cullWorld && worldFrustum.outside3D(wallBounds[&line - lines], bottom, top))
+        {
+            if(traceVisibility)++traceVisibility->rejectedWalls;
             return;
+        }
         bool translucent = false;
 #ifdef DOOM_BOOM_SECTORS
         translucent = span == 3 && line.tranlump && tex >= 0;
@@ -98,6 +102,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             }
             quad(out, corners[0], corners[1], corners[2], corners[3]);
         }
+        if(traceVisibility)traceVisibility->walls+=int((out.size()-first)/3);
         lampGlow(out, first, sides[line.sidenum[side]].sector, wallImage(tex));
     }
     // The mirrored pass draws the world a second time, so it runs only while a
@@ -354,7 +359,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 // Sky faces use their extended heights above. Only test
                 // ordinary flats with the height this frame will submit.
                 if (cullWorld && support < 0 && worldFrustum.outside3D(floorBounds[i], z, z))
+                {
+                    if(traceVisibility)++(ceiling?traceVisibility->rejectedCeilings:traceVisibility->rejectedFloors);
                     continue;
+                }
                 int lump = firstflat + flattranslation[flat];
                 lumpImage(lump, true);
                 const sector_t *lit = support >= 0 ? &sectors[support] : sector;
@@ -390,6 +398,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     out[n].v += oy;
                 }
 #endif
+                if(traceVisibility)(ceiling?traceVisibility->ceilings:traceVisibility->floors)+=int((out.size()-first)/3);
                 lampGlow(out, first, sector, lumpImage(lump, true));
             }
         }
@@ -1313,14 +1322,33 @@ static float floorOverhang(const mobj_t*,int,const Image&);
         // Secondary cameras, baking and displaced/damaged surfaces keep the
         // complete original batches. Bounds describe only ordinary map faces.
         const auto *world=SV_MapWorld();
-        cullWorld=!M_CheckParm((char*)"-noworldculling")&&!reflectionActive&&!settings.glassReflections&&
-            !captures&&!bakesPending()&&!loadingOnThisThread()&&!P_GlobalDigEnabled()&&!digMeshEnabled()&&
-            !(world&&world->cutCount())&&floorBounds.size()==(size_t)numsubsectors&&wallBounds.size()==(size_t)numlines;
+        using namespace performance;
+        unsigned disable=0;
+        auto allows=[&](bool blocked,CullReason reason) {
+            if(blocked)disable|=reason;
+            // The normal renderer retains its short-circuit evaluation.
+            return trace||!blocked;
+        };
+        cullWorld=allows(M_CheckParm((char*)"-noworldculling")!=0,CullForcedOff)&&
+            allows(reflectionActive,CullLiquid)&&allows(settings.glassReflections,CullGlassSetting)&&
+            allows(captures,CullGlassCapture)&&allows(bakesPending(),CullBakes)&&
+            allows(loadingOnThisThread(),CullLoading)&&allows(P_GlobalDigEnabled(),CullDigging)&&
+            allows(digMeshEnabled(),CullDigMesh)&&allows(world&&world->cutCount(),CullCuts)&&
+            allows(floorBounds.size()!=(size_t)numsubsectors,CullFloors)&&
+            allows(wallBounds.size()!=(size_t)numlines,CullWalls)&&!disable;
         worldFrustum=doom_world_frustum::Frustum({{camera.eye[0],camera.eye[1],camera.eye[2]},
             {camera.right[0],camera.right[1],camera.right[2]},{camera.up[0],camera.up[1],camera.up[2]},
             {camera.forward[0],camera.forward[1],camera.forward[2]},camera.projection[0],camera.projection[1],camera.projection[2]});
         timing(2);
-        if (!buildSolidScene(fraction))
+        const bool solid=buildSolidScene(fraction);
+        if(trace) {
+            auto &v=trace->visibility;
+            v.reasons=disable;v.xy=worldFrustum.xyPlaneCount();v.spatial=worldFrustum.spatialPlaneCount();
+            v.valid=worldFrustum.valid();v.enabled=cullWorld&&!solid;v.solid=solid;
+            v.shared=reflectionActive||captures||settings.glassReflections;
+        }
+        traceVisibility=trace?&trace->visibility:nullptr;
+        if (!solid)
         {
             flatGeometry(skyTop);
             timing(3);
@@ -1330,6 +1358,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             buildDigMesh();
             buildSolidMapMesh();
         }
+        traceVisibility=nullptr;
         timing(4);
         if(visibilityTrace||profile.enabled||trace) {
             size_t triangles=skyVertices.size()/3;
@@ -1343,6 +1372,8 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                 profile.frame.worldGeometryMs=(SDL_GetTicksNS()-visibilityStart)/1e6;
             }
             if(trace) {
+                trace->visibility.sky=int(skyVertices.size()/3);
+                for(const auto &b:transferredSkies)trace->visibility.sky+=int(b.second.size()/3);
                 trace->triangles=int(triangles);
                 trace->subsectors=int(processedLeaves);trace->rejectedSubsectors=int(rejectedLeaves);
                 trace->lines=int(processedLines);trace->rejectedLines=int(rejectedLines);

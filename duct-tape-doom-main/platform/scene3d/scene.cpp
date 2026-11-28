@@ -1090,7 +1090,7 @@ FrameView prepareFrame(int w,int h,performance::Frame *trace) {
     if(!worldPending) {translucentWorld.clear();transferredSkies.clear();mistVertices.clear();shaftVertices.clear();heatVertices.clear();skyVertices.clear();}
     uint64_t masksStart=profileStart();
     stamp(3);
-    assignLightMasks();
+    assignLightMasks(trace);
     stamp(4);
     profileAdd(profile.frame.masksMs,masksStart);
     uint64_t wordsStart=profileStart();
@@ -1126,7 +1126,8 @@ void capturePerformanceView(performance::Frame &frame,const Uniforms &camera) {
     auto fixed=[](float value){
         return fixed_t(std::clamp(double(value)*FRACUNIT,double(INT32_MIN),double(INT32_MAX)));
     };
-    const auto *leaf=R_PointInSubsector(fixed(camera.eye[0]),fixed(camera.eye[1]));
+    const auto *leaf=std::isfinite(camera.eye[0])&&std::isfinite(camera.eye[1])?
+        R_PointInSubsector(fixed(camera.eye[0]),fixed(camera.eye[1])):nullptr;
     if(leaf&&leaf->sector) {
         const auto *sector=leaf->sector;
         frame.subsector=int(leaf-subsectors);
@@ -1147,15 +1148,164 @@ void capturePerformanceView(performance::Frame &frame,const Uniforms &camera) {
     frame.particleVertices=unsigned(particleVertices.size());
     frame.fogLights=fogLights.count;
 }
-void capturePerformanceLights(const performance::Frame &frame) {
-    if(!performance::wantsLights(frame))return;
-    std::array<performance::Light,maxLights> values;
-    for(unsigned i=0;i<gpuFlashes.count;++i) {
-        const auto &light=gpuFlashes.lights[i];
-        values[i]={unsigned(lightKinds[i]),light.position[0],light.position[1],light.position[2],light.position[3],
-            light.strength,light.baked,lightSliceCost[i],light.count,lightSources[i]?int(lightSources[i]->type):-1};
+static void traceMaterialName(int key,char name[9]) {
+    if(key==SurfaceOrigin::unknown)return;
+    if(key>=0)R_TextureName(key,name);
+    else {
+        const int lump=-1-key;
+        if(lump>=firstflat&&lump-firstflat<numflats)std::memcpy(name,lumpinfo[lump].name,8);
     }
-    performance::lights(frame,values.data(),gpuFlashes.count);
+}
+static performance::MaterialBinding traceMaterialBinding(int key) {
+    performance::MaterialBinding binding;
+    traceMaterialName(key,binding.material);
+    const auto found=images.find(key);
+    if(found==images.end()||!binding.material[0])return binding;
+    const auto &image=found->second;
+    binding.loaded=true;
+    binding.emissive=settings.emissive&&image.emissionWeight>0;
+    binding.relief=bool(image.relief);
+    binding.livingProfile=settings.livingSurfaces?image.livingProfile:0;
+    binding.liquid=image.liquidEmitter;
+    binding.blend=0;
+    const int pic=key>=0?key:-1-key-firstflat;
+    int nextPic=0;
+    const int speed=P_PicAnimationNext(key>=0,pic,&nextPic);
+    if(speed<=0||leveltime<=0)return binding;
+    const int nextKey=key>=0?nextPic:-1-firstflat-nextPic;
+    const auto next=images.find(nextKey);
+    if(next==images.end()){binding.blend=-1;return binding;}
+    if(next->second.width==image.width&&next->second.height==image.height) {
+        traceMaterialName(nextKey,binding.next);
+        binding.blend=((leveltime-1)%speed+renderFraction)/speed;
+    }
+    return binding;
+}
+// Stock BSP planes and opaque wall spans. Bounded to keep diagnostic sampling
+// predictable on large/modified maps. The ray describes geometry, not pixels.
+static performance::FocusedSurface traceCenterSurface(const Uniforms &camera,const performance::Frame &frame) {
+    performance::FocusedSurface hit;
+    using namespace performance;
+    constexpr unsigned unsupported=CullDigging|CullDigMesh|CullCuts;
+    if(frame.visibility.solid||!frame.visibility.valid||(frame.visibility.reasons&unsupported)||
+       numlines>8192||numsectors>2048)return hit;
+    const float *eye=camera.eye,*ray=camera.forward;
+    const float horizontal=std::hypot(ray[0],ray[1]);
+    float best=std::min(2048.f,camera.projection[3]);
+    auto position=[&](float distance) {
+        for(int axis=0;axis<3;++axis)hit.position[axis]=eye[axis]+ray[axis]*distance;
+        hit.distance=distance;
+    };
+    if(horizontal>1e-5f) {
+        WallHit wall;
+        if(firstSolidWall(eye[0],eye[1],eye[2],ray[0]/horizontal,ray[1]/horizontal,ray[2]/horizontal,best*horizontal,wall)) {
+            best=wall.t/horizontal;
+            WallSpan span;
+            if(best>=camera.projection[2]&&wallAmbienceSpan(wall,span)) {
+                position(best);
+                hit.kind=3+wall.section;hit.line=wall.line;hit.side=wall.side;
+                const auto &side=sides[lines[wall.line].sidenum[wall.side]];
+                hit.sector=int(side.sector-sectors);
+                const int source=wall.section==1?side.toptexture:wall.section==2?side.bottomtexture:side.midtexture;
+                traceMaterialName(source,hit.source);hit.binding=traceMaterialBinding(span.texture);
+                const float x=span.b.x-span.a.x,y=span.b.y-span.a.y,length=std::hypot(x,y);
+                if(length>0){hit.normal[0]=y/length;hit.normal[1]=-x/length;}
+            }
+        }
+    }
+    if(std::abs(ray[2])<=1e-5f)return hit;
+    const bool ceiling=ray[2]>0;
+    for(int i=0;i<numsectors;++i) {
+        const auto *sector=&sectors[i];
+        const sector_t *visual=sector;
+#ifdef DOOM_BOOM_SECTORS
+        sector_t copy;
+        visual=P_BoomRenderSector(const_cast<sector_t *>(sector),&copy,0);
+#endif
+        const int pic=ceiling?visual->ceilingpic:visual->floorpic;
+        if(pic<0||pic>=numflats||pic==skyflatnum)continue;
+        const float z=visual==sector?sectorHeight(sector,ceiling):units(ceiling?visual->ceilingheight:visual->floorheight);
+        const float distance=(z-eye[2])/ray[2];
+        if(distance<camera.projection[2]||distance>=best)continue;
+        const double x=(eye[0]+distance*ray[0])*FRACUNIT,y=(eye[1]+distance*ray[1])*FRACUNIT;
+        if(x<INT32_MIN||x>INT32_MAX||y<INT32_MIN||y>INT32_MAX)continue;
+        const auto *leaf=R_PointInSubsector(fixed_t(x),fixed_t(y));
+        if(leaf->sector!=sector)continue;
+        best=distance;hit={};position(best);
+        hit.kind=ceiling?2:1;hit.normal[2]=ceiling?-1.f:1.f;
+        hit.subsector=int(leaf-subsectors);hit.sector=i;
+        traceMaterialName(-1-firstflat-pic,hit.source);
+        hit.binding=traceMaterialBinding(-1-firstflat-flattranslation[pic]);
+    }
+    return hit;
+}
+void capturePerformanceEvidence(const performance::Frame &frame,const Uniforms &camera,performance::Evidence &evidence) {
+    evidence.count=gpuFlashes.count;
+    unsigned surface[2]{},decoration[2]{};
+    for(unsigned i=0;i<evidence.count;++i) {
+        const auto &light=gpuFlashes.lights[i];
+        auto &entry=evidence.lights[i];
+        entry={unsigned(lightKinds[i]),light.position[0],light.position[1],light.position[2],light.position[3],
+            light.strength,light.baked,lightSliceCost[i],light.count,lightSources[i]?int(lightSources[i]->type):-1};
+        const auto &origin=traceLightOrigins[i];
+        traceMaterialName(origin.material,entry.material);
+        entry.originSector=origin.sector;entry.originLine=origin.line;entry.originSide=origin.side;
+        entry.contributors=origin.contributors;
+        if(lightKinds[i]==I_RENDER3D_LIGHT_SURFACE)surface[i/32]|=1u<<(i%32);
+        if(lightKinds[i]==I_RENDER3D_LIGHT_DECORATION)decoration[i/32]|=1u<<(i%32);
+    }
+    if(!performance::wantsAttribution(frame))return;
+    evidence.attributionAttempted=true;
+    evidence.focus=traceCenterSurface(camera,frame);
+    // Use masks already written for the main batches. Skip the optional
+    // scan entirely when the population exceeds the sampling budget.
+    if(!frame.maskAvailable||frame.masks[0].processed>16384)return;
+    evidence.maskSampleAvailable=true;
+    for(unsigned i=0;i<evidence.count;++i)evidence.lights[i].assignedTriangles=0;
+    for(const auto &[key,vertices]:batches) {
+        performance::MaterialWork work;
+        work.binding=traceMaterialBinding(key);
+        work.flat=key<0;
+        for(size_t n=0;n+2<vertices.size();n+=3) {
+            const auto *mask=vertices[n].lightMask;
+            unsigned population=0;
+            for(unsigned word=0;word<2;++word) {
+                unsigned bits=mask[word];
+                while(bits) {
+                    const unsigned low=bits&(~bits+1u);
+                    unsigned bit=0,tmp=low;
+                    if(tmp>=1u<<16){bit+=16;tmp>>=16;}
+                    if(tmp>=1u<<8){bit+=8;tmp>>=8;}
+                    if(tmp>=1u<<4){bit+=4;tmp>>=4;}
+                    if(tmp>=1u<<2){bit+=2;tmp>>=2;}
+                    if(tmp>=2)++bit;
+                    ++population;
+                    const unsigned index=word*32+bit;
+                    if(index<evidence.count)++evidence.lights[index].assignedTriangles;
+                    bits^=low;
+                }
+            }
+            if(population<evidence.maskHistogram.size())++evidence.maskHistogram[population];
+            if(work.binding.material[0]&&!(vertices[n].mode&MODE_SPRITE))work.masks.account(mask,surface,decoration);
+        }
+        if(!work.masks.processed)continue;
+        auto &top=evidence.materials;
+        auto at=std::find_if(top.begin(),top.end(),[&](const auto &m){return m.masks.processed<work.masks.processed;});
+        if(at==top.end())continue;
+        std::move_backward(at,top.end()-1,top.end());
+        *at=work;
+        evidence.materialCount=std::min(unsigned(top.size()),evidence.materialCount+1);
+    }
+    unsigned processed=0,pairs=0;
+    for(unsigned n=0;n<evidence.maskHistogram.size();++n) {
+        processed+=evidence.maskHistogram[n];
+        pairs+=n*evidence.maskHistogram[n];
+    }
+    if(processed!=frame.masks[0].processed||pairs!=frame.masks[0].pairs) {
+        evidence.maskSampleAvailable=false;
+        evidence.materialCount=0;
+        for(unsigned n=0;n<evidence.count;++n)evidence.lights[n].assignedTriangles=-1;
+    }
 }
 std::vector<unsigned> hudPixels(const unsigned *pixels) {
     float podiumRect[4];

@@ -40,7 +40,7 @@ bool platformReadMask(const char *path,int width,int height,std::vector<float> &
 int gpuMaxSamples();
 
 namespace doom3d {
-namespace performance { struct Frame; }
+namespace performance { struct Frame; struct Evidence; }
 constexpr float doomPi=3.14159265358979323846f;
 inline float units(int value) { return value/65536.0f; }
 struct Point { float x,y; };
@@ -460,7 +460,7 @@ Image &lumpImage(int lump,bool flat);
 FrameView prepareFrame(int width,int height,performance::Frame *trace=nullptr);
 void applyPerformanceTraceSettings();
 void capturePerformanceView(performance::Frame &frame,const Uniforms &camera);
-void capturePerformanceLights(const performance::Frame &frame);
+void capturePerformanceEvidence(const performance::Frame &frame,const Uniforms &camera,performance::Evidence &evidence);
 // Level loading (loading.cpp): when loadPending, the backend calls
 // runLoading before drawing the frame. It does the frame's level building
 // and bakes while show draws the loading screen (level or other title, the

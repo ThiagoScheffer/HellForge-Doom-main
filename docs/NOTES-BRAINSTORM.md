@@ -445,7 +445,6 @@ performance problem: need check: when player go on top of the acid texture  and 
 
 
 
-
 update near-miss bullet sounds and other fx
 
 notes to ideas:
@@ -455,8 +454,10 @@ check if how and if possible to add every light source to casts light.
 so textures of lights become real light sources, if no light them no render waste, and room will be dark.
 skies are source of light also, but will cast only when player is near a openspace or it have a celing window.
 
-can we add items a small grounded shadow? avoiding it shadow to look weird or floating?
+can we add items a small grounded shadow so it make it fit naturally to the enviroment light? avoiding it shadow to look weird orfloating?
 
+
+Worms need a lighting fit - current even on dark place they look lit.
 
 Logical lights only?
 

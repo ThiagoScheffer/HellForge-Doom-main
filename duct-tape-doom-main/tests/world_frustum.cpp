@@ -10,6 +10,7 @@ static void check(bool pass,const char *message) {
 int main() {
     Camera c{{0,0,32},{0,-1,0},{0,0,1},{1,0,0},1,1,1};
     Frustum f(c);
+    check(f.valid()&&f.xyPlaneCount()>0&&f.spatialPlaneCount()==4,"horizontal camera visibility diagnostics");
     check(f.outside({90,200,110,220}),"outside horizontal view");
     check(f.outside({-110,-10,-90,10}),"behind camera");
     check(!f.outside({90,90,110,110}),"crossing frustum edge");
@@ -18,6 +19,7 @@ int main() {
     check(!f.outside({0,0,-1,1}),"invalid bounds fail open");
     auto invalid=c;invalid.horizontal=std::numeric_limits<double>::quiet_NaN();
     check(!Frustum(invalid).outside({90,200,110,220}),"invalid projection fail open");
+    check(!Frustum(invalid).valid()&&Frustum(invalid).spatialPlaneCount()==0,"invalid camera has no usable planes");
     invalid=c;invalid.up.z=std::numeric_limits<double>::infinity();
     check(!Frustum(invalid).outside({90,200,110,220}),"invalid basis fail open");
     // A very wide projection must retain a point excluded by a narrower one.
@@ -27,6 +29,7 @@ int main() {
     check(!Frustum(vertical).outside({-1000,-1000,-900,-900}),"vertical view retains any height");
     Camera down{{0,0,32},{0,-1,0},{1,0,0},{0,0,-1},1,1,1};
     Frustum steep(down);
+    check(steep.valid()&&steep.xyPlaneCount()==0&&steep.spatialPlaneCount()==4,"empty XY projection differs from invalid camera");
     std::array<float,4> distantFlat{90,-10,110,10};
     check(!steep.outside(distantFlat),"XY keeps all heights at a vertical pitch");
     check(steep.outside3D(distantFlat,0,0),"distant floor outside steep view");

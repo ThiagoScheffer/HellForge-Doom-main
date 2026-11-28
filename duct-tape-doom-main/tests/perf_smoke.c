@@ -595,7 +595,7 @@ void I_TestFrame(void)
     if(M_CheckParm("-test-performance-trace"))
     {
         extern int I_TestPerformanceTracePanel(int step);
-        static int step;
+        static int step, looked;
         static uint64_t start, focusStart;
         if(gamestate!=GS_LEVEL||!players[consoleplayer].mo)return;
         if(!start) {
@@ -614,12 +614,16 @@ void I_TestFrame(void)
             start=SDL_GetTicksNS();
         }
         const uint64_t elapsed=SDL_GetTicksNS()-start;
-        const uint64_t at[]={500000000,2500000000,2850000000,4250000000};
+        if(!looked&&elapsed>=1500000000&&M_CheckParm("-test-trace-look")) {
+            I_Render3DLook(1000.f);
+            looked=1;
+        }
+        const uint64_t at[]={500000000,3500000000,3850000000,5250000000};
         if(step<4&&elapsed>=at[step]) {
             if(!I_TestPerformanceTracePanel(step))I_Error("Performance trace F4 step %d failed",step);
             printf("Performance trace F4 step %d passed\n",step++);
         }
-        if(step==4&&elapsed>=5000000000)I_Quit();
+        if(step==4&&elapsed>=6000000000)I_Quit();
         return;
     }
     if (state == FINISHED) return;

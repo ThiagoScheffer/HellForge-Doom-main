@@ -190,7 +190,7 @@ std::vector<OptionTab> optionTabs(Settings &s) {
                 choice("performance_trace_duration","Minimum slowdown duration",&s.performanceTraceDuration,
                     {"250 ms","500 ms","1000 ms"},{250,500,1000},"Time below the sustained slowdown threshold.",accelerated),
                 choice("performance_trace_detail","Capture detail",&s.performanceTraceDetail,
-                    {"Basic","Detailed"},{0,1},"Detailed capture samples active lights during incidents.",accelerated),
+                    {"Basic","Detailed"},{0,1},"Basic records visibility and light-mask totals. Detailed also retains exact-frame incident lights and samples focused materials. GPU timings are unavailable on this backend.",accelerated),
                 check("performance_trace_auto_export","Automatic export",&s.performanceTraceAutoExport,
                     "Queue completed incidents for local export in the background.",accelerated),
                 exportTrace,openTrace}},

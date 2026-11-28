@@ -1,3 +1,4 @@
+#include "../performance_trace.h"
 /* Dynamic lights collected each frame: muzzle flashes, projectiles,
    decorations, barrels and door spill, packed for the GPU. */
 #include "internal.h"
@@ -172,11 +173,13 @@ static CachedBlockers *blockerSlot(const BlockerKey &key) {
 // spot: a spotlight's unit axis and cone cosine (direction); without a cone,
 // x is a glowing panel's half-height, which softens its wall shadows, and a
 // negative w is minus a lamp's radius (lampSpot), which softens all of them.
+std::array<SurfaceOrigin,maxLights> traceLightOrigins{};
 void appendLight(float x,float y,float z,float radius,float strength,const std::array<float,3> &color,const mobj_t *source,float directionality,bool occluded,float baked,
                  const std::array<float,4> &spot) {
     if(flashes.count>=maxLights) return;
     ProfileTimer timer{profile.frame.lightsMs};
     lightSources[flashes.count]=source;fogOnly[flashes.count]=false;lightKinds[flashes.count]=lightKind;
+    if(settings.performanceTrace&&settings.performanceTraceDetail)traceLightOrigins[flashes.count]={};
     Flash &f=flashes.lights[flashes.count++];
     f={{x,y,z,radius},strength,(unsigned)lightBlockers.size(),0,baked,{color[0],color[1],color[2],directionality},{spot[0],spot[1],spot[2],spot[3]}};
     if(!occluded) return;
@@ -645,13 +648,24 @@ void selectFogLights(const Uniforms &camera) {
 }
 // A sphere that misses a triangle's bounds cannot illuminate any fragment
 // of it. The conservative mask preserves every light inside its radius.
-void assignLightMasks() {
-    struct Job {Vertex *vertices;size_t count;VertexSection* section;uint64_t stamp=0;};
+void assignLightMasks(performance::Frame *trace) {
+    unsigned surfaceBits[2]{},decorationBits[2]{};
+    if(trace) {
+        for(unsigned i=0;i<flashes.count;++i) {
+            if(lightKinds[i]==I_RENDER3D_LIGHT_SURFACE)surfaceBits[i/32]|=1u<<(i%32);
+            if(lightKinds[i]==I_RENDER3D_LIGHT_DECORATION)decorationBits[i/32]|=1u<<(i%32);
+        }
+
+    }
+    // Jobs own the same disjoint ranges as the writes. Persistent vertex
+    // sections still recompute CPU masks, even when GPU uploads are reused.
+    static std::array<performance::MaskWork,performance::maxMaskJobs> workload;
+    struct Job {Vertex *vertices;size_t count;VertexSection* section;uint64_t stamp=0;bool mirror=false;};
     static std::vector<Job> jobs;jobs.clear();size_t triangles=0;
     for(auto *group:{&batches,&mirrorBatches})for(auto &batch:*group) {
         auto &vertices=batch.second;
         auto add=[&](size_t first,size_t end,VertexSection* section){
-            for(size_t n=first;n+2<end;n+=768){size_t count=std::min(size_t(768),(end-n)/3*3);jobs.push_back({vertices.data()+n,count,section});triangles+=count/3;}
+            for(size_t n=first;n+2<end;n+=768){size_t count=std::min(size_t(768),(end-n)/3*3);jobs.push_back({vertices.data()+n,count,section,0,group==&mirrorBatches});triangles+=count/3;}
         };
         auto sections=vertexSections.find(&vertices);size_t cursor=0;
         if(sections!=vertexSections.end())for(auto& section:sections->second){
@@ -661,7 +675,12 @@ void assignLightMasks() {
         }
         add(cursor,vertices.size(),nullptr);
     }
-    auto assign=[&](int index) {
+    const bool account=trace&&jobs.size()<=workload.size();
+    if(account) {
+        trace->maskAvailable=true;
+        std::fill_n(workload.begin(),jobs.size(),performance::MaskWork{});
+    }
+    auto assign=[&](int index,bool account) {
         auto &job=jobs[index];auto vertices=job.vertices;job.stamp=1469598103934665603ULL;
         for(size_t n=0;n<job.count;n+=3) {
             unsigned mask[2]={};
@@ -674,17 +693,20 @@ void assignLightMasks() {
                     if(!fogOnly[i]&&doom_flash_reaches_bounds(&light,low,high))mask[i/32]|=1u<<(i%32);
                 }
             }
+            if(account)workload[index].account(mask,surfaceBits,decorationBits);
             job.stamp=(job.stamp^mask[0])*1099511628211ULL;job.stamp=(job.stamp^mask[1])*1099511628211ULL;
             for(size_t v=n;v<n+3;++v)std::copy(mask,mask+2,vertices[v].lightMask);
         }
     };
-    if(triangles*flashes.count>=65536)frameParallelFor((int)jobs.size(),assign);
-    else for(int n=0;n<(int)jobs.size();++n)assign(n);
+    if(triangles*flashes.count>=65536)
+        frameParallelFor((int)jobs.size(),[&](int n){assign(n,account);});
+    else for(int n=0;n<(int)jobs.size();++n)assign(n,account);
+    if(account)for(size_t n=0;n<jobs.size();++n)trace->masks[jobs[n].mirror].add(workload[n]);
     for(const auto& job:jobs)if(job.section)job.section->maskStamp=(job.section->maskStamp^job.stamp)*1099511628211ULL;
     if(M_CheckParm((char*)"-verifylightthreads"))for(int n=0;n<(int)jobs.size();++n) {
         const auto &job=jobs[n];std::vector<std::array<unsigned,2>> expected(job.count);
         for(size_t v=0;v<job.count;++v)std::copy(job.vertices[v].lightMask,job.vertices[v].lightMask+2,expected[v].begin());
-        assign(n);
+        assign(n,false);
         for(size_t v=0;v<job.count;++v)if(!std::equal(expected[v].begin(),expected[v].end(),job.vertices[v].lightMask))
             I_Error((char*)"Parallel light masks differ from serial lighting");
     }
@@ -695,7 +717,9 @@ void skipProfiledLights() {
     for(unsigned i=0;i<flashes.count;++i) {
         if(profile.skip&(1u<<lightKinds[i]))continue;
         flashes.lights[kept]=flashes.lights[i];lightSources[kept]=lightSources[i];
-        fogOnly[kept]=fogOnly[i];lightKinds[kept]=lightKinds[i];++kept;
+        fogOnly[kept]=fogOnly[i];lightKinds[kept]=lightKinds[i];
+        if(settings.performanceTrace&&settings.performanceTraceDetail)traceLightOrigins[kept]=traceLightOrigins[i];
+        ++kept;
     }
     flashes.count=kept;
 }

@@ -15,6 +15,7 @@ class Frustum {
     std::array<Plane,10> planes{};
     int count=0;
     Vec eye{};
+    bool validProjection=false;
     std::array<Vec,4> spatialPlanes{};
     int spatialCount=0;
 public:
@@ -23,6 +24,7 @@ public:
         using namespace doom_sprite_frustum;
         if(!finite(c.eye)||!finite(c.right)||!finite(c.up)||!finite(c.forward)||
            !std::isfinite(c.horizontal)||!std::isfinite(c.vertical)||c.horizontal<=0||c.vertical<=0)return;
+        validProjection=true;
         eye=c.eye;
         Vec sides[4];int k=0;
         for(int axis=0;axis<2;++axis)for(double sign:{-1.,1.}) {
@@ -48,6 +50,9 @@ public:
             }
         }
     }
+    bool valid() const noexcept {return validProjection;}
+    int xyPlaneCount() const noexcept {return count;}
+    int spatialPlaneCount() const noexcept {return spatialCount;}
     bool outside(const std::array<float,4> &bounds) const {
         for(float v:bounds)if(!std::isfinite(v))return false;
         if(bounds[0]>bounds[2]||bounds[1]>bounds[3])return false;
