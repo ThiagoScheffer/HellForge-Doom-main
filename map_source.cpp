@@ -56,7 +56,7 @@ void MapSource::reset(std::vector<MapRegion> input){
   }
   r.map=std::move(map);next.push_back(std::move(r));
  }
- regions=std::move(next);horizontalTiles.clear();
+ regions=std::move(next);horizontalTiles.clear();horizontalUse.clear();horizontalClock=0;horizontalBytes=0;
 }
 bool MapSource::heights(int sector,float floor,float ceiling){
  if(!std::isfinite(floor)||!std::isfinite(ceiling))return false;
@@ -108,9 +108,9 @@ Volume MapSource::tile(int x,int y,int z,bool mesh)const{
  // Lift/door motion changes vertical intervals only. Reuse the immutable
  // outline distances across heights and vertically adjacent voxel tiles.
  const std::array<int,2> key{x,y};
- if(horizontalTiles.size()>=2048&&!horizontalTiles.count(key))horizontalTiles.clear();
  auto inserted=horizontalTiles.try_emplace(key);
- auto& columns=inserted.first->second;
+ auto& entry=inserted.first->second;
+ auto& columns=entry.columns;
  Vec end=out.point(out.nx-1,out.ny-1,out.nz-1);
  if(inserted.second)for(size_t n=0;n<regions.size();++n){
   const auto& r=regions[n];
@@ -124,22 +124,41 @@ Volume MapSource::tile(int x,int y,int z,bool mesh)const{
   }
   columns.push_back(std::move(column));
  }
+ // Account for retained vector capacity plus conservative container metadata.
+ // Keep the current tile until sampling completes, even if it alone exceeds the budget.
+ if(inserted.second){
+  entry.bytes=columns.capacity()*sizeof(ColumnRegion)+sizeof(HorizontalTile)+128;
+  horizontalBytes+=entry.bytes;
+ }else horizontalUse.erase(entry.used);
+ entry.used=++horizontalClock;horizontalUse.emplace(entry.used,key);
+ constexpr size_t entryLimit=8192,byteLimit=32*1024*1024;
+ while(horizontalTiles.size()>1&&(horizontalTiles.size()>entryLimit||horizontalBytes>byteLimit)){
+  auto oldest=horizontalUse.begin();auto victim=horizontalTiles.find(oldest->second);
+  horizontalBytes-=victim->second.bytes;horizontalTiles.erase(victim);horizontalUse.erase(oldest);
+ }
  std::vector<const ColumnRegion*> nearby;
  for(const auto& column:columns){const auto& r=regions[column.region].map;
   if(r.ceiling>r.floor&&r.ceiling>=out.origin.z-step*2&&r.floor<=end.z+step*2)nearby.push_back(&column);
  }
- for(int iy=0;iy<out.ny;++iy)for(int ix=0;ix<out.nx;++ix){
-  for(int iz=0;iz<out.nz;++iz){
-   float pz=out.point(ix,iy,iz).z,value=step*2;
-   for(size_t i=0;i<nearby.size();++i){
-    const auto& r=regions[nearby[i]->region].map;
-    if(r.ceiling<=r.floor)continue;
-    value=std::min(value,std::max(nearby[i]->distances[iy*out.nx+ix],std::max(r.floor-pz,pz-r.ceiling)));
-   }
+ // Vertical distance is identical across the XY slice. Keep region order
+ // and the original min/max arithmetic; write contiguous density samples.
+ std::vector<float> vertical(nearby.size());
+ for(int iz=0;iz<out.nz;++iz){
+  float pz=out.point(0,0,iz).z;
+  for(size_t i=0;i<nearby.size();++i){
+   const auto& r=regions[nearby[i]->region].map;
+   vertical[i]=std::max(r.floor-pz,pz-r.ceiling);
+  }
+  for(int iy=0;iy<out.ny;++iy)for(int ix=0;ix<out.nx;++ix){
+   float value=step*2;
+   for(size_t i=0;i<nearby.size();++i)
+    value=std::min(value,std::max(nearby[i]->distances[iy*out.nx+ix],vertical[i]));
    value=std::abs(value)<.001f?-.001f:std::clamp(value,-step*2,step*2);
    out.base[out.index(ix,iy,iz)]=out.density[out.index(ix,iy,iz)]=value;
   }
  }
+ // A single exceptionally complex column must not remain above the bound.
+ if(horizontalBytes>byteLimit){horizontalUse.erase(entry.used);horizontalBytes-=entry.bytes;horizontalTiles.erase(key);}
  if(mesh)out.rebuild();return out;
 }
 }

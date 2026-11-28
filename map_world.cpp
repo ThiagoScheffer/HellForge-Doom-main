@@ -105,9 +105,8 @@ bool MapWorld::affected(Vec p,float radius,float height)const{
  return false;
 }
 void MapWorld::update(TileKey k,WorldTile& tile,bool incremental,size_t firstCut){
- // Recreating an evicted volume does not change geometry. Only edits invalidate
- // its compact mesh; height changes/reset/load invalidate globally beforehand.
- if(incremental)eraseRayMesh(k);
+ // A resident incremental tile can prove its density is unchanged. A fresh
+ // incremental tile still invalidates conservatively if a compact mesh exists.
  // An unchanged base does not need sampling or meshing again on each hit.
  bool fresh=!incremental||tile.volume.density.empty();
  std::vector<float> oldBase,oldDensity;
@@ -148,6 +147,7 @@ void MapWorld::update(TileKey k,WorldTile& tile,bool incremental,size_t firstCut
   }
  }
  if(fresh||changed){
+  if(incremental)eraseRayMesh(k);
   if(fresh&&oldBase==next.base&&oldDensity==next.density){
    next.chunks=std::move(oldChunks);tile.edited=changed;return;
   }
@@ -202,14 +202,21 @@ bool MapWorld::heights(int sector,float floor,float ceiling){
  // Keep distant sight geometry warm while a door/lift moves. Include the full
  // XY footprint and narrow field band, plus any cuts anchored to this plane.
  // All Z slices in those columns are invalidated, covering both old/new heights.
+ // Precompute exactly the existing affected footprints once per mover,
+ // rather than scanning the entire journal for every cached mesh tile.
+ std::vector<std::array<float,4>> movingCutBounds;
+ for(const auto& cut:cuts)if(cut.sector==sector&&previous[cut.plane]!=planes[sector][cut.plane]){
+  Vec c=center(cut);float r=cut.radius*std::max(1.f,cut.stretch)*1.06f+8;
+  movingCutBounds.push_back({c.x-r,c.x+r,c.y-r,c.y+r});
+ }
  for(auto it=rayTiles.begin();it!=rayTiles.end();){
   auto k=it->first;
   bool affected=(k[0]+1)*extent>=lo.x-8&&k[0]*extent<=hi.x+8&&
    (k[1]+1)*extent>=lo.y-8&&k[1]*extent<=hi.y+8;
-  for(const auto& cut:cuts)if(!affected&&cut.sector==sector&&previous[cut.plane]!=planes[sector][cut.plane]){
-   Vec c=center(cut);float r=cut.radius*std::max(1.f,cut.stretch)*1.06f+8;
-   affected=(k[0]+1)*extent>=c.x-r&&k[0]*extent<=c.x+r&&
-    (k[1]+1)*extent>=c.y-r&&k[1]*extent<=c.y+r;
+  for(const auto& bounds:movingCutBounds){
+   if(affected)break;
+   affected=(k[0]+1)*extent>=bounds[0]&&k[0]*extent<=bounds[1]&&
+    (k[1]+1)*extent>=bounds[2]&&k[1]*extent<=bounds[3];
   }
   if(affected){rayBytes-=it->second.bytes;rayUse.erase(it->second.used);it=rayTiles.erase(it);}else ++it;
  }
@@ -319,6 +326,10 @@ void MapWorld::eraseRayMesh(TileKey k){
 MapWorld::RayMeshStats MapWorld::rayMeshStats()const{
  return {rayHits,rayMisses,rayEvictions,rayBytes,rayTiles.size()};
 }
+void MapWorld::setRayMeshBudget(size_t bytes){
+ rayByteLimit=std::clamp(bytes,size_t(64)*1024*1024,size_t(256)*1024*1024);
+ while(!rayUse.empty()&&rayBytes>rayByteLimit){eraseRayMesh(rayUse.begin()->second);++rayEvictions;}
+}
 const RayMesh* MapWorld::rayMesh(TileKey k){
  auto it=rayTiles.find(k);
  if(it!=rayTiles.end()){
@@ -340,7 +351,7 @@ const RayMesh* MapWorld::rayMesh(TileKey k){
  if(!next.mesh.build(original))return nullptr;
  next.bytes=sizeof(RayTile)+sizeof(TileKey)+sizeof(uint64_t)+128+
   next.mesh.storageBytes();
- constexpr size_t byteLimit=64*1024*1024,tileLimit=16384;
+ const size_t byteLimit=rayByteLimit;constexpr size_t tileLimit=16384;
  // An unusually complex tile retains the original path without consuming the
  // bounded mesh budget. tile()'s reference remains valid throughout this call.
  if(next.bytes>byteLimit)return nullptr;

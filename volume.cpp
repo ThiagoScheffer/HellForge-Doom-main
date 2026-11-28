@@ -64,8 +64,9 @@ void Volume::rebuild(){
   Chunk &chunk=chunks[(iz*cy+iy)*cx+ix];if(!chunk.dirty)continue;chunk.dirty=false;chunk.triangles.clear();++chunk.revision;++lastRebuilt;
   for(int z=iz*cells;z<std::min(nz-1,(iz+1)*cells);++z)for(int y=iy*cells;y<std::min(ny-1,(iy+1)*cells);++y)for(int x=ix*cells;x<std::min(nx-1,(ix+1)*cells);++x){
    Vec p[8];float v[8];size_t ids[8];bool damage=false,hasAir=false,hasSolid=false;
-   for(int i=0;i<8;++i){int xx=x+corners[i][0],yy=y+corners[i][1],zz=z+corners[i][2];size_t k=index(xx,yy,zz);ids[i]=k;p[i]=point(xx,yy,zz);v[i]=density[k];hasAir|=v[i]<0;hasSolid|=v[i]>=0;damage|=density[k]<base[k]-excavationEpsilon;}
+   for(int i=0;i<8;++i){int xx=x+corners[i][0],yy=y+corners[i][1],zz=z+corners[i][2];size_t k=index(xx,yy,zz);ids[i]=k;v[i]=density[k];hasAir|=v[i]<0;hasSolid|=v[i]>=0;}
    if(!hasAir||!hasSolid)continue;
+   for(int i=0;i<8;++i){p[i]=point(x+corners[i][0],y+corners[i][1],z+corners[i][2]);damage|=v[i]<base[ids[i]]-excavationEpsilon;}
    // Shared edges must execute identical floating-point arithmetic, even
    // when adjacent tetrahedra traverse that edge in opposite directions.
    auto edge=[&](int a,int b){if(ids[a]>ids[b])std::swap(a,b);return p[a]+(p[b]-p[a])*(v[a]/(v[a]-v[b]));};
@@ -165,7 +166,11 @@ bool RayMesh::build(const Volume& source){
   // Spatially split an index array; retain original triangle IDs for exact tie
   // handling. Bounds include the exact test's barycentric edge tolerance.
   part.order.reserve(part.triangles.size());
-  for(size_t i=0;i<part.triangles.size();++i)part.order.push_back(uint16_t(i));
+  std::vector<Vec> centers;centers.reserve(part.triangles.size());
+  for(size_t i=0;i<part.triangles.size();++i){
+   part.order.push_back(uint16_t(i));const auto& t=part.triangles[i];
+   centers.push_back(part.values[t[0]]+part.values[t[1]]+part.values[t[2]]);
+  }
   auto buildNodes=[&](auto&& self,uint32_t first,uint32_t count)->uint32_t{
    uint32_t index=uint32_t(part.nodes.size());part.nodes.emplace_back();
    Node node;node.first=first;node.count=count;node.lo={INFINITY,INFINITY,INFINITY};node.hi={-INFINITY,-INFINITY,-INFINITY};
@@ -180,7 +185,7 @@ bool RayMesh::build(const Volume& source){
    if(count>32){
     Vec span=node.hi-node.lo;int axis=span.x>span.y?0:1;if(span.z>(axis?span.y:span.x))axis=2;
     auto middle=part.order.begin()+first+count/2;
-    auto coordinate=[&](uint16_t id){const auto& t=part.triangles[id];Vec c=part.values[t[0]]+part.values[t[1]]+part.values[t[2]];return axis==0?c.x:axis==1?c.y:c.z;};
+    auto coordinate=[&](uint16_t id){const Vec& c=centers[id];return axis==0?c.x:axis==1?c.y:c.z;};
     std::nth_element(part.order.begin()+first,middle,part.order.begin()+first+count,[&](uint16_t a,uint16_t b){float x=coordinate(a),y=coordinate(b);return x<y||(x==y&&a<b);});
     self(self,first,count/2);node.right=self(self,first+count/2,count-count/2);node.count=0;
    }

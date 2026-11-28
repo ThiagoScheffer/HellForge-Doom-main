@@ -1,4 +1,5 @@
 #include "monster_profile.h"
+#include "solid_sight_result_cache.h"
 #include "large_platform_shield.h"
 #include <set>
 #include "monster_wake_audit.h"
@@ -28,6 +29,27 @@ extern "C" {int sv_chain_collapses=1,sv_hanging_fragments=1,sv_collapse_size=12;
 extern "C" int SV_Edited(float x,float y,float z);
 static lab::Scene scene;
 static lab::MapWorld mapWorld;
+// Deliberately opt-in until real-map equivalence and mutation coverage have
+// been validated. The existing ray-mesh cache and its flags stay independent.
+using SolidSightResults=doom_solid_sight::NegativeCache<fixed_t>;
+static SolidSightResults solidSightResults;
+static bool solidSightResultFailed=false;
+static uint64_t solidSightVerified=0,solidSightMismatches=0;
+static uint64_t sightSectorChanges=0,sightBlastChanges=0,sightCollapseChanges=0;
+static uint64_t sightSectorNoops=0,sightBlastNoops=0,sightCollapseNoops=0;
+static uint64_t supportEmptyBypasses=0;
+static bool solidSupportFastEnabled(){
+ static const bool enabled=!M_CheckParm((char*)"-nosolidsupportfast");
+ return enabled;
+}
+static void invalidateSolidSightResults(){solidSightResults.invalidate();}
+static void resetSolidSightResults(){
+ solidSightResults.reset();solidSightVerified=solidSightMismatches=0;
+ sightSectorChanges=sightBlastChanges=sightCollapseChanges=0;
+ sightSectorNoops=sightBlastNoops=sightCollapseNoops=0;
+ supportEmptyBypasses=0;
+ // A verification failure disables reuse for the rest of the process.
+}
 extern "C" int SV_Edited(float x,float y,float z){return SV_MapMode()&&mapWorld.edited({x,y,z});}
 static std::vector<std::array<fixed_t,2>> mapHeights;
 static unsigned serial=~0u;
@@ -121,7 +143,11 @@ int SV_Active(){
  if(SV_MapMode()){
   if(!numsectors||!sectors)return 0;
   if(serial!=r_levelserial){
+   resetSolidSightResults();
    mapWorld.reset(readMapSource());mapHeights.clear();directImpact=nullptr;actorMissile=nullptr;
+   // Preserve 64 MiB default; opt in to a larger bounded geometry cache.
+   mapWorld.setRayMeshBudget(size_t(M_CheckParm((char*)"-solidraycache256")?256:
+    M_CheckParm((char*)"-solidraycache128")?128:64)*1024*1024);
    for(int i=0;i<numsectors;++i)mapHeights.push_back({sectors[i].floorheight,sectors[i].ceilingheight});
    serial=r_levelserial;
   }
@@ -143,7 +169,9 @@ void SV_SectorChanged(sector_t *s){
  if(mapHeights[i][0]==s->floorheight&&mapHeights[i][1]==s->ceilingheight)return;
  mapHeights[i]={s->floorheight,s->ceilingheight};
  auto begin=std::chrono::steady_clock::now();
- mapWorld.heights(i,unit(s->floorheight),unit(s->ceilingheight));
+ if(mapWorld.heights(i,unit(s->floorheight),unit(s->ceilingheight))){
+  ++sightSectorChanges;invalidateSolidSightResults();
+ }else ++sightSectorNoops;
  if(M_CheckParm((char*)"-profilesolid"))printf("SOLID sector %d tic %d %.3f ms\n",i,gametic,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count());
 }
 int SV_Slide(mobj_t* m){
@@ -217,6 +245,14 @@ int SV_Position(mobj_t *m,fixed_t x,fixed_t y,fixed_t *floor,fixed_t *ceiling){
  MP_AUTO(MP_SUPPORT);
  if(!SV_Active())return -1;
  if(!SV_MapMode())return solidPositionUncached(m,x,y,floor,ceiling);
+ // MapWorld::affected() is false with an empty cut journal. The original
+ // uncached path then returns -1 without writing either height output.
+ // Avoid actor-cache lookup, column stamps and cache churn in that case.
+ // Test the live journal on every request: the first cut immediately
+ // restores the ordinary support path, including for moving sectors.
+ if(solidSupportFastEnabled()&&mapWorld.cutCount()==0){
+  ++supportEmptyBypasses;return -1;
+ }
  struct Support {std::array<fixed_t,6> query{};uint64_t revision=~uint64_t(0);int result=-1;fixed_t floor=0,ceiling=0;};
  static std::map<mobj_t*,Support> supports;
  static unsigned level=~0u;
@@ -243,10 +279,12 @@ void SV_Refresh(mobj_t *m){
  // capsule out of that rim every tic is both unnecessary and expensive.
  if((m->info->flags&MF_MISSILE)&&!(m->flags&MF_MISSILE)
     &&(m->flags&MF_NOGRAVITY))return;
- auto started=std::chrono::steady_clock::now();
+ static const bool profile=M_CheckParm((char*)"-profilesolid")!=0;
+ // Keep the legacy path available for the A/B control, including its clock read.
+ auto started=(profile||!solidSupportFastEnabled())?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
  fixed_t floor,ceiling;
  if(SV_Position(m,m->x,m->y,&floor,&ceiling)==1){m->floorz=floor;m->ceilingz=ceiling;}
- if(M_CheckParm((char*)"-profilesolid")){double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();if(ms>.3)printf("SOLID support tic %d type %d flags %x %.3f ms\n",gametic,m->type,m->flags,ms);}
+ if(profile){double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();if(ms>.3)printf("SOLID support tic %d type %d flags %x %.3f ms\n",gametic,m->type,m->flags,ms);}
 }
 struct PendingCollapse {size_t cut;int due,generation;};
 struct FallingSupport {lab::Vec start;int due,generation;};
@@ -264,6 +302,8 @@ static void tickCollapses(){
   auto item=*it;pendingCollapses.erase(it);
   auto begin=std::chrono::steady_clock::now();
   auto removed=mapWorld.crumble(std::clamp(sv_collapse_size,4,24),item.cut,24);
+  if(!removed.empty()){++sightCollapseChanges;invalidateSolidSightResults();}
+  else ++sightCollapseNoops;
   if(M_CheckParm((char*)"-profilesolid"))printf("SOLID collapse tic %d cut %zu removed %zu %.3f ms\n",leveltime,item.cut,removed.size(),std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count());
   int falling=0;
   for(auto p:removed){
@@ -377,6 +417,8 @@ static void impact(float *point,int owner,float radius,float depth=0){
   }
   auto blastStart=std::chrono::steady_clock::now();
   bool applied=mapWorld.blast(center,radius,sector,plane,anchor,origin,inward,cap,float(P_GlobalDigMaxDepth()),stretch);
+  if(applied){++sightBlastChanges;invalidateSolidSightResults();}
+  else ++sightBlastNoops;
   if(M_CheckParm((char*)"-profilesolid"))printf("SOLID map blast tic %d radius %.2f depth %.2f: %.3f ms\n",gametic,radius,depth,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-blastStart).count());
   if(M_CheckParm((char*)"-profilesolid"))printf("MAP cut applied %d center %.2f %.2f %.2f sample %.2f\n",
    int(applied),center.x,center.y,center.z,mapWorld.sample(origin+inward*.5f));
@@ -390,7 +432,12 @@ static void impact(float *point,int owner,float radius,float depth=0){
     auto nearby=std::find_if(pendingCollapses.begin(),pendingCollapses.end(),[&](const auto &p){return mapWorld.cutNear(p.cut,center,24);});
     if(nearby!=pendingCollapses.end()){nearby->cut=mapWorld.cutCount()-1;nearby->generation=std::min(nearby->generation,collapseGeneration);}
     else if(pendingCollapses.size()<16)pendingCollapses.push_back({mapWorld.cutCount()-1,leveltime+(sv_hanging_fragments?18:1),collapseGeneration});
-   }else for(auto p:mapWorld.crumble())if(R_CraterCrumble)R_CraterCrumble(p.x,p.y,p.z);
+   }else {
+    auto removed=mapWorld.crumble();
+    if(!removed.empty()){++sightCollapseChanges;invalidateSolidSightResults();}
+    else ++sightCollapseNoops;
+    for(auto p:removed)if(R_CraterCrumble)R_CraterCrumble(p.x,p.y,p.z);
+   }
   }
   return;
  }
@@ -476,6 +523,13 @@ void SV_Blast(mobj_t *m,int radius){
   if(R_RubbleImpact)R_RubbleImpact(m->type==MT_BARREL?MT_ROCKET:m->type,best[0],best[1],best[2],best[3],best[4],best[5]);
  }
 }
+// Same three samples, same arithmetic, same early success as the original.
+static int solidSightUncached(mobj_t *a,mobj_t *b,bool reuseMesh){
+ for(float factor:{.25f,.5f,.75f})
+  if(solidTrace(unit(a->x),unit(a->y),unit(a->z)+unit(a->height)*.75f,
+     unit(b->x-a->x),unit(b->y-a->y),unit(b->z)+unit(b->height)*factor-unit(a->z)-unit(a->height)*.75f,nullptr,nullptr,reuseMesh)>=1)return 1;
+ return 0;
+}
 int SV_Sight(mobj_t *a,mobj_t *b){
 #ifdef DOOM_MONSTER_BENCHMARK
  WA_SolidScope wakeScope;
@@ -488,14 +542,47 @@ int SV_Sight(mobj_t *a,mobj_t *b){
   static int lastTic=-1;static unsigned lastLevel=~0u;
   if(lastLevel!=r_levelserial||(leveltime<10&&leveltime!=lastTic)||leveltime-lastTic>=TICRATE){
    auto s=mapWorld.rayMeshStats();lastTic=leveltime;lastLevel=r_levelserial;
-   fprintf(stderr,"SOLID sight meshes tic %d: hits %llu misses %llu evictions %llu tiles %zu bytes %zu\n",
-    leveltime,(unsigned long long)s.hits,(unsigned long long)s.misses,(unsigned long long)s.evictions,s.tiles,s.bytes);
+   fprintf(stderr,"SOLID sight meshes tic %d: hits %llu misses %llu evictions %llu tiles %zu bytes %zu budget %zu\n",
+    leveltime,(unsigned long long)s.hits,(unsigned long long)s.misses,(unsigned long long)s.evictions,s.tiles,s.bytes,mapWorld.rayMeshBudget());
   }
  }
- for(float factor:{.25f,.5f,.75f})
-  if(solidTrace(unit(a->x),unit(a->y),unit(a->z)+unit(a->height)*.75f,
-     unit(b->x-a->x),unit(b->y-a->y),unit(b->z)+unit(b->height)*factor-unit(a->z)-unit(a->height)*.75f,nullptr,nullptr,reuseMesh)>=1)return 1;
- return 0;
+ static const bool requested=M_CheckParm((char*)"-solidsightresultcache")!=0;
+ static const bool verify=M_CheckParm((char*)"-verifysolidsightresultcache")!=0;
+ static const bool report=M_CheckParm((char*)"-profilesolidsightresults")!=0;
+ const bool useResults=requested&&reuseMesh&&SV_MapMode()&&!solidSightResultFailed;
+ if(report&&SV_MapMode()){
+  static int lastTic=-1;static unsigned lastLevel=~0u;
+  if(lastLevel!=r_levelserial||leveltime<lastTic||(leveltime<10&&leveltime!=lastTic)||leveltime-lastTic>=TICRATE){
+   lastTic=leveltime;lastLevel=r_levelserial;
+   const auto &v=solidSightResults.stats();
+   fprintf(stderr,"SOLID sight results tic %d: enabled %d verify %d failed %d hits %llu misses %llu stores %llu replacements %llu invalidations %llu verified %llu mismatches %llu capacity %zu bytes %zu\n",
+    leveltime,int(useResults),int(verify&&useResults),int(solidSightResultFailed),(unsigned long long)v.hits,(unsigned long long)v.misses,
+    (unsigned long long)v.stores,(unsigned long long)v.replacements,(unsigned long long)v.invalidations,
+    (unsigned long long)solidSightVerified,(unsigned long long)solidSightMismatches,SolidSightResults::capacity,sizeof(solidSightResults));
+   fprintf(stderr,"SOLID sight invalidation reasons tic %d: sectors %llu blasts %llu collapses %llu sector_noops %llu blast_noops %llu collapse_noops %llu\n",leveltime,
+    (unsigned long long)sightSectorChanges,(unsigned long long)sightBlastChanges,(unsigned long long)sightCollapseChanges,
+    (unsigned long long)sightSectorNoops,(unsigned long long)sightBlastNoops,(unsigned long long)sightCollapseNoops);
+   fprintf(stderr,"SOLID support fast tic %d: enabled %d empty_bypasses %llu cuts %zu\n",
+    leveltime,int(solidSupportFastEnabled()),(unsigned long long)supportEmptyBypasses,mapWorld.cutCount());
+  }
+ }
+ if(!useResults)return solidSightUncached(a,b,reuseMesh);
+ // SV_Sight reads only these eight fixed-point values. It does not raycast
+ // against actors, use facing angles, or inspect monster state definitions.
+ const SolidSightResults::Key key{a->x,a->y,a->z,a->height,b->x,b->y,b->z,b->height};
+ if(solidSightResults.contains(key)){
+  if(!verify)return 0;
+  ++solidSightVerified;
+  int actual=solidSightUncached(a,b,reuseMesh);
+  if(actual!=0){
+   ++solidSightMismatches;solidSightResultFailed=true;invalidateSolidSightResults();
+   fprintf(stderr,"SOLID sight result mismatch tic %d: cached 0 actual %d; result reuse disabled for this process\n",leveltime,actual);
+  }
+  return actual;
+ }
+ int actual=solidSightUncached(a,b,reuseMesh);
+ if(actual==0)solidSightResults.remember(key);
+ return actual;
 }
 int SV_SaveSize(){
  if(!SV_Active())return 0;
@@ -508,6 +595,7 @@ int SV_Save(unsigned char *data){
  int length=(int)saved.size();memcpy(data,saved.data(),length);memcpy(data+length,&length,4);memcpy(data+length+4,"SVEN",4);return length+8;
 }
 void SV_Load(const unsigned char *data,int length){
+ invalidateSolidSightResults();
  pendingCollapses.clear();fallingSupports.clear();collapseLevel=r_levelserial;
  if(!SV_Active()||length<8||memcmp(data+length-4,"SVEN",4))return;
  int size;memcpy(&size,data+length-8,4);if(size<0||size>length-8)return;

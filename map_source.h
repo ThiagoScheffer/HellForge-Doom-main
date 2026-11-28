@@ -38,7 +38,11 @@ private:
  std::vector<Region> regions;
  struct ColumnRegion {size_t region;std::array<float,(tileCells+1)*(tileCells+1)> distances;};
  // XY topology never moves with lifts. Cache distances independently of Z.
- mutable std::map<std::array<int,2>,std::vector<ColumnRegion>> horizontalTiles;
+ struct HorizontalTile {std::vector<ColumnRegion> columns;uint64_t used=0;size_t bytes=0;};
+ mutable std::map<std::array<int,2>,HorizontalTile> horizontalTiles;
+ mutable std::map<uint64_t,std::array<int,2>> horizontalUse;
+ mutable uint64_t horizontalClock=0;
+ mutable size_t horizontalBytes=0;
  static float horizontal(const Region&,float x,float y);
 };
 }

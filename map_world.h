@@ -24,6 +24,8 @@ public:
  bool ray(Vec start,Vec direction,float range,Hit& hit,bool reuseMesh=false);
  struct RayMeshStats {uint64_t hits=0,misses=0,evictions=0;size_t bytes=0,tiles=0;};
  RayMeshStats rayMeshStats()const;
+ void setRayMeshBudget(size_t bytes);
+ size_t rayMeshBudget()const{return rayByteLimit;}
  bool fits(Vec feet,float radius,float height);
  bool edited(Vec p)const;
  float removal(Vec p)const;
@@ -55,7 +57,7 @@ private:
  std::unordered_map<TileKey,RayTile,RayKeyHash> rayTiles;
  std::map<uint64_t,TileKey> rayUse;
  uint64_t rayClock=0,rayHits=0,rayMisses=0,rayEvictions=0;
- size_t rayBytes=0;
+ size_t rayBytes=0,rayByteLimit=64*1024*1024;
  const RayMesh* rayMesh(TileKey);
  void eraseRayMesh(TileKey);
  void clearRayMeshes();

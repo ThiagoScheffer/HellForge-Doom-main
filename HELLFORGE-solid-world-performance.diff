@@ -1,0 +1,305 @@
+--- a/map_source.cpp
++++ b/map_source.cpp
+@@ -56,7 +56,7 @@
+   }
+   r.map=std::move(map);next.push_back(std::move(r));
+  }
+- regions=std::move(next);horizontalTiles.clear();
++ regions=std::move(next);horizontalTiles.clear();horizontalUse.clear();horizontalClock=0;horizontalBytes=0;
+ }
+ bool MapSource::heights(int sector,float floor,float ceiling){
+  if(!std::isfinite(floor)||!std::isfinite(ceiling))return false;
+@@ -108,9 +108,9 @@
+  // Lift/door motion changes vertical intervals only. Reuse the immutable
+  // outline distances across heights and vertically adjacent voxel tiles.
+  const std::array<int,2> key{x,y};
+- if(horizontalTiles.size()>=2048&&!horizontalTiles.count(key))horizontalTiles.clear();
+  auto inserted=horizontalTiles.try_emplace(key);
+- auto& columns=inserted.first->second;
++ auto& entry=inserted.first->second;
++ auto& columns=entry.columns;
+  Vec end=out.point(out.nx-1,out.ny-1,out.nz-1);
+  if(inserted.second)for(size_t n=0;n<regions.size();++n){
+   const auto& r=regions[n];
+@@ -124,22 +124,41 @@
+   }
+   columns.push_back(std::move(column));
+  }
++ // Account for retained vector capacity plus conservative container metadata.
++ // Keep the current tile until sampling completes, even if it alone exceeds the budget.
++ if(inserted.second){
++  entry.bytes=columns.capacity()*sizeof(ColumnRegion)+sizeof(HorizontalTile)+128;
++  horizontalBytes+=entry.bytes;
++ }else horizontalUse.erase(entry.used);
++ entry.used=++horizontalClock;horizontalUse.emplace(entry.used,key);
++ constexpr size_t entryLimit=8192,byteLimit=32*1024*1024;
++ while(horizontalTiles.size()>1&&(horizontalTiles.size()>entryLimit||horizontalBytes>byteLimit)){
++  auto oldest=horizontalUse.begin();auto victim=horizontalTiles.find(oldest->second);
++  horizontalBytes-=victim->second.bytes;horizontalTiles.erase(victim);horizontalUse.erase(oldest);
++ }
+  std::vector<const ColumnRegion*> nearby;
+  for(const auto& column:columns){const auto& r=regions[column.region].map;
+   if(r.ceiling>r.floor&&r.ceiling>=out.origin.z-step*2&&r.floor<=end.z+step*2)nearby.push_back(&column);
+  }
+- for(int iy=0;iy<out.ny;++iy)for(int ix=0;ix<out.nx;++ix){
+-  for(int iz=0;iz<out.nz;++iz){
+-   float pz=out.point(ix,iy,iz).z,value=step*2;
+-   for(size_t i=0;i<nearby.size();++i){
+-    const auto& r=regions[nearby[i]->region].map;
+-    if(r.ceiling<=r.floor)continue;
+-    value=std::min(value,std::max(nearby[i]->distances[iy*out.nx+ix],std::max(r.floor-pz,pz-r.ceiling)));
+-   }
++ // Vertical distance is identical across the XY slice. Keep region order
++ // and the original min/max arithmetic; write contiguous density samples.
++ std::vector<float> vertical(nearby.size());
++ for(int iz=0;iz<out.nz;++iz){
++  float pz=out.point(0,0,iz).z;
++  for(size_t i=0;i<nearby.size();++i){
++   const auto& r=regions[nearby[i]->region].map;
++   vertical[i]=std::max(r.floor-pz,pz-r.ceiling);
++  }
++  for(int iy=0;iy<out.ny;++iy)for(int ix=0;ix<out.nx;++ix){
++   float value=step*2;
++   for(size_t i=0;i<nearby.size();++i)
++    value=std::min(value,std::max(nearby[i]->distances[iy*out.nx+ix],vertical[i]));
+    value=std::abs(value)<.001f?-.001f:std::clamp(value,-step*2,step*2);
+    out.base[out.index(ix,iy,iz)]=out.density[out.index(ix,iy,iz)]=value;
+   }
+  }
++ // A single exceptionally complex column must not remain above the bound.
++ if(horizontalBytes>byteLimit){horizontalUse.erase(entry.used);horizontalBytes-=entry.bytes;horizontalTiles.erase(key);}
+  if(mesh)out.rebuild();return out;
+ }
+ }
+--- a/map_source.h
++++ b/map_source.h
+@@ -38,7 +38,11 @@
+  std::vector<Region> regions;
+  struct ColumnRegion {size_t region;std::array<float,(tileCells+1)*(tileCells+1)> distances;};
+  // XY topology never moves with lifts. Cache distances independently of Z.
+- mutable std::map<std::array<int,2>,std::vector<ColumnRegion>> horizontalTiles;
++ struct HorizontalTile {std::vector<ColumnRegion> columns;uint64_t used=0;size_t bytes=0;};
++ mutable std::map<std::array<int,2>,HorizontalTile> horizontalTiles;
++ mutable std::map<uint64_t,std::array<int,2>> horizontalUse;
++ mutable uint64_t horizontalClock=0;
++ mutable size_t horizontalBytes=0;
+  static float horizontal(const Region&,float x,float y);
+ };
+ }
+--- a/map_world.cpp
++++ b/map_world.cpp
+@@ -105,9 +105,8 @@
+  return false;
+ }
+ void MapWorld::update(TileKey k,WorldTile& tile,bool incremental,size_t firstCut){
+- // Recreating an evicted volume does not change geometry. Only edits invalidate
+- // its compact mesh; height changes/reset/load invalidate globally beforehand.
+- if(incremental)eraseRayMesh(k);
++ // A resident incremental tile can prove its density is unchanged. A fresh
++ // incremental tile still invalidates conservatively if a compact mesh exists.
+  // An unchanged base does not need sampling or meshing again on each hit.
+  bool fresh=!incremental||tile.volume.density.empty();
+  std::vector<float> oldBase,oldDensity;
+@@ -148,6 +147,7 @@
+   }
+  }
+  if(fresh||changed){
++  if(incremental)eraseRayMesh(k);
+   if(fresh&&oldBase==next.base&&oldDensity==next.density){
+    next.chunks=std::move(oldChunks);tile.edited=changed;return;
+   }
+@@ -202,14 +202,21 @@
+  // Keep distant sight geometry warm while a door/lift moves. Include the full
+  // XY footprint and narrow field band, plus any cuts anchored to this plane.
+  // All Z slices in those columns are invalidated, covering both old/new heights.
++ // Precompute exactly the existing affected footprints once per mover,
++ // rather than scanning the entire journal for every cached mesh tile.
++ std::vector<std::array<float,4>> movingCutBounds;
++ for(const auto& cut:cuts)if(cut.sector==sector&&previous[cut.plane]!=planes[sector][cut.plane]){
++  Vec c=center(cut);float r=cut.radius*std::max(1.f,cut.stretch)*1.06f+8;
++  movingCutBounds.push_back({c.x-r,c.x+r,c.y-r,c.y+r});
++ }
+  for(auto it=rayTiles.begin();it!=rayTiles.end();){
+   auto k=it->first;
+   bool affected=(k[0]+1)*extent>=lo.x-8&&k[0]*extent<=hi.x+8&&
+    (k[1]+1)*extent>=lo.y-8&&k[1]*extent<=hi.y+8;
+-  for(const auto& cut:cuts)if(!affected&&cut.sector==sector&&previous[cut.plane]!=planes[sector][cut.plane]){
+-   Vec c=center(cut);float r=cut.radius*std::max(1.f,cut.stretch)*1.06f+8;
+-   affected=(k[0]+1)*extent>=c.x-r&&k[0]*extent<=c.x+r&&
+-    (k[1]+1)*extent>=c.y-r&&k[1]*extent<=c.y+r;
++  for(const auto& bounds:movingCutBounds){
++   if(affected)break;
++   affected=(k[0]+1)*extent>=bounds[0]&&k[0]*extent<=bounds[1]&&
++    (k[1]+1)*extent>=bounds[2]&&k[1]*extent<=bounds[3];
+   }
+   if(affected){rayBytes-=it->second.bytes;rayUse.erase(it->second.used);it=rayTiles.erase(it);}else ++it;
+  }
+@@ -319,6 +326,10 @@
+ MapWorld::RayMeshStats MapWorld::rayMeshStats()const{
+  return {rayHits,rayMisses,rayEvictions,rayBytes,rayTiles.size()};
+ }
++void MapWorld::setRayMeshBudget(size_t bytes){
++ rayByteLimit=std::clamp(bytes,size_t(64)*1024*1024,size_t(256)*1024*1024);
++ while(!rayUse.empty()&&rayBytes>rayByteLimit){eraseRayMesh(rayUse.begin()->second);++rayEvictions;}
++}
+ const RayMesh* MapWorld::rayMesh(TileKey k){
+  auto it=rayTiles.find(k);
+  if(it!=rayTiles.end()){
+@@ -340,7 +351,7 @@
+  if(!next.mesh.build(original))return nullptr;
+  next.bytes=sizeof(RayTile)+sizeof(TileKey)+sizeof(uint64_t)+128+
+   next.mesh.storageBytes();
+- constexpr size_t byteLimit=64*1024*1024,tileLimit=16384;
++ const size_t byteLimit=rayByteLimit;constexpr size_t tileLimit=16384;
+  // An unusually complex tile retains the original path without consuming the
+  // bounded mesh budget. tile()'s reference remains valid throughout this call.
+  if(next.bytes>byteLimit)return nullptr;
+--- a/map_world.h
++++ b/map_world.h
+@@ -24,6 +24,8 @@
+  bool ray(Vec start,Vec direction,float range,Hit& hit,bool reuseMesh=false);
+  struct RayMeshStats {uint64_t hits=0,misses=0,evictions=0;size_t bytes=0,tiles=0;};
+  RayMeshStats rayMeshStats()const;
++ void setRayMeshBudget(size_t bytes);
++ size_t rayMeshBudget()const{return rayByteLimit;}
+  bool fits(Vec feet,float radius,float height);
+  bool edited(Vec p)const;
+  float removal(Vec p)const;
+@@ -55,7 +57,7 @@
+  std::unordered_map<TileKey,RayTile,RayKeyHash> rayTiles;
+  std::map<uint64_t,TileKey> rayUse;
+  uint64_t rayClock=0,rayHits=0,rayMisses=0,rayEvictions=0;
+- size_t rayBytes=0;
++ size_t rayBytes=0,rayByteLimit=64*1024*1024;
+  const RayMesh* rayMesh(TileKey);
+  void eraseRayMesh(TileKey);
+  void clearRayMeshes();
+--- a/volume.cpp
++++ b/volume.cpp
+@@ -64,8 +64,9 @@
+   Chunk &chunk=chunks[(iz*cy+iy)*cx+ix];if(!chunk.dirty)continue;chunk.dirty=false;chunk.triangles.clear();++chunk.revision;++lastRebuilt;
+   for(int z=iz*cells;z<std::min(nz-1,(iz+1)*cells);++z)for(int y=iy*cells;y<std::min(ny-1,(iy+1)*cells);++y)for(int x=ix*cells;x<std::min(nx-1,(ix+1)*cells);++x){
+    Vec p[8];float v[8];size_t ids[8];bool damage=false,hasAir=false,hasSolid=false;
+-   for(int i=0;i<8;++i){int xx=x+corners[i][0],yy=y+corners[i][1],zz=z+corners[i][2];size_t k=index(xx,yy,zz);ids[i]=k;p[i]=point(xx,yy,zz);v[i]=density[k];hasAir|=v[i]<0;hasSolid|=v[i]>=0;damage|=density[k]<base[k]-excavationEpsilon;}
++   for(int i=0;i<8;++i){int xx=x+corners[i][0],yy=y+corners[i][1],zz=z+corners[i][2];size_t k=index(xx,yy,zz);ids[i]=k;v[i]=density[k];hasAir|=v[i]<0;hasSolid|=v[i]>=0;}
+    if(!hasAir||!hasSolid)continue;
++   for(int i=0;i<8;++i){p[i]=point(x+corners[i][0],y+corners[i][1],z+corners[i][2]);damage|=v[i]<base[ids[i]]-excavationEpsilon;}
+    // Shared edges must execute identical floating-point arithmetic, even
+    // when adjacent tetrahedra traverse that edge in opposite directions.
+    auto edge=[&](int a,int b){if(ids[a]>ids[b])std::swap(a,b);return p[a]+(p[b]-p[a])*(v[a]/(v[a]-v[b]));};
+@@ -165,7 +166,11 @@
+   // Spatially split an index array; retain original triangle IDs for exact tie
+   // handling. Bounds include the exact test's barycentric edge tolerance.
+   part.order.reserve(part.triangles.size());
+-  for(size_t i=0;i<part.triangles.size();++i)part.order.push_back(uint16_t(i));
++  std::vector<Vec> centers;centers.reserve(part.triangles.size());
++  for(size_t i=0;i<part.triangles.size();++i){
++   part.order.push_back(uint16_t(i));const auto& t=part.triangles[i];
++   centers.push_back(part.values[t[0]]+part.values[t[1]]+part.values[t[2]]);
++  }
+   auto buildNodes=[&](auto&& self,uint32_t first,uint32_t count)->uint32_t{
+    uint32_t index=uint32_t(part.nodes.size());part.nodes.emplace_back();
+    Node node;node.first=first;node.count=count;node.lo={INFINITY,INFINITY,INFINITY};node.hi={-INFINITY,-INFINITY,-INFINITY};
+@@ -180,7 +185,7 @@
+    if(count>32){
+     Vec span=node.hi-node.lo;int axis=span.x>span.y?0:1;if(span.z>(axis?span.y:span.x))axis=2;
+     auto middle=part.order.begin()+first+count/2;
+-    auto coordinate=[&](uint16_t id){const auto& t=part.triangles[id];Vec c=part.values[t[0]]+part.values[t[1]]+part.values[t[2]];return axis==0?c.x:axis==1?c.y:c.z;};
++    auto coordinate=[&](uint16_t id){const Vec& c=centers[id];return axis==0?c.x:axis==1?c.y:c.z;};
+     std::nth_element(part.order.begin()+first,middle,part.order.begin()+first+count,[&](uint16_t a,uint16_t b){float x=coordinate(a),y=coordinate(b);return x<y||(x==y&&a<b);});
+     self(self,first,count/2);node.right=self(self,first+count/2,count-count/2);node.count=0;
+    }
+--- a/duct-tape-doom-main/platform/solid_runtime.cpp
++++ b/duct-tape-doom-main/platform/solid_runtime.cpp
+@@ -35,9 +35,13 @@
+ static SolidSightResults solidSightResults;
+ static bool solidSightResultFailed=false;
+ static uint64_t solidSightVerified=0,solidSightMismatches=0;
++static uint64_t sightSectorChanges=0,sightBlastChanges=0,sightCollapseChanges=0;
++static uint64_t sightSectorNoops=0,sightBlastNoops=0,sightCollapseNoops=0;
+ static void invalidateSolidSightResults(){solidSightResults.invalidate();}
+ static void resetSolidSightResults(){
+  solidSightResults.reset();solidSightVerified=solidSightMismatches=0;
++ sightSectorChanges=sightBlastChanges=sightCollapseChanges=0;
++ sightSectorNoops=sightBlastNoops=sightCollapseNoops=0;
+  // A verification failure disables reuse for the rest of the process.
+ }
+ extern "C" int SV_Edited(float x,float y,float z){return SV_MapMode()&&mapWorld.edited({x,y,z});}
+@@ -135,6 +139,9 @@
+   if(serial!=r_levelserial){
+    resetSolidSightResults();
+    mapWorld.reset(readMapSource());mapHeights.clear();directImpact=nullptr;actorMissile=nullptr;
++   // Preserve 64 MiB default; opt in to a larger bounded geometry cache.
++   mapWorld.setRayMeshBudget(size_t(M_CheckParm((char*)"-solidraycache256")?256:
++    M_CheckParm((char*)"-solidraycache128")?128:64)*1024*1024);
+    for(int i=0;i<numsectors;++i)mapHeights.push_back({sectors[i].floorheight,sectors[i].ceilingheight});
+    serial=r_levelserial;
+   }
+@@ -156,8 +163,9 @@
+  if(mapHeights[i][0]==s->floorheight&&mapHeights[i][1]==s->ceilingheight)return;
+  mapHeights[i]={s->floorheight,s->ceilingheight};
+  auto begin=std::chrono::steady_clock::now();
+- invalidateSolidSightResults();
+- mapWorld.heights(i,unit(s->floorheight),unit(s->ceilingheight));
++ if(mapWorld.heights(i,unit(s->floorheight),unit(s->ceilingheight))){
++  ++sightSectorChanges;invalidateSolidSightResults();
++ }else ++sightSectorNoops;
+  if(M_CheckParm((char*)"-profilesolid"))printf("SOLID sector %d tic %d %.3f ms\n",i,gametic,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count());
+ }
+ int SV_Slide(mobj_t* m){
+@@ -277,8 +285,9 @@
+  for(auto it=pendingCollapses.begin();it!=pendingCollapses.end();++it)if(it->due<=leveltime){
+   auto item=*it;pendingCollapses.erase(it);
+   auto begin=std::chrono::steady_clock::now();
+-  invalidateSolidSightResults();
+   auto removed=mapWorld.crumble(std::clamp(sv_collapse_size,4,24),item.cut,24);
++  if(!removed.empty()){++sightCollapseChanges;invalidateSolidSightResults();}
++  else ++sightCollapseNoops;
+   if(M_CheckParm((char*)"-profilesolid"))printf("SOLID collapse tic %d cut %zu removed %zu %.3f ms\n",leveltime,item.cut,removed.size(),std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count());
+   int falling=0;
+   for(auto p:removed){
+@@ -391,8 +400,9 @@
+    }
+   }
+   auto blastStart=std::chrono::steady_clock::now();
+-  invalidateSolidSightResults();
+   bool applied=mapWorld.blast(center,radius,sector,plane,anchor,origin,inward,cap,float(P_GlobalDigMaxDepth()),stretch);
++  if(applied){++sightBlastChanges;invalidateSolidSightResults();}
++  else ++sightBlastNoops;
+   if(M_CheckParm((char*)"-profilesolid"))printf("SOLID map blast tic %d radius %.2f depth %.2f: %.3f ms\n",gametic,radius,depth,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-blastStart).count());
+   if(M_CheckParm((char*)"-profilesolid"))printf("MAP cut applied %d center %.2f %.2f %.2f sample %.2f\n",
+    int(applied),center.x,center.y,center.z,mapWorld.sample(origin+inward*.5f));
+@@ -407,8 +417,10 @@
+     if(nearby!=pendingCollapses.end()){nearby->cut=mapWorld.cutCount()-1;nearby->generation=std::min(nearby->generation,collapseGeneration);}
+     else if(pendingCollapses.size()<16)pendingCollapses.push_back({mapWorld.cutCount()-1,leveltime+(sv_hanging_fragments?18:1),collapseGeneration});
+    }else {
+-    invalidateSolidSightResults();
+-    for(auto p:mapWorld.crumble())if(R_CraterCrumble)R_CraterCrumble(p.x,p.y,p.z);
++    auto removed=mapWorld.crumble();
++    if(!removed.empty()){++sightCollapseChanges;invalidateSolidSightResults();}
++    else ++sightCollapseNoops;
++    for(auto p:removed)if(R_CraterCrumble)R_CraterCrumble(p.x,p.y,p.z);
+    }
+   }
+   return;
+@@ -514,8 +526,8 @@
+   static int lastTic=-1;static unsigned lastLevel=~0u;
+   if(lastLevel!=r_levelserial||(leveltime<10&&leveltime!=lastTic)||leveltime-lastTic>=TICRATE){
+    auto s=mapWorld.rayMeshStats();lastTic=leveltime;lastLevel=r_levelserial;
+-   fprintf(stderr,"SOLID sight meshes tic %d: hits %llu misses %llu evictions %llu tiles %zu bytes %zu\n",
+-    leveltime,(unsigned long long)s.hits,(unsigned long long)s.misses,(unsigned long long)s.evictions,s.tiles,s.bytes);
++   fprintf(stderr,"SOLID sight meshes tic %d: hits %llu misses %llu evictions %llu tiles %zu bytes %zu budget %zu\n",
++    leveltime,(unsigned long long)s.hits,(unsigned long long)s.misses,(unsigned long long)s.evictions,s.tiles,s.bytes,mapWorld.rayMeshBudget());
+   }
+  }
+  static const bool requested=M_CheckParm((char*)"-solidsightresultcache")!=0;
+@@ -531,6 +543,9 @@
+     leveltime,int(useResults),int(verify&&useResults),int(solidSightResultFailed),(unsigned long long)v.hits,(unsigned long long)v.misses,
+     (unsigned long long)v.stores,(unsigned long long)v.replacements,(unsigned long long)v.invalidations,
+     (unsigned long long)solidSightVerified,(unsigned long long)solidSightMismatches,SolidSightResults::capacity,sizeof(solidSightResults));
++   fprintf(stderr,"SOLID sight invalidation reasons tic %d: sectors %llu blasts %llu collapses %llu sector_noops %llu blast_noops %llu collapse_noops %llu\n",leveltime,
++    (unsigned long long)sightSectorChanges,(unsigned long long)sightBlastChanges,(unsigned long long)sightCollapseChanges,
++    (unsigned long long)sightSectorNoops,(unsigned long long)sightBlastNoops,(unsigned long long)sightCollapseNoops);
+   }
+  }
+  if(!useResults)return solidSightUncached(a,b,reuseMesh);
