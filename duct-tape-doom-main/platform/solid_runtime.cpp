@@ -38,6 +38,26 @@ static uint64_t solidSightVerified=0,solidSightMismatches=0;
 static uint64_t sightSectorChanges=0,sightBlastChanges=0,sightCollapseChanges=0;
 static uint64_t sightSectorNoops=0,sightBlastNoops=0,sightCollapseNoops=0;
 static uint64_t supportEmptyBypasses=0;
+static uint64_t supportSpatialChecks=0,supportSpatialBypasses=0,supportSpatialVerified=0,supportSpatialMismatches=0;
+static bool supportSpatialFailed=false;
+static bool solidSupportSpatialEnabled(){
+ static const bool requested=M_CheckParm((char*)"-solidsupportspatial")!=0;
+ return requested&&!supportSpatialFailed;
+}
+static bool solidSupportSpatialVerify(){
+ static const bool verify=M_CheckParm((char*)"-verifysolidsupportspatial")!=0;
+ return verify;
+}
+static int finishSpatialSupportVerification(bool verify,int result){
+ if(verify){
+  ++supportSpatialVerified;
+  if(result!=-1){
+   ++supportSpatialMismatches;supportSpatialFailed=true;
+   fprintf(stderr,"SOLID support spatial mismatch: tic %d legacy result %d; disabling spatial bypass\n",gametic,result);
+  }
+ }
+ return result;
+}
 static bool solidSupportFastEnabled(){
  static const bool enabled=!M_CheckParm((char*)"-nosolidsupportfast");
  return enabled;
@@ -48,6 +68,7 @@ static void resetSolidSightResults(){
  sightSectorChanges=sightBlastChanges=sightCollapseChanges=0;
  sightSectorNoops=sightBlastNoops=sightCollapseNoops=0;
  supportEmptyBypasses=0;
+ supportSpatialChecks=supportSpatialBypasses=supportSpatialVerified=supportSpatialMismatches=0;
  // A verification failure disables reuse for the rest of the process.
 }
 extern "C" int SV_Edited(float x,float y,float z){return SV_MapMode()&&mapWorld.edited({x,y,z});}
@@ -253,6 +274,22 @@ int SV_Position(mobj_t *m,fixed_t x,fixed_t y,fixed_t *floor,fixed_t *ceiling){
  if(solidSupportFastEnabled()&&mapWorld.cutCount()==0){
   ++supportEmptyBypasses;return -1;
  }
+ // Only bypass the exact existing MapWorld::affected gate. Near damage,
+ // or if the index cannot prove rejection, keep all Stage 3 processing.
+ bool verifySpatial=false;
+ if(solidSupportFastEnabled()&&solidSupportSpatialEnabled()){
+  ++supportSpatialChecks;
+  if(!mapWorld.mayBeAffected({unit(x),unit(y),unit(m->z)},unit(m->radius),unit(m->height))){
+   if(!solidSupportSpatialVerify()){++supportSpatialBypasses;return -1;}
+   // In verification mode execute the original cached path, not just the
+   // index oracle. Always return its result and preserve its output writes.
+   verifySpatial=true;
+   if(mapWorld.affected({unit(x),unit(y),unit(m->z)},unit(m->radius),unit(m->height))){
+    ++supportSpatialMismatches;supportSpatialFailed=true;verifySpatial=false;
+    fprintf(stderr,"SOLID support spatial predicate mismatch: tic %d; disabling spatial bypass\n",gametic);
+   }
+  }
+ }
  struct Support {std::array<fixed_t,6> query{};uint64_t revision=~uint64_t(0);int result=-1;fixed_t floor=0,ceiling=0;};
  static std::map<mobj_t*,Support> supports;
  static unsigned level=~0u;
@@ -264,13 +301,13 @@ int SV_Position(mobj_t *m,fixed_t x,fixed_t y,fixed_t *floor,fixed_t *ceiling){
  if(support.query==query&&support.revision==stamp){
   MP_COUNT(MP_CACHE_HIT,1);
   if(support.result==1){*floor=support.floor;*ceiling=support.ceiling;}
-  return support.result;
+  return finishSpatialSupportVerification(verifySpatial,support.result);
  }
  MP_COUNT(MP_CACHE_MISS,1);MP_COUNT(MP_CACHE_INVALIDATE,support.revision!=~uint64_t(0)&&support.revision!=stamp);
  int result=solidPositionUncached(m,x,y,floor,ceiling);
  support.query=query;support.revision=mapWorld.supportStamp({unit(x),unit(y),unit(m->z)},unit(m->radius));support.result=result;
  if(result==1){support.floor=*floor;support.ceiling=*ceiling;}
- return result;
+ return finishSpatialSupportVerification(verifySpatial,result);
 }
 void SV_Refresh(mobj_t *m){
  if(!SV_Active()||m->type==MT_PUFF)return;
@@ -564,6 +601,11 @@ int SV_Sight(mobj_t *a,mobj_t *b){
     (unsigned long long)sightSectorNoops,(unsigned long long)sightBlastNoops,(unsigned long long)sightCollapseNoops);
    fprintf(stderr,"SOLID support fast tic %d: enabled %d empty_bypasses %llu cuts %zu\n",
     leveltime,int(solidSupportFastEnabled()),(unsigned long long)supportEmptyBypasses,mapWorld.cutCount());
+   auto index=mapWorld.cutIndexStats();
+   fprintf(stderr,"SOLID support spatial tic %d: enabled %d verify %d failed %d checks %llu bypasses %llu verified %llu mismatches %llu complete %d cells %zu references %zu indexed_cuts %zu\n",
+    leveltime,int(solidSupportFastEnabled()&&solidSupportSpatialEnabled()),int(solidSupportSpatialVerify()),int(supportSpatialFailed),
+    (unsigned long long)supportSpatialChecks,(unsigned long long)supportSpatialBypasses,(unsigned long long)supportSpatialVerified,
+    (unsigned long long)supportSpatialMismatches,int(index.complete),index.cells,index.references,index.indexedCuts);
   }
  }
  if(!useResults)return solidSightUncached(a,b,reuseMesh);

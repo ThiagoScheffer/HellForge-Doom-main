@@ -30,6 +30,11 @@ public:
  bool edited(Vec p)const;
  float removal(Vec p)const;
  bool affected(Vec feet,float radius,float height)const;
+ // Conservative indexed version of affected(): false proves the same rejection.
+ // True may mean an unsupported query/index; callers must use the old path.
+ bool mayBeAffected(Vec feet,float radius,float height)const;
+ struct CutIndexStats {bool complete;size_t cells,references,indexedCuts;};
+ CutIndexStats cutIndexStats()const{return {cutIndexComplete,cutCells.size(),cutReferences,indexedCuts};}
  bool save(std::ostream&)const;
  bool load(std::istream&);
  const std::map<TileKey,WorldTile>& tiles()const{return cache;}
@@ -54,6 +59,13 @@ private:
  // independently of the smaller collision-volume cache. Never cache LOS answers.
  struct RayTile {RayMesh mesh;size_t bytes=0;uint64_t used=0;};
  struct RayKeyHash {size_t operator()(const TileKey& key)const{size_t h=2166136261u;for(auto v:key)h=(h^uint32_t(v))*16777619u;return h;}};
+ // Cut anchors translate only in Z. Index immutable XY influence bounds;
+ // exact candidate tests still use current plane heights and the original AABB.
+ std::unordered_map<TileKey,std::vector<uint32_t>,RayKeyHash> cutCells;
+ size_t cutReferences=0,indexedCuts=0;
+ bool cutIndexComplete=true;
+ void resetCutIndex();
+ void appendCutIndex(size_t first);
  std::unordered_map<TileKey,RayTile,RayKeyHash> rayTiles;
  std::map<uint64_t,TileKey> rayUse;
  uint64_t rayClock=0,rayHits=0,rayMisses=0,rayEvictions=0;

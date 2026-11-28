@@ -10,7 +10,7 @@ static constexpr float extent=MapSource::tileCells*MapSource::step;
 TileKey MapWorld::key(Vec p){return {int(std::floor(p.x/extent)),int(std::floor(p.y/extent)),int(std::floor(p.z/extent))};}
 void MapWorld::reset(MapSource next){
  clearRayMeshes();rayHits=rayMisses=rayEvictions=0;
- source=std::move(next);cuts.clear();planes.clear();cache.clear();columns.clear();
+ source=std::move(next);cuts.clear();resetCutIndex();planes.clear();cache.clear();columns.clear();
  for(const auto& r:source.topology())planes[r.sector]={r.floor,r.ceiling};
 }
 Vec MapWorld::center(const MapCut& cut)const{
@@ -104,6 +104,53 @@ bool MapWorld::affected(Vec p,float radius,float height)const{
  }
  return false;
 }
+// 128-unit XY cells; independent of volume/ray tile residency and revisions.
+// Use the same rounded float endpoints as affected(), including touching edges.
+static constexpr float cutCellExtent=128.f;
+static bool cutCellRange(float x0,float y0,float x1,float y1,TileKey& lo,TileKey& hi,size_t limit){
+ if(!std::isfinite(x0)||!std::isfinite(y0)||!std::isfinite(x1)||!std::isfinite(y1)||
+    x0>x1||y0>y1||std::abs(x0)>1e9f||std::abs(y0)>1e9f||std::abs(x1)>1e9f||std::abs(y1)>1e9f)return false;
+ lo={int(std::floor(x0/cutCellExtent)),int(std::floor(y0/cutCellExtent)),0};
+ hi={int(std::floor(x1/cutCellExtent)),int(std::floor(y1/cutCellExtent)),0};
+ return uint64_t(hi[0]-lo[0]+1)*uint64_t(hi[1]-lo[1]+1)<=limit;
+}
+void MapWorld::resetCutIndex(){
+ cutCells.clear();cutReferences=indexedCuts=0;cutIndexComplete=true;
+}
+void MapWorld::appendCutIndex(size_t first){
+ if(!cutIndexComplete)return;
+ constexpr size_t cellLimit=65536,referenceLimit=1048576;
+ auto disable=[&](){resetCutIndex();cutIndexComplete=false;};
+ if(first!=indexedCuts||first>cuts.size()){disable();return;}
+ for(size_t i=first;i<cuts.size();++i){
+  const auto& c=cuts[i];float r=c.radius*std::max(1.f,c.stretch)*1.06f+MapSource::step*2;
+  TileKey lo,hi;
+  if(!cutCellRange(c.center.x-r,c.center.y-r,c.center.x+r,c.center.y+r,lo,hi,256)){disable();return;}
+  for(int y=lo[1];y<=hi[1];++y)for(int x=lo[0];x<=hi[0];++x){
+   TileKey k{x,y,0};auto it=cutCells.find(k);
+   if(cutReferences>=referenceLimit||(it==cutCells.end()&&cutCells.size()>=cellLimit)){disable();return;}
+   if(it==cutCells.end())it=cutCells.try_emplace(k).first;
+   it->second.push_back(uint32_t(i));++cutReferences;
+  }
+  ++indexedCuts;
+ }
+}
+bool MapWorld::mayBeAffected(Vec p,float radius,float height)const{
+ if(cuts.empty())return false;
+ if(!cutIndexComplete||indexedCuts!=cuts.size()||!std::isfinite(radius)||!std::isfinite(height)||
+    !std::isfinite(p.z)||!std::isfinite(p.z+height)||radius<0||height<0)return true;
+ TileKey lo,hi;
+ if(!cutCellRange(p.x-radius,p.y-radius,p.x+radius,p.y+radius,lo,hi,64))return true;
+ for(int y=lo[1];y<=hi[1];++y)for(int x=lo[0];x<=hi[0];++x){
+  auto it=cutCells.find({x,y,0});if(it==cutCells.end())continue;
+  for(uint32_t i:it->second){
+   const auto& c=cuts[i];Vec q=center(c);float r=c.radius*std::max(1.f,c.stretch)*1.06f+MapSource::step*2;
+   if(q.x+r>=p.x-radius&&q.x-r<=p.x+radius&&q.y+r>=p.y-radius&&q.y-r<=p.y+radius&&
+      q.z+r>=p.z&&q.z-r<=p.z+height)return true;
+  }
+ }
+ return false;
+}
 void MapWorld::update(TileKey k,WorldTile& tile,bool incremental,size_t firstCut){
  // A resident incremental tile can prove its density is unchanged. A fresh
  // incremental tile still invalidates conservatively if a compact mesh exists.
@@ -190,6 +237,7 @@ bool MapWorld::blast(Vec c,float r,int sector,int plane,float anchor,Vec capOrig
   TileKey k{x,y,z};update(k,cache[k],true);
  }
  if(nextRevision==beforeRevision){cuts.pop_back();return false;}
+ appendCutIndex(cuts.size()-1);
  return true;
 }
 bool MapWorld::heights(int sector,float floor,float ceiling){
@@ -316,6 +364,7 @@ std::vector<Vec> MapWorld::crumble(int maximum,size_t anchorIndex,int totalLimit
   }
  }
  for(auto k:dirty)update(k,cache[k],true,firstRemoval);
+ appendCutIndex(firstRemoval);
  return removed;
 }
 void MapWorld::clearRayMeshes(){rayTiles.clear();rayUse.clear();rayBytes=0;rayClock=0;}
@@ -428,7 +477,7 @@ bool MapWorld::load(std::istream& in){
  }
  // Old saves retain their format; discard only cuts now owned by shielded floors.
  next.erase(std::remove_if(next.begin(),next.end(),[&](const MapCut& c){return c.sector>=0&&c.plane==0&&source.floorShielded(c.sector);}),next.end());
- cuts=std::move(next);cache.clear();clearRayMeshes();
+ cuts=std::move(next);resetCutIndex();appendCutIndex(0);cache.clear();clearRayMeshes();
  for(const auto& cut:cuts){
   Vec c=center(cut);float reach=cut.radius*std::max(1.f,cut.stretch)*1.06f+MapSource::step*2;
   auto lo=key(c-Vec{reach,reach,reach}),hi=key(c+Vec{reach,reach,reach});
