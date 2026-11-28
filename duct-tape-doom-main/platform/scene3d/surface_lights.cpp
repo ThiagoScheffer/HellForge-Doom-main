@@ -2,6 +2,7 @@
    see each other. */
 #include "internal.h"
 #include "../material_light_coverage.h"
+#include "wall_emission_history.h"
 #include <tuple>
 extern "C" {
 }
@@ -73,10 +74,34 @@ struct WallPoints {
     std::vector<WallPointSample> points;
 };
 static std::unordered_map<size_t,WallPoints> wallPointSamples;
+// Keep the original current-entry caches; retain additional animation states
+// only within fixed per-level entry and payload budgets. Map-node and entry
+// metadata are separately bounded by the entry limits.
+struct IntegralPayload {size_t operator()(const WallEmissionIntegral &) const {return 0;}};
+struct PointPayload {size_t operator()(const WallPoints &p) const {return p.points.capacity()*sizeof(WallPointSample);}};
+static doom_wall_emission::History<WallEmissionIntegral,IntegralPayload> integralHistory(8192,0);
+static doom_wall_emission::History<WallPoints,PointPayload> pointHistory(8192,16*1024*1024);
+
+static bool animatedWallTransition(int texture,int previous,const std::array<float,4> &bounds,
+                                  const std::array<float,4> &previousBounds) {
+    if(previous<0||previous==texture||bounds!=previousBounds)return false;
+    static const bool disabled=M_CheckParm((char*)"-nowallemissionhistory")!=0;
+    if(disabled)return false;
+    int next;
+    return P_PicAnimationNext(true,texture,&next)>0;
+}
+struct CoverageTrace {
+    unsigned flatMisses=0,pointMisses=0,pointRestores=0,integralMisses=0,integralRestores=0;
+    uint64_t flatNs=0,pointNs=0,integralNs=0;
+};
+static bool coverageTracing=false;
+static CoverageTrace coverageTrace;
+
 static std::vector<SurfaceLight> mergeInputs,mergeResult;
 static std::vector<size_t> mergeMembership;
 static std::vector<float> mergeWeights;
 static int mergeLightingModel=doom_lighting_model::Enhanced;
+static bool lastMergeHit=false;
 static bool sameSurface(const SurfaceLight &a,const SurfaceLight &b,bool shine=true) {
     return a.key==b.key&&a.x==b.x&&a.y==b.y&&a.z==b.z&&a.radius==b.radius&&a.strength==b.strength&&
         a.color==b.color&&a.facing==b.facing&&a.extent==b.extent&&a.group==b.group&&a.flickerSector==b.flickerSector&&
@@ -187,6 +212,7 @@ std::vector<SurfaceLight> mergedSurfaceLights(std::vector<SurfaceLight> tiles) {
     }
     bool hit=tiles.size()==mergeInputs.size()&&!mergeResult.empty();
     if(hit)for(size_t i=0;i<tiles.size();++i)if(!sameSurface(tiles[i],mergeInputs[i],false)){hit=false;break;}
+    lastMergeHit=hit;
     if(!hit) {
         mergeInputs=tiles;
         groupSurfaceLights(tiles);mergeResult=mergeSurfaceLights<true>(tiles);
@@ -386,6 +412,7 @@ static void surfaceLight(const SurfaceLightKey &key,int sector,float x,float y,f
 #endif
 }
 static void materialReplaced() {
+    integralHistory.clear();pointHistory.clear();
     lightBakeKey=-1;
     surfaceGroups.clear();mergeResult.clear();surfaceSelection.clear();
 }
@@ -473,6 +500,7 @@ static const std::vector<FlatLightSample> &flatSamples(int sectorIndex,int lump,
     auto key=std::make_tuple(sectorIndex,lump,clipped);
     auto cached=flatLightSamples.find(key);
     if(cached!=flatLightSamples.end()) return cached->second;
+    const uint64_t start=coverageTracing?SDL_GetTicksNS():0;
     std::map<std::pair<int,int>,Point> samples;
     // Sample the texture's emission center on its world-aligned repeat grid.
     // BSP polygons only test membership; their centers never place lights.
@@ -491,9 +519,16 @@ static const std::vector<FlatLightSample> &flatSamples(int sectorIndex,int lump,
     std::vector<FlatLightSample> result;
     for(const auto &sample:samples) result.push_back({sample.second,sample.first.first,sample.first.second});
     if(clipped&&flatCoverageBudget)addClippedFlatSamples(sectorIndex,image,samples,result);
-    return flatLightSamples.emplace(key,std::move(result)).first->second;
+    const auto &stored=flatLightSamples.emplace(key,std::move(result)).first->second;
+    if(coverageTracing) {
+        ++coverageTrace.flatMisses;
+        coverageTrace.flatNs+=SDL_GetTicksNS()-start;
+    }
+    return stored;
 }
 void collectFlatLights() {
+    coverageTracing=M_CheckParm((char*)"-profilespikes")!=0;
+    if(coverageTracing)coverageTrace={};
     switchLights.clear();
 #ifdef DOOM_TEST_DRIVER
     static const bool audit=M_CheckParm((char*)"-materiallightaudit")!=0;
@@ -528,6 +563,14 @@ void collectFlatLights() {
     }
 }
 void collectSurfaceLights() {
+    if(coverageTracing) {
+        const auto &s=coverageTrace;
+        if(s.flatNs+s.pointNs+s.integralNs>2000000||s.pointRestores||s.integralRestores)
+            fprintf(stderr,"Surface coverage tic %d leveltic %d: flat misses %u %.3f ms, wall point misses %u restores %u %.3f ms, wall integral misses %u restores %u %.3f ms, raw %zu, point history %zu entries %zu bytes, integral history %zu entries\n",
+                gametic,leveltime,s.flatMisses,s.flatNs/1e6,s.pointMisses,s.pointRestores,s.pointNs/1e6,
+                s.integralMisses,s.integralRestores,s.integralNs/1e6,surfaceLights.size(),
+                pointHistory.size(),pointHistory.payloadBytes(),integralHistory.size());
+    }
 #ifdef DOOM_TEST_DRIVER
     MaterialAuditFrame report;
 #endif
@@ -612,7 +655,7 @@ void collectSurfaceLights() {
                     bakedLightsActive?1.0f:0,{std::min(p.extent,p.radius),n[0],n[1],0});
         if(index<flashes.count&&settings.performanceTrace&&settings.performanceTraceDetail)traceLightOrigins[index]=p.origin;
     }
-    if(trace){auto end=SDL_GetTicksNS();if(end-t0>2000000)fprintf(stderr,"Surface spike tic %d: merge %.3f select %.3f blockers %.3f ms\n",gametic,(t1-t0)/1e6,(t2-t1)/1e6,(end-t2)/1e6);}
+    if(trace){auto end=SDL_GetTicksNS();if(end-t0>2000000)fprintf(stderr,"Surface spike tic %d: merge %.3f select %.3f blockers %.3f ms, merge cache %s, raw %zu merged %zu\n",gametic,(t1-t0)/1e6,(t2-t1)/1e6,(end-t2)/1e6,lastMergeHit?"hit":"miss",surfaceLights.size(),mergeResult.size());}
 }
 
 // How much glowing wall is round a point, as glowing area (texels that glow, in square units) within
@@ -692,6 +735,12 @@ static const std::vector<WallPointSample> &clippedWallPoints(size_t key,int text
         const std::array<float,4> &bounds,int firstU,int lastU,int firstV,int lastV) {
     auto &cached=wallPointSamples[key];
     if(cached.texture==texture&&cached.mask==image.explicitEmissionHash&&cached.bounds==bounds)return cached.points;
+    if(animatedWallTransition(texture,cached.texture,bounds,cached.bounds)&&
+       pointHistory.transition(key,texture,image.explicitEmissionHash,bounds,cached)) {
+        if(coverageTracing)++coverageTrace.pointRestores;
+        return cached.points;
+    }
+    const uint64_t start=coverageTracing?SDL_GetTicksNS():0;
     cached={texture,image.explicitEmissionHash,bounds,{}};
     const auto [left,length,top,bottom]=bounds;
     const float right=left+length;
@@ -720,6 +769,10 @@ static const std::vector<WallPointSample> &clippedWallPoints(size_t key,int text
     if(!budget&&!clippedWallLimitReported) {
         fprintf(stderr,"3D material lighting: clipped wall coverage budget reached.\n");
         clippedWallLimitReported=true;
+    }
+    if(coverageTracing) {
+        ++coverageTrace.pointMisses;
+        coverageTrace.pointNs+=SDL_GetTicksNS()-start;
     }
     return cached.points;
 }
@@ -758,7 +811,13 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
         std::array<float,4> bounds={u,len,anchor-top,anchor-bottom};
         int material=texturetranslation[tex];
         bool hit=cached.texture==material&&cached.mask==image.explicitEmissionHash&&cached.bounds==bounds;
+        if(!hit&&animatedWallTransition(material,cached.texture,bounds,cached.bounds)) {
+            const size_t key=size_t(&line-lines)*8+side*4+span;
+            hit=integralHistory.transition(key,material,image.explicitEmissionHash,bounds,cached);
+            if(hit&&coverageTracing)++coverageTrace.integralRestores;
+        }
         if(!hit||M_CheckParm((char*)"-verifysurfacecache")) {
+            const uint64_t start=coverageTracing?SDL_GetTicksNS():0;
             double weight=0,centerU=0,centerV=0;
             for(int v=(int)std::floor(anchor-top);v<(int)std::ceil(anchor-bottom);++v)
                 for(int uu=(int)std::floor(u);uu<(int)std::ceil(u+len);++uu){
@@ -772,6 +831,10 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
             if(hit&&(cached.weight!=weight||cached.centerU!=centerU||cached.centerV!=centerV))
                 I_Error((char*)"Cached wall emission differs from pixel integration");
             cached={material,image.explicitEmissionHash,bounds,weight,centerU,centerV};
+            if(coverageTracing) {
+                if(!hit)++coverageTrace.integralMisses;
+                coverageTrace.integralNs+=SDL_GetTicksNS()-start;
+            }
         }
         double weight=cached.weight,centerU=cached.centerU,centerV=cached.centerV;
         if(weight>0){
@@ -798,6 +861,7 @@ void wallLights(const line_t &line,int side,Point a,Point b,float bottom,float t
 }
 void clearSurfaceLights() {
     switchLights.clear();
+    integralHistory.clear();pointHistory.clear();coverageTrace={};coverageTracing=false;
     wallEmissionIntegrals.clear();wallPointSamples.clear();mergeInputs.clear();mergeResult.clear();mergeMembership.clear();mergeWeights.clear();
     surfaceLights.clear();surfaceSelection.clear();flatLightSamples.clear();surfaceGroups.clear();lampRanges.clear();surfaceLightTime=0;
     flatCoverageBudget=flatCoverageLimit;clippedWallLimitReported=false;wallMaterials.clear();flatMaterials.clear();

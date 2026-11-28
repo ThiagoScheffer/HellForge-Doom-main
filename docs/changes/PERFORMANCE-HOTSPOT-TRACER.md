@@ -123,3 +123,51 @@ columns. Offline joins use session identity plus frame serial.
 cmake --build build/trace-link-verify --config Release --target doom doom-perf-smoke doom-performance-trace-tests doom-world-frustum-tests
 ctest --test-dir build/trace-link-verify -C Release -R '^(performance-trace|world-frustum-bounds|sprite-frustum-bounds)$' --output-on-failure
 ```
+
+The Release executable, the existing performance smoke driver and the
+focused tracer and frustum targets compiled. All three focused CTest cases
+passed. The synthetic tests covered long downsampling, stable duplicate
+exports, incident eviction, exact retained peak payloads, two mask words,
+and merged provenance. The one-position Doom II MAP01 check completed
+through the existing synchronous benchmark entry point.
+
+The SDL/Vulkan Doom II test driver started with the tracer disabled and
+applied Basic or Detailed through F4. The unattended driver used its
+test-only focus override. Both modes exported one parent with two
+spatial segments. Basic omitted lights. Detailed resolved floor and wall
+materials from the geometry ray and selected emitters. The observed names
+included `FLOOR0_1`, `TEKGREN4` and surface sources such as `GRNLITE1`.
+Report rows parsed consistently and peak frame serials matched their
+reserved evidence. No scan-out or GPU hardware timestamps were measured.
+
+A replay of the original Ultimate Doom E1M1 LOWFPS save used the existing
+emissive-enabled reproduction settings and showed 3 XY planes level,
+0 near ?89?, and 4 height-aware planes in both views. Median world
+triangles were 302 and 146. Median main mask workload was 474 and 185
+triangles, with 515 and 132 light?triangle pairs. Both views retained
+eight selected surface lights. The downward geometry ray reported
+`NUKAGE2`, a translated animation frame. Selected lights included
+`NUKAGE2`, `NUKAGE3` and `NUKE24`. These measurements describe the
+current renderer and provide no claim of recovery from the original FPS drop.
+
+In the Doom II reports the median timed camera/light-count collection
+was 0.0022 ms in Basic and 0.0023 ms in Detailed. The Detailed snapshot
+routine had a median of 0.0016 ms across captured frames. These timers
+cover those routines only. Whole-tracer overhead was unmeasured.
+
+No custom WAD was generated or used. The LOWFPS run used the existing
+bundled DiggingMaterials assets. No full suite, generic map scan, broad
+benchmark or timestamp-provider test ran.
+
+### Upgrade source files
+
+- `BUILDING.md` and this document
+- `duct-tape-doom-main/platform/performance_trace.cpp` and `performance_trace.h`
+- `duct-tape-doom-main/platform/gpu3d/frame.cpp`
+- `duct-tape-doom-main/platform/scene3d.h`
+- `duct-tape-doom-main/platform/scene3d/geometry.cpp`, `internal.h`,
+  `lights.cpp`, `scene.cpp` and `surface_lights.cpp`
+- `duct-tape-doom-main/platform/settings_panel.cpp`,
+  `surface_lighting.h` and `world_frustum.h`
+- `duct-tape-doom-main/tests/perf_smoke.c`, `performance_trace.cpp`
+  and `world_frustum.cpp`

@@ -1,6 +1,6 @@
 """Regenerate the checked-in launcher catalogue from native F4 declarations (Python 3)."""
 from pathlib import Path
-import re, hashlib, xml.etree.ElementTree as ET
+import argparse, re, hashlib, xml.etree.ElementTree as ET
 ROOT=Path(__file__).resolve().parents[1]
 s=(ROOT/'duct-tape-doom-main/platform/settings_panel.cpp').read_text(encoding='utf-8')
 def args(start):
@@ -56,5 +56,7 @@ for key,low,high in re.findall(r'WP_KEY\(\w+,"([a-z_0-9]+)",(-?\d+),(-?\d+)\)',w
     seen.add(key)
     ET.SubElement(root,'option',key=key,title=key[3:].replace('_',' ').title(),category='Combat tuning',kind='slider',min=low,max=high,step='1')
 ET.indent(root)
-ET.ElementTree(root).write(ROOT/'launcher/settings-schema.xml',encoding='utf-8',xml_declaration=True)
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output',type=Path,default=ROOT/'launcher/settings-schema.xml')
+ET.ElementTree(root).write(parser.parse_args().output,encoding='utf-8',xml_declaration=True)
 print(f'Generated {len(seen)} F4 and balance setting descriptors')

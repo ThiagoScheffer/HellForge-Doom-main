@@ -3,8 +3,10 @@
 Install Visual Studio 2022 C++ Build Tools with CMake support and the Windows SDK. The launcher uses the .NET Framework C# compiler included with Windows.
 
 Install Python 3.9+ with `python` or `py` available on PATH. Every launcher
-build, including `-LauncherOnly`, regenerates `launcher/settings-schema.xml`
-from the native F4 settings and weak-point declarations before embedding it.
+build, including `-LauncherOnly`, regenerates its settings catalogue from the
+native F4 settings and weak-point declarations before embedding it. Regular
+builds write `launcher/settings-schema.xml`. The `-MonsterProfiling` build
+writes its catalogue to `build/monster-profiling/settings-schema.xml`.
 Generation failures stop the build. Full native builds also refresh the
 `platform/settings_panel.cpp` timestamp to force its compilation during
 incremental rebuilds. Launcher-only builds update the catalogue but retain
@@ -130,7 +132,21 @@ controls still include ambush sight reuse and conservative sprite filtering,
 both default off. Gameplay also exposes restricted classic-only idle-search
 reuse and aggregate swarm diagnostics.
 
-For diagnostic work, use a separate build directory, configure
+Build the launcher with the live monster profiler enabled using this command.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launcher/build.ps1 -MonsterProfiling
+```
+
+Open `build/monster-profiling/launcher/DOOM-Hellforge-Monster-Profiling.exe`,
+select the IWAD and map WAD, and enter
+`-profilemonsters "Diagnostics\Hellforge Monsters"` in **Engine Arguments**.
+Use a writable directory and a separate directory per recording. Play the
+problem area, then exit the game to flush the results. The launcher forwards
+the arguments and keeps the engine output in **Open Last Log**. Relative paths
+resolve from the Hellforge settings and save folder.
+
+For fixed-tic benchmark drivers, use a separate build directory, configure
 `-DDOOM_MONSTER_PROFILING=ON -DDOOM_MONSTER_BENCHMARK=ON`, then build
 `doom-monster-bench` and/or `doom-headless`. Runtime profiling needs
 `-profilemonsters <output-directory>`; wake auditing additionally needs

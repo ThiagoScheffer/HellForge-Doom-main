@@ -1,38 +1,45 @@
-param([switch]$LauncherOnly, [string]$OutputPath, [string]$EnginePath, [switch]$Experimental, [switch]$ForceRebuild)
+param([switch]$LauncherOnly, [string]$OutputPath, [string]$EnginePath, [switch]$Experimental, [switch]$ForceRebuild, [switch]$MonsterProfiling)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 if ($LauncherOnly -and $ForceRebuild) { throw '-ForceRebuild cannot be combined with -LauncherOnly.' }
+if ($MonsterProfiling -and ($LauncherOnly -or $EnginePath)) {
+    throw '-MonsterProfiling builds its own engine. Use a full build without -EnginePath.'
+}
 . (Join-Path $root 'tools\Build-Common.ps1')
+$nativeBuild = if ($MonsterProfiling) { "$root\build\monster-profiling" } else { "$root\build" }
+$profiling = if ($MonsterProfiling) { 'ON' } else { 'OFF' }
 if (-not $LauncherOnly) {
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw 'Visual Studio 2022 C++ Build Tools are required.' }
 $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-$configureArguments = Get-HellforgeConfigureArguments "$root\duct-tape-doom-main" "$root\build"
-& $cmake @configureArguments -G 'Visual Studio 17 2022' -A x64 -DDOOM_BUILD_SDL=ON -DDOOM_RENDER3D=ON -DDOOM_SOUNDFONT=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_TESTING=ON -DDOOM_GAME_DATA= -DDOOM_TEST_GPU=OFF -DDOOM_MONSTER_PROFILING=OFF -DDOOM_MONSTER_PROFILE_ARGUMENTS=OFF -DDOOM_MONSTER_BENCHMARK=OFF
+$configureArguments = Get-HellforgeConfigureArguments "$root\duct-tape-doom-main" $nativeBuild
+& $cmake @configureArguments -G 'Visual Studio 17 2022' -A x64 -DDOOM_BUILD_SDL=ON -DDOOM_RENDER3D=ON -DDOOM_SOUNDFONT=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_TESTING=ON -DDOOM_GAME_DATA= -DDOOM_TEST_GPU=OFF "-DDOOM_MONSTER_PROFILING=$profiling" -DDOOM_MONSTER_PROFILE_ARGUMENTS=OFF -DDOOM_MONSTER_BENCHMARK=OFF
 if ($LASTEXITCODE) { throw 'Configure failed' }
 # Source archives can preserve older timestamps. Always refresh the F4 source
 # timestamp so incremental native builds compile its current contents.
 (Get-Item -LiteralPath "$root\duct-tape-doom-main\platform\settings_panel.cpp").LastWriteTimeUtc = [DateTime]::UtcNow
-$nativeBuildArguments = Get-HellforgeNativeBuildArguments (Join-Path $root 'build') -ForceRebuild:$ForceRebuild
+$nativeBuildArguments = Get-HellforgeNativeBuildArguments $nativeBuild -ForceRebuild:$ForceRebuild
+if ($MonsterProfiling) { $nativeBuildArguments += @('--target', 'doom') }
 if ($ForceRebuild) { Write-Host 'Cleaning native build outputs before recompiling all code (ignoring source timestamps).' }
 & $cmake @nativeBuildArguments
 if ($LASTEXITCODE) { throw 'Engine build failed' }
 }
 if (-not $OutputPath) {
-    $OutputPath = if ($Experimental) { "$root\build\experimental-release\DOOM-Hellforge-Experimental.exe" } else { "$root\dist\DOOM-Hellforge.exe" }
+    $OutputPath = if ($MonsterProfiling) { "$nativeBuild\launcher\DOOM-Hellforge-Monster-Profiling.exe" } elseif ($Experimental) { "$root\build\experimental-release\DOOM-Hellforge-Experimental.exe" } else { "$root\dist\DOOM-Hellforge.exe" }
 }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force (Split-Path $OutputPath -Parent) | Out-Null
 New-Item -ItemType Directory -Force "$root\build" | Out-Null
-if (-not $EnginePath) { $EnginePath = "$root\build\Release\doom.exe" }
+if (-not $EnginePath) { $EnginePath = "$nativeBuild\Release\doom.exe" }
 $EnginePath = (Resolve-Path -LiteralPath $EnginePath).Path
 $version = (Get-Content "$PSScriptRoot\VERSION" -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'launcher/VERSION must contain a four-part numeric version.' }
 $engineHash = (Get-FileHash -LiteralPath $EnginePath -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
 $buildId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-$versionSource = if ($Experimental) { Join-Path (Split-Path $OutputPath -Parent) 'ExperimentalVersion.cs' } else { "$root\build\LauncherVersion.cs" }
+$versionSource = if ($Experimental) { Join-Path (Split-Path $OutputPath -Parent) 'ExperimentalVersion.cs' } else { "$nativeBuild\LauncherVersion.cs" }
 $flavor = if ($Experimental) { ' | Experimental' } else { '' }
+if ($MonsterProfiling) { $flavor += ' | Monster Profiling' }
 @"
 using System.Reflection;
 [assembly: AssemblyVersion("$version")]
@@ -48,21 +55,23 @@ if ($Experimental) {
 }
 # Regenerate even for launcher-only builds; the generator also reads weak-point
 # declarations, so checking only settings_panel.cpp's hash is insufficient.
+$schemaPath = if ($MonsterProfiling) { "$nativeBuild\settings-schema.xml" } else { "$PSScriptRoot\settings-schema.xml" }
+$schemaArgs = @("$root\tools\Generate-LauncherSettings.py", '--output', $schemaPath)
 $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($python) {
-    & $python.Source "$root\tools\Generate-LauncherSettings.py"
+    & $python.Source @schemaArgs
 } else {
     $pythonLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $pythonLauncher) { throw 'Python 3.9+ is required to regenerate launcher settings. Install Python and rebuild.' }
-    & $pythonLauncher.Source -3 "$root\tools\Generate-LauncherSettings.py"
+    & $pythonLauncher.Source -3 @schemaArgs
 }
 if ($LASTEXITCODE) { throw 'Launcher settings generation failed. Build stopped to avoid embedding stale settings.' }
-$catalogue = [xml](Get-Content -LiteralPath "$PSScriptRoot\settings-schema.xml" -Raw)
+$catalogue = [xml](Get-Content -LiteralPath $schemaPath -Raw)
 $nativeSettingsHash = (Get-FileHash -LiteralPath "$root\duct-tape-doom-main\platform\settings_panel.cpp" -Algorithm SHA256).Hash
 if ($nativeSettingsHash -ne $catalogue.settings.source_sha256) {
     throw 'Generated launcher settings do not match settings_panel.cpp. Build stopped.'
 }
-$compilerArgs = @("/win32icon:$PSScriptRoot\hellforge.ico", "/resource:$PSScriptRoot\hellforge.ico,hellforge.ico", "/resource:$PSScriptRoot\settings-schema.xml,settings-schema.xml", '/nologo','/codepage:65001','/target:winexe','/platform:x64','/optimize+',"/out:$OutputPath",
+$compilerArgs = @("/win32icon:$PSScriptRoot\hellforge.ico", "/resource:$PSScriptRoot\hellforge.ico,hellforge.ico", "/resource:$schemaPath,settings-schema.xml", '/nologo','/codepage:65001','/target:winexe','/platform:x64','/optimize+',"/out:$OutputPath",
     "/resource:$EnginePath,doom.exe", "/resource:$PSScriptRoot\hero.png,hero.png", "/resource:$graphicsResource,graphics.cfg",
     "/resource:$PSScriptRoot\DiggingMaterials.wad,DiggingMaterials.wad", "/resource:$PSScriptRoot\mods\FluidWeapons.pk3,FluidWeapons.pk3",
     "/resource:$PSScriptRoot\mods\FluidWeapons-SFX.pk3,FluidWeapons-SFX.pk3", "/resource:$PSScriptRoot\mods\FluidMonsters.pk3,FluidMonsters.pk3",
