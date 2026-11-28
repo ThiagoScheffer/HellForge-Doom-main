@@ -7,6 +7,7 @@
 #include <vector>
 extern "C" {
 #include "p_local.h"
+#include "p_hazard.h"
 #include "doomstat.h"
 extern int wp_test_sight,wp_test_block_visits,wp_test_block_cells;
 extern mobj_t *wp_test_hidden;
@@ -16,6 +17,10 @@ extern int wp_test_rng_value,wp_test_rng_calls,wp_test_damage_calls;
 int leveltime=10;
 static unsigned checks=0;
 static void check(bool ok,const char *why){if(!ok){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}++checks;}
+static uint32_t readLE32(const std::vector<unsigned char> &bytes,size_t offset) {
+    return uint32_t(bytes.at(offset))|(uint32_t(bytes.at(offset+1))<<8)|
+           (uint32_t(bytes.at(offset+2))<<16)|(uint32_t(bytes.at(offset+3))<<24);
+}
 static mobjinfo_t info{};
 static player_t player{};
 static mobj_t source{},target{};
@@ -188,7 +193,9 @@ static void injuriesAndSaves() {
     reset(MT_BABY);e=event(WP_ROCKET_DIRECT,WP_LEGS,4);P_WeakpointApply(&e);
     check(P_WeakpointImmobilized(&target),"mechanical leg injury activates");
     std::vector<unsigned char> saved(P_WeakpointSave(nullptr));check(P_WeakpointSave(saved.data())==saved.size(),"save size matches serialized records");
-    leveltime+=1000;check(P_WeakpointLoad(saved.data(),saved.size())==saved.size(),"versioned injury trailer loads");
+    check(readLE32(saved,0)==7&&readLE32(saved,4)==1&&saved.size()==16+236,
+          "ordinary injury writes one 236-byte WP01 V7 record");
+    leveltime+=1000;check(P_WeakpointLoad(saved.data(),saved.size())==saved.size(),"V7 injury trailer loads");
     check(P_WeakpointImmobilized(&target),"remaining immobilization survives save/load");
     leveltime+=35;check(!P_WeakpointImmobilized(&target),"immobilization expires at 35 tics");
     e=event(WP_ROCKET_DIRECT,WP_LEGS,4);P_WeakpointApply(&e);check(!P_WeakpointImmobilized(&target),"cooldown starts after immobilization ends");
@@ -206,6 +213,62 @@ static void injuriesAndSaves() {
     for(int i=0;i<1000;++i){mobj_t projectile{};P_WeakpointProjectileSpawn(&projectile,&source,WP_ROCKET_DIRECT);P_WeakpointForget(&projectile);}
     P_WeakpointForget(&plasma);check(P_WeakpointRuntimeCount()==0,"repeated projectile lifecycles do not leak records");
     p_wp_balance.aimChance=oldAim;p_wp_balance.legChance=oldLeg;
+}
+static void hazardSaves() {
+    constexpr size_t kindOffset=8+236,ageOffset=kindOffset+4;
+    struct CorpseCase {hazard_kind_t kind;bool expired;};
+    const CorpseCase cases[]={{HAZARD_ACID,false},{HAZARD_LAVA,false},{HAZARD_ACID,true}};
+    for(const auto &[kind,expired]:cases) {
+        // Record the corpse after the ordinary death path has cleared live state.
+        // Exercise both a pending dissolution and a fully aged acid corpse.
+        reset(MT_TROOP);
+        target.health=0;target.tics=-1;target.flags=MF_CORPSE;
+        P_WeakpointDied(&target);
+        P_HazardRecordDeath(&target,kind);
+        const int age=expired?ACID_DISSOLVE_TICS:47;
+        leveltime+=age+(expired?30:0);
+
+        std::vector<unsigned char> saved(P_WeakpointSave(nullptr));
+        check(P_WeakpointSave(saved.data())==saved.size()&&readLE32(saved,0)==8&&
+              readLE32(saved,4)==1&&saved.size()==16+244,"hazard corpse writes one 244-byte WP01 V8 record");
+        check(readLE32(saved,kindOffset)==uint32_t(kind)&&readLE32(saved,ageOffset)==uint32_t(age),
+              "V8 stores the hazard kind and clamped elapsed age");
+        leveltime+=1000;
+        check(P_WeakpointLoad(saved.data(),saved.size())==saved.size(),"V8 corpse trailer loads");
+        check(bool(P_HazardAcidCorpse(&target))==(kind==HAZARD_ACID)&&
+              bool(P_HazardLavaCorpse(&target))==(kind==HAZARD_LAVA),"V8 restores the original hazard identity");
+        check(P_HazardDeathAge(&target)==age&&bool(P_HazardDissolved(&target))==expired,
+              "V8 restores elapsed age and acid dissolution state after time has advanced");
+        if(kind==HAZARD_LAVA) {
+            leveltime+=ACID_DISSOLVE_TICS;
+            check(P_HazardDeathAge(&target)==ACID_DISSOLVE_TICS&&!P_HazardDissolved(&target),
+                  "a fully aged lava corpse never follows acid dissolution");
+        }
+        if(kind!=HAZARD_ACID||expired)continue;
+        target.tics=1;
+        leveltime+=ACID_DISSOLVE_TICS-age;
+        check(!P_HazardDissolved(&target),"acid dissolution waits for a settled corpse");
+        target.tics=-1;
+        check(P_HazardDissolved(&target),"loaded acid corpse finishes dissolving at the original age boundary");
+
+        check(P_WeakpointLoad(saved.data(),saved.size()-1)==0&&P_WeakpointRuntimeCount()==0,
+              "truncated V8 footer is rejected");
+        auto shortRecord=saved;
+        shortRecord.erase(shortRecord.begin()+ageOffset);
+        const uint32_t shortSize=uint32_t(shortRecord.size());
+        for(size_t i=0;i<4;++i)shortRecord[shortSize-8+i]=static_cast<unsigned char>(shortSize>>(8*i));
+        check(P_WeakpointLoad(shortRecord.data(),shortRecord.size())==shortSize&&P_WeakpointRuntimeCount()==0,
+              "V8 with a valid footer and a partial record is ignored");
+        auto invalidKind=saved;
+        invalidKind[kindOffset]=0xff;
+        check(P_WeakpointLoad(invalidKind.data(),invalidKind.size())==invalidKind.size()&&
+              !P_HazardAcidCorpse(&target)&&!P_HazardLavaCorpse(&target),"unknown V8 hazard kind is ignored");
+        auto excessiveAge=saved;
+        for(size_t i=0;i<4;++i)excessiveAge[ageOffset+i]=0xff;
+        check(P_WeakpointLoad(excessiveAge.data(),excessiveAge.size())==excessiveAge.size()&&
+              P_HazardAcidCorpse(&target)&&P_HazardDeathAge(&target)==ACID_DISSOLVE_TICS&&
+              P_HazardDissolved(&target),"excessive serialized V8 age clamps to dissolution time");
+    }
 }
 static int notifications=0;
 static void bleedingAndFrenzy() {
@@ -463,6 +526,7 @@ static void severeCriticalRules() {
 }
 int main() {
     matrix();eligibility();energyAndRockets();discharge();injuriesAndSaves();bleedingAndFrenzy();survivalRules();eyeInjuryRules();elementalRules();elemental2Rules();spatialAcquisition();
+    hazardSaves();
     severeCriticalRules();
     int original=p_wp_balance.heavyHead;
     check(P_WeakpointReadBalance("wp_heavy_head",190)&&p_wp_balance.heavyHead==190,"documented balance key loads");

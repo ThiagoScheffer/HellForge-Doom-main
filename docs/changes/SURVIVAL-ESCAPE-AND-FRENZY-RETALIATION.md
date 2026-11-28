@@ -109,13 +109,17 @@ to combat after the timeout.
 
 ## Persistence and focused verification
 
-The WP01 trailer writes **V7, 236-byte records**. It preserves the V6 220-byte prefix
-and appends the remaining search deadline, danger reference, current hostile opponent
-and retaliation-missile opponent. References use serialized actor indices, not pointers.
-Readers retain V1–V6 support; older pursuits receive a bounded initial search window.
-V7 restores the precise remaining window, including targetless searching. Raw actor
-layout and normal death/boss processing are unchanged. Original older executables
-cannot restore the new V7 status fields.
+The WP01 trailer normally writes **V7 with 236-byte records**. V7 extends the
+220-byte V6 prefix with the remaining search deadline, danger reference, current
+hostile opponent and retaliation-missile opponent. It restores the precise
+remaining window, including targetless searching. Actor references use serialized
+thinker indices, and pursuits from older versions receive a bounded initial window.
+
+If a serialized actor has hazard-death state, the trailer writes **V8 with
+244-byte records**. The eight-byte extension stores the hazard kind and elapsed
+corpse age. The loader restores this state for supported acid and lava corpses and
+bounds the age to the acid dissolution duration. It still reads V1–V7. The original
+Doom actor save structure and normal death and boss processing are unchanged.
 
 Built Release targets: `doom`, `doom-weakpoints-tests`, `doom-survival-update-tests`.
 The combat-rule binary passed 571 checks, including old-format reading and default-off

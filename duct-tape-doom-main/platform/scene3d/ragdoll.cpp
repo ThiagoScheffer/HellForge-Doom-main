@@ -23,6 +23,9 @@
 #include <new>
 #include "../../linuxdoom-1.10/p_digwall.h"
 #include "../../linuxdoom-1.10/p_solid.h"
+extern "C" {
+#include "../../linuxdoom-1.10/p_local.h"
+}
 
 namespace doom3d {
 constexpr float dollGravity=0.45f;  // units per tic per tic: 1.5x earth's at a body's scale, so throws read snappy (at earth's 0.3 a hard throw flew flat at chest height for half a second); Doom's 1 drops a body in 8 tics
@@ -701,6 +704,11 @@ struct Ragdoll {
 };
 
 static std::unordered_map<const mobj_t*,Ragdoll> dolls;
+// Some BLOCKMAPs omit linedefs, and a diagonal's bounding box can cover
+// cells the line never touches. Keep only the missing bbox entries.
+static std::vector<std::vector<int>> missingWallLines;
+static unsigned wallMapSerial=0;
+static bool wallMapPrepared=false;
 static BodyPoseBudget poseBudget;
 static const Ragdoll *nextDeferred=nullptr;
 static unsigned dollOrder=0;
@@ -786,6 +794,7 @@ void forgetRagdoll(const mobj_t *thing) {
 void ragdollsShutdown() {
     for(auto &entry:dolls)dropCard(entry.second);
     dolls.clear();reliefsShutdown();
+    missingWallLines.clear();wallMapPrepared=false;
     poseBudget={};nextDeferred=nullptr;dollOrder=cardCacheHits=cardDeferred=0;previousCardTic=-1;
 }
 
@@ -805,8 +814,67 @@ static const Relief *reliefOfState(int state) {
     int side=frameLump(state,2,&flip),back=frameLump(state,4,&backFlip);
     return reliefFor(frameLump(state,0),side,flip,back,backFlip);
 }
+struct WallBounds {float left,right,bottom,top;};
+struct WallCells {int left,right,bottom,top;};
+
+static int64_t wallBlock(float coordinate,fixed_t origin) {
+    return (int64_t(double(coordinate)*FRACUNIT)-origin)>>MAPBLOCKSHIFT;
+}
+
+static WallCells wallCells(const WallBounds &bounds) {
+    auto cell=[](float coordinate,fixed_t origin,int count) {
+        return int(std::clamp<int64_t>(wallBlock(coordinate,origin),0,count-1));
+    };
+    return {cell(bounds.left,bmaporgx,bmapwidth),cell(bounds.right,bmaporgx,bmapwidth),
+            cell(bounds.bottom,bmaporgy,bmapheight),cell(bounds.top,bmaporgy,bmapheight)};
+}
+
+static bool wallBlockmapAvailable() {
+    return lines&&numlines>0&&blockmap&&blockmaplump&&blockmap==blockmaplump+4&&
+           bmapwidth>0&&bmapheight>0&&int64_t(bmapwidth)*bmapheight<=INT_MAX;
+}
+
+static void prepareWallMap() {
+    if(wallMapPrepared&&wallMapSerial==r_levelserial)return;
+    missingWallLines.clear();
+    if(!wallBlockmapAvailable())return;
+    wallMapSerial=r_levelserial;
+    wallMapPrepared=true;
+
+    // Keep preparation bounded even for maps with many long diagonals.
+    constexpr int64_t maxEntries=1<<20;
+    int64_t entries=int64_t(bmapwidth)*bmapheight;
+    if(entries+numlines>maxEntries)return;
+    std::vector<WallCells> coverage;
+    coverage.reserve(numlines);
+    for(int i=0;i<numlines;++i) {
+        const auto &box=lines[i].bbox;
+        WallCells cells=wallCells({units(box[BOXLEFT]),units(box[BOXRIGHT]),
+                                   units(box[BOXBOTTOM]),units(box[BOXTOP])});
+        entries+=int64_t(cells.right-cells.left+1)*(cells.top-cells.bottom+1);
+        if(entries>maxEntries)return;
+        coverage.push_back(cells);
+    }
+    missingWallLines.resize(size_t(bmapwidth)*bmapheight);
+    for(int i=0;i<numlines;++i) {
+        const auto &cells=coverage[i];
+        for(int y=cells.bottom;y<=cells.top;++y)
+            for(int x=cells.left;x<=cells.right;++x)
+                missingWallLines[y*bmapwidth+x].push_back(i);
+    }
+    std::vector<int> listed(numlines,-1);
+    for(int cell=0;cell<int(missingWallLines.size());++cell) {
+        // The level loader validates offsets, line indices and terminators.
+        for(auto *id=blockmaplump+blockmap[cell];*id!=-1;++id)listed[*id]=cell;
+        auto &missing=missingWallLines[cell];
+        missing.erase(std::remove_if(missing.begin(),missing.end(),
+            [&](int id){return listed[id]==cell;}),missing.end());
+    }
+}
+
 void prepareRagdolls() {
     if(!ragdollDeathsEnabled(settings))return;
+    prepareWallMap();
     for(int type=0;type<NUMMOBJTYPES;++type)
         if(mobjinfo[type].flags&MF_COUNTKILL)reliefOfState(mobjinfo[type].painstate);
 }
@@ -814,22 +882,69 @@ void prepareRagdolls() {
 // Walls and steps within reach of the body: one-sided lines, and two-sided
 // ones whose far floor stands over 16 units above the body's (a step it
 // can't lie across) or whose opening is too low to lie through.
-static std::vector<Wall> wallsNear(const mobj_t &thing,float reach) {
+struct WallQuery {
+    WallBounds bounds;
+    std::vector<const line_t*> candidates;
+
+    bool overlaps(const line_t &line) const {
+        return units(line.bbox[BOXLEFT])<=bounds.right&&units(line.bbox[BOXRIGHT])>=bounds.left&&
+               units(line.bbox[BOXBOTTOM])<=bounds.top&&units(line.bbox[BOXTOP])>=bounds.bottom;
+    }
+};
+static WallQuery *activeWallQuery=nullptr;
+
+static boolean collectWallLine(line_t *line) {
+    if(activeWallQuery->overlaps(*line))activeWallQuery->candidates.push_back(line);
+    return true;
+}
+
+static std::vector<Wall> wallsNear(const mobj_t &thing,float reach,bool &noBoundary) {
     std::vector<Wall> out;
-    float x=units(thing.x),y=units(thing.y),floor=units(thing.floorz);
-    for(int i=0;i<numlines;++i) {
-        const line_t &line=lines[i];
-        if(units(line.bbox[BOXLEFT])>x+reach||units(line.bbox[BOXRIGHT])<x-reach||
-           units(line.bbox[BOXBOTTOM])>y+reach||units(line.bbox[BOXTOP])<y-reach)continue;
+    const float x=units(thing.x),y=units(thing.y),floor=units(thing.floorz);
+    WallQuery query{{x-reach,x+reach,y-reach,y+reach},{}};
+    auto classify=[&](const line_t &line) {
         float top=1e9f;
         if(line.backsector) {
             float lo=std::max(units(line.frontsector->floorheight),units(line.backsector->floorheight));
             float hi=std::min(units(line.frontsector->ceilingheight),units(line.backsector->ceilingheight));
-            if(hi-lo>=16&&lo-floor<=16)continue;
+            if(hi-lo>=16&&lo-floor<=16)return;
             top=hi-lo<16?1e9f:lo-floor;
         }
         out.push_back({units(line.v1->x),units(line.v1->y),units(line.v2->x),units(line.v2->y),top,!line.backsector});
+    };
+    noBoundary=false;
+    prepareWallMap();
+    if(!wallBlockmapAvailable()||missingWallLines.empty()||validcount==INT_MAX) {
+        if(lines)for(int i=0;i<numlines;++i)if(query.overlaps(lines[i]))classify(lines[i]);
+        return out;
     }
+
+    const auto &bounds=query.bounds;
+    const WallCells cells=wallCells(bounds);
+    {
+        struct RestoreQuery {
+            WallQuery *previous;
+            ~RestoreQuery(){activeWallQuery=previous;}
+        } restore{activeWallQuery};
+        activeWallQuery=&query;
+        ++validcount;
+        for(int by=cells.bottom;by<=cells.top;++by)
+            for(int bx=cells.left;bx<=cells.right;++bx) {
+                P_BlockLinesIterator(bx,by,collectWallLine);
+                for(int id:missingWallLines[by*bmapwidth+bx]) {
+                    auto &line=lines[id];
+                    if(line.validcount==validcount)continue;
+                    line.validcount=validcount;
+                    collectWallLine(&line);
+                }
+            }
+    }
+    // Collision resolution is sequential, so keep the old linedef order.
+    std::sort(query.candidates.begin(),query.candidates.end());
+    for(const auto *line:query.candidates)classify(*line);
+    noBoundary=query.candidates.empty()&&
+               wallBlock(bounds.left,bmaporgx)>=0&&wallBlock(bounds.right,bmaporgx)<bmapwidth&&
+               wallBlock(bounds.bottom,bmaporgy)>=0&&wallBlock(bounds.top,bmaporgy)<bmapheight;
     return out;
 }
 // Whether a to b crosses a wall's line.
@@ -839,16 +954,51 @@ static bool crosses(float ax,float ay,float bx,float by,const Wall &w) {
     float d3=turn(ax,ay,bx,by,w.ax,w.ay),d4=turn(ax,ay,bx,by,w.bx,w.by);
     return ((d1>0)!=(d2>0))&&((d3>0)!=(d4>0));
 }
+
+// Require a single BSP leaf as well as a boundary-free BLOCKMAP rectangle.
+// A BSP partition can extend beyond its linedef, including into void space.
+static bool oneFloorSubsector(const mobj_t &thing,float reach) {
+    const float x=units(thing.x),y=units(thing.y);
+    const int64_t left=int64_t(double(x-reach)*FRACUNIT),right=int64_t(double(x+reach)*FRACUNIT);
+    const int64_t bottom=int64_t(double(y-reach)*FRACUNIT),top=int64_t(double(y+reach)*FRACUNIT);
+    if(left<INT32_MIN||right>INT32_MAX||bottom<INT32_MIN||top>INT32_MAX)return false;
+    if(!numnodes)return true;
+
+    int index=numnodes-1;
+    while(!(index&NF_SUBSECTOR)) {
+        auto &node=nodes[index];
+        if(node.dx&&node.dy) {
+            // Within one sign region, R_PointOnSide either uses the same
+            // sign shortcut everywhere or compares two monotonic products.
+            const int64_t dx0=left-node.x,dx1=right-node.x;
+            const int64_t dy0=bottom-node.y,dy1=top-node.y;
+            if(dx0<INT32_MIN||dx1>INT32_MAX||dy0<INT32_MIN||dy1>INT32_MAX||
+               (dx0<0)!=(dx1<0)||(dy0<0)!=(dy1<0))return false;
+        }
+        const int side=R_PointOnSide(fixed_t(left),fixed_t(bottom),&node);
+        if(R_PointOnSide(fixed_t(left),fixed_t(top),&node)!=side||
+           R_PointOnSide(fixed_t(right),fixed_t(bottom),&node)!=side||
+           R_PointOnSide(fixed_t(right),fixed_t(top),&node)!=side)return false;
+        index=node.children[side];
+    }
+    return true;
+}
+
 // The floors round the kill: each cell's sector, sampled once (FloorGrid). A cell whose middle lies
 // behind a solid wall (one-sided, or an opening too low to lie through) from the body samples whatever
 // room is on the far side, another floor: it takes the body's own sector instead, or a ledge or pit
 // up to a cell wide hugged the wall and snagged or swallowed limbs falling against it.
-static FloorGrid floorsNear(const mobj_t &thing,const std::vector<Wall> &walls,float reach) {
+static FloorGrid floorsNear(const mobj_t &thing,const std::vector<Wall> &walls,float reach,bool noBoundary) {
     FloorGrid g;
     float tx=units(thing.x),ty=units(thing.y);
     g.size=(int)(2*reach/floorCell);g.x0=tx-reach;g.y0=ty-reach;
-    g.cells.resize((size_t)g.size*g.size);
     const sector_t *own=R_PointInSubsector(thing.x,thing.y)->sector;
+    const size_t count=size_t(g.size)*g.size;
+    if(noBoundary&&oneFloorSubsector(thing,reach)) {
+        g.cells.assign(count,own);
+        return g;
+    }
+    g.cells.resize(count);
     std::vector<const Wall*> solid;
     for(const Wall &w:walls)if(w.top>=1e9f)solid.push_back(&w);
     for(int j=0;j<g.size;++j)for(int i=0;i<g.size;++i) {
@@ -1057,8 +1207,9 @@ bool startRagdoll(const mobj_t &thing,float dx,float dy,float speed,float side,f
     doll.projectionReference=doll.p[P_SPINE];
     if(doll.mirror)doll.projectionReference.x=-doll.projectionReference.x;
     doll.order=++dollOrder;
-    doll.walls=wallsNear(thing,doll.reach);
-    doll.floors=floorsNear(thing,doll.walls,doll.reach);
+    bool noBoundary;
+    doll.walls=wallsNear(thing,doll.reach,noBoundary);
+    doll.floors=floorsNear(thing,doll.walls,doll.reach,noBoundary);
     doll.gx=doll.ox-doll.floors.x0;doll.gy=doll.oy-doll.floors.y0;doll.gz=units(thing.z);
     doll.nearWalls=wallsHere(doll);doll.walls.clear();doll.walls.shrink_to_fit();
     for(int n=0;n<DOLL_POINTS;++n)doll.centre[0]+=doll.p[n].x/DOLL_POINTS,doll.centre[1]+=doll.p[n].y/DOLL_POINTS;

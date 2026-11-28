@@ -50,7 +50,7 @@ Aggression grants deterministic extra passes through existing chase/attack-decis
 
 Tier two emits heavier droplets and occasional pain vocals; tier three adds more frequent/larger loss and limited pooling under stationary monsters. Vocals are cooldown-limited (3 s / 2 s by default) and never restart an animation. Visual blood uses existing budgets/settings. Tier-three pooling is bounded floor-splat accumulation, not a new fluid simulation. Bleed ticks preserve normal deaths and original player attribution, including after source-body replacement and save/load. Disabling bleeding immediately cancels damage, severity, slowing, aggression and vocal timers.
 
-> **Current survival update:** [Escape, life hunting and frenzy retaliation](SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md) supersedes the original feeding-only matrix and timeout behavior below. Cacodemons/Pinkies now use a ten-second search window with retreat and faster walking; Arch-viles can hunt living prey. Current status saves use V7. Earlier evidence and balance history remain preserved here.
+> **Current survival update:** [Escape, life hunting and frenzy retaliation](SURVIVAL-ESCAPE-AND-FRENZY-RETALIATION.md) supersedes the original feeding-only matrix and timeout behavior below. Cacodemons/Pinkies now use a ten-second search window with retreat and faster walking; Arch-viles can hunt living prey. Earlier evidence and balance history remain preserved here.
 
 ## Feeding behavior and monster matrix
 
@@ -99,6 +99,8 @@ All balance values below use the existing validated `wp_` graphics-config reader
 | wp_metal_spark_scale / wp_head_blood_scale | 175 / 175 | 100â€“300 percent |
 | wp_head_wall_reach / wp_head_wall_marks | 64 / 3 | 1â€“96 / 0â€“3 |
 
-The shared trailer writes **version 3, 136-byte records**, preserving the existing boundary marker and v1/v2 prefixes. It reads v1 (60-byte), v2 (84-byte) and legacy saves without a trailer. Old flat bleeds become tier one. New state includes tier, discharge identifier, next tick/expiry, original actor/player attribution, vocal/opportunity bookkeeping, feeding phase/target/previous target/timers and no-double-recovery corpse metadata. Actor references use serialized thinker indices and player attribution has a bounded player-slot fallback. The native serialized actor layout is unchanged.
+The current WP01 trailer uses **V7 with 236-byte records** for ordinary saves. When a serialized actor has hazard-death state, it writes **V8 with 244-byte records**. The eight added bytes hold the hazard kind and elapsed corpse age for supported acid and lava corpses. The loader still reads V1–V7 and accepts legacy saves without the trailer. Actor references use serialized thinker indices. The original Doom actor save structure and normal death processing are unchanged.
+
+This release originally added **V3 with 136-byte records**. It preserved the V1/V2 prefixes and promoted old flat bleeds to tier one. V3 added bleed tier, discharge identifier, tick and expiry times, actor/player attribution, and feeding state and timers. It also recorded whether a corpse had already awarded feeding recovery.
 
 Death, removal, resurrection, respawn and level transitions clear relevant status/reference state. Runtime targets are released before vertical movement can follow removed food. No UI toggle adds gameplay random draws. See [verification, captures, changed-file inventory and limitations](MONSTER-SURVIVAL-AI-TESTS.md).
