@@ -2,11 +2,15 @@
    once, in settings_panel.cpp. */
 #include "internal.h"
 #include "../settings_panel.h"
+#include "../performance_trace.h"
 #include <cerrno>
 #include <fstream>
 #include <sstream>
 extern "C" { extern int screenblocks,detailLevel; }
 extern "C" void AM_SetEnhancedAutomap(int enabled);
+extern "C" {
+#include "d_main.h"
+}
 
 namespace doom3d {
 const char *graphicsConfig="graphics.cfg";
@@ -51,7 +55,29 @@ static bool saveSettings() {
     SDL_RemovePath(temporary.c_str());
     return saveFailure(reason);
 }
-void settingsChanged() {AM_SetEnhancedAutomap(settings.enhancedAutomap);applySettings();syncWallAmbienceSettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;}
+void applyPerformanceTraceSettings() {
+    static bool wasEnabled=false;
+    const bool enabled=settings.accelerated&&settings.performanceTrace;
+    if(!enabled&&!wasEnabled)return;
+    const performance::Config config{settings.performanceTraceTarget,settings.performanceTraceMode,
+        settings.performanceTraceDuration,settings.performanceTraceDetail!=0,settings.performanceTraceAutoExport!=0};
+    performance::configure(enabled,config,settingsSerial,serializeOptions(settings));
+    if(enabled&&!wasEnabled) {
+        auto basename=[](const char *path) {
+            if(!path)return std::string{};
+            std::string name=path;
+            return name.substr(name.find_last_of("/\\")+1);
+        };
+        std::string addons;
+        for(int i=1;i<MAXWADFILES&&wadfiles[i];++i){
+            if(!addons.empty())addons+='\n';
+            addons+=basename(wadfiles[i]);
+        }
+        performance::files(basename(wadfiles[0]).c_str(),std::move(addons));
+    }
+    wasEnabled=enabled;
+}
+void settingsChanged() {AM_SetEnhancedAutomap(settings.enhancedAutomap);applySettings();syncWallAmbienceSettings();R_SetViewSize(screenblocks,detailLevel);saveSettings();tickTime=0;++settingsSerial;applyPerformanceTraceSettings();}
 } // namespace doom3d
 
 #ifdef DOOM_TEST_DRIVER

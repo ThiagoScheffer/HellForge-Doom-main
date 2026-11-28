@@ -424,7 +424,7 @@ float materialEmissionGain(const Image &image);
 
 // geometry.cpp
 void quad(std::vector<Vertex> &out,Vertex a,Vertex b,Vertex c,Vertex d);
-void geometry(const Uniforms &camera,float fraction);
+void geometry(const Uniforms &camera,float fraction,performance::Frame *trace=nullptr);
 
 // shadows.cpp
 struct RagdollCard;

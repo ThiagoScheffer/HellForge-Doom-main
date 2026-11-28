@@ -106,6 +106,19 @@ ctest --test-dir build -C Release -E "^bigmap-" --output-on-failure
 Use `-verifybakecache` with an isolated cache to compare restored channels to a reference bake.
 Keep `build/Release/doom.pdb` with the matching engine build for crash analysis. See [reload/cache details](docs/changes/RELOAD-LIGHTING-CACHE.md).
 
+## Performance Hotspot Tracer
+
+Open **F4 → Performance → Diagnostics**, enable **Performance Tracer**, and
+apply the settings. Set Target FPS to match the pacing you expect. Automatic
+export writes completed incidents locally. **Export Performance Report** saves
+retained incidents and recent frames, including any incident in progress.
+Reports are in `Diagnostics/Performance` under the game's working directory,
+normally the Hellforge settings and save folder.
+
+The tracer records CPU timings and swapchain waits. GPU execution time is
+unavailable in the bundled SDL GPU API. Run the focused synthetic test with
+`ctest --test-dir build -C Release -R "^performance-trace$" --output-on-failure`.
+
 ## Monster performance diagnostics and current controls
 
 The normal launcher build explicitly sets `DOOM_MONSTER_PROFILING=OFF`,

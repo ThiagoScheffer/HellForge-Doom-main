@@ -4,6 +4,7 @@
  * (with its Settings member) is all it takes to show, load and save it. */
 #ifndef DOOM_SETTINGS_PANEL_H
 #define DOOM_SETTINGS_PANEL_H
+#include <string>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -50,6 +51,7 @@ void readOption(Settings &s,const char *key,double value);
 // Blood) gets them from its old switches.
 void finishReading(Settings &s);
 void writeOptions(FILE *file,Settings &s);
+std::string serializeOptions(Settings &s);
 // Switches off the effects the game does without (Game_HasEffect).
 void fitGame(Settings &s);
 }

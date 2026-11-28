@@ -2,6 +2,7 @@
 /* The visible world each frame: leaf visibility, walls, flats and things
    batched per texture. */
 #include "internal.h"
+#include "../performance_trace.h"
 #include "../decoration_ambience_rules.h"
 #include "frame_workers.h"
 #include "../sprite_frustum.h"
@@ -59,6 +60,10 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             tex = texturetranslation[tex];
             wallImage(tex);
         }
+        // Span heights are the ones used below to emit vertices. Emitter
+        // collection above also runs for spans outside the camera.
+        if (cullWorld && worldFrustum.outside3D(wallBounds[&line - lines], bottom, top))
+            return;
         bool translucent = false;
 #ifdef DOOM_BOOM_SECTORS
         translucent = span == 3 && line.tranlump && tex >= 0;
@@ -345,9 +350,13 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                             skyOutput(sector).push_back({p.x, p.y, z});
                     continue;
                 }
+                float z = visual == sector ? sectorHeight(sector, ceiling) : units(ceiling ? visual->ceilingheight : visual->floorheight);
+                // Sky faces use their extended heights above. Only test
+                // ordinary flats with the height this frame will submit.
+                if (cullWorld && support < 0 && worldFrustum.outside3D(floorBounds[i], z, z))
+                    continue;
                 int lump = firstflat + flattranslation[flat];
                 lumpImage(lump, true);
-                float z = visual == sector ? sectorHeight(sector, ceiling) : units(ceiling ? visual->ceilingheight : visual->floorheight);
                 const sector_t *lit = support >= 0 ? &sectors[support] : sector;
 #ifdef DOOM_BOOM_SECTORS
                 int lightSector = ceiling ? visual->ceilinglightsec : visual->floorlightsec;
@@ -1250,7 +1259,7 @@ static float floorOverhang(const mobj_t*,int,const Image&);
                     addEnemyShadow(*self, lumpImage(lump, false), lump, sf.flip[rotation], x, y, z, camera, &light, true);
                 }
     }
-    void geometry(const Uniforms &camera, float fraction)
+    void geometry(const Uniforms &camera, float fraction, performance::Frame *trace)
     {
         MP_AUTO(MP_GEOMETRY);
         const bool visibilityTrace=M_CheckParm((char*)"-profileworldvisibility")!=0;
@@ -1322,15 +1331,22 @@ static float floorOverhang(const mobj_t*,int,const Image&);
             buildSolidMapMesh();
         }
         timing(4);
-        if(visibilityTrace||profile.enabled) {
+        if(visibilityTrace||profile.enabled||trace) {
             size_t triangles=skyVertices.size()/3;
             for(const auto &b:batches)triangles+=b.second.size()/3;
             for(const auto &b:transferredSkies)triangles+=b.second.size()/3;
             for(const auto &b:translucentWorld)triangles+=b.vertices.size()/3;
-            profile.frame.worldSubsectors=processedLeaves;profile.frame.worldRejectedSubsectors=rejectedLeaves;
-            profile.frame.worldLines=processedLines;profile.frame.worldRejectedLines=rejectedLines;
-            profile.frame.worldTriangles=(int)triangles;
-            profile.frame.worldGeometryMs=(SDL_GetTicksNS()-visibilityStart)/1e6;
+            if(visibilityTrace||profile.enabled) {
+                profile.frame.worldSubsectors=processedLeaves;profile.frame.worldRejectedSubsectors=rejectedLeaves;
+                profile.frame.worldLines=processedLines;profile.frame.worldRejectedLines=rejectedLines;
+                profile.frame.worldTriangles=(int)triangles;
+                profile.frame.worldGeometryMs=(SDL_GetTicksNS()-visibilityStart)/1e6;
+            }
+            if(trace) {
+                trace->triangles=int(triangles);
+                trace->subsectors=int(processedLeaves);trace->rejectedSubsectors=int(rejectedLeaves);
+                trace->lines=int(processedLines);trace->rejectedLines=int(rejectedLines);
+            }
             if(visibilityTrace)fprintf(stderr,"World visibility tic %d: enabled %d subsectors %u rejected %u lines %u rejected %u triangles %zu geometry %.3f ms\n",
                 gametic,cullWorld,processedLeaves,rejectedLeaves,processedLines,rejectedLines,triangles,profile.frame.worldGeometryMs);
         }

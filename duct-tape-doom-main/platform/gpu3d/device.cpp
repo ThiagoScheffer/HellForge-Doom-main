@@ -1,6 +1,7 @@
 /* The SDL_gpu device: creation and shutdown, samplers, the fixed textures,
    texture uploads, and the texture hooks the scene builds with (scene3d.h). */
 #include "internal.h"
+#include "../performance_trace.h"
 
 namespace gpu3d {
 SDL_GPUDevice *device;
@@ -207,6 +208,10 @@ static void configurePresentMode(SDL_Window *window,bool profiling) {
         mode=SDL_GPU_PRESENTMODE_VSYNC;SDL_SetGPUSwapchainParameters(device,window,SDL_GPU_SWAPCHAINCOMPOSITION_SDR,mode);
     }
     fprintf(stderr,"GPU presentation: %s.\n",mode==SDL_GPU_PRESENTMODE_MAILBOX?"mailbox (tear-free)":mode==SDL_GPU_PRESENTMODE_IMMEDIATE?"immediate (profiler)":"FIFO vsync");
+    if(!profiling)performance::identify(SDL_GetGPUDeviceDriver(device),
+        SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device),SDL_PROP_GPU_DEVICE_NAME_STRING,nullptr),
+        mode==SDL_GPU_PRESENTMODE_MAILBOX?"mailbox":mode==SDL_GPU_PRESENTMODE_IMMEDIATE?"immediate":"fifo",
+        mode!=SDL_GPU_PRESENTMODE_IMMEDIATE);
 }
 
 int I_Render3DInit(SDL_Window *window) {
@@ -254,11 +259,13 @@ int I_Render3DInit(SDL_Window *window) {
     sceneInit(window);
     applySettings();
     applySampleCount();
+    applyPerformanceTraceSettings();
     fprintf(stderr,"GPU renderer: %s; up to %dx MSAA, native pixels, widescreen and depth-tested 3D.\n",
         SDL_GetGPUDeviceDriver(device),maxSamples);
     return 1;
 }
 void I_Render3DShutdown(void) {
+    performance::shutdown();
     if(device)SDL_WaitForGPUIdle(device);
     sceneShutdown();
     flushUploads();
@@ -276,6 +283,7 @@ void I_Render3DShutdown(void) {
 void I_Render3DProfile(int enabled,unsigned skip) {
     profile.skip=enabled?skip:0;
     if(profile.enabled==(enabled!=0)||!device)return;
+    if(enabled&&settings.performanceTrace)performance::boundary(SDL_GetTicksNS(),"benchmark_started");
     profile.enabled=enabled!=0;
     configurePresentMode(gameWindow,profile.enabled);
 }

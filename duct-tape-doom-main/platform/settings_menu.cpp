@@ -28,6 +28,7 @@ extern void M_OpenLanMenu(void);
 #include "settings_panel.h"
 #include "settings_layout.h"
 #include "game_profile.h"
+#include "performance_trace.h"
 
 using namespace doom3d;
 
@@ -270,7 +271,11 @@ std::vector<std::string> wrap(const std::string &string,int lineWidth,size_t max
 std::string valueText(const Option &option) {
     if(option.arcadeLocked())return "OFF (ARCADE)";
     if(option.kind==OptionKind::Key)return panel.binding&&panel.lines[(size_t)panel.selected].option==&option?"PRESS KEY":*option.flag?SDL_GetScancodeName((SDL_Scancode)*option.flag):"UNBOUND";
-    if(option.kind==OptionKind::Action)return option.action==resetDirectorDraft?"Reset":"Start";
+    if(option.kind==OptionKind::Action) {
+        if(option.action==exportPerformanceReport)return "Export";
+        if(option.action==openPerformanceFolder)return "Open";
+        return option.action==resetDirectorDraft?"Reset":"Start";
+    }
     if(option.kind==OptionKind::Check)return *option.flag?"On":"Off";
     if(option.kind==OptionKind::Choice) {
         for(size_t i=0;i<option.values.size();++i)if(option.values[i]==*option.flag)return option.items[i];
@@ -750,6 +755,36 @@ extern "C" int I_TestSettingsControls(void) {
 }
 
 #ifdef DOOM_TEST_DRIVER
+extern "C" int I_TestPerformanceTracePanel(int step) {
+    if(step==0||step==1||step==3)I_Render3DSettingsMenu();
+    if(!panel.open)return 0;
+    if(step==0) {
+        if(settings.performanceTrace||!selectSetting("performance_trace"))return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        if(settings.performanceTrace||!panel.draft.performanceTrace)return 0;
+        if(!selectSetting("performance_trace_target"))return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_LEFT,0);
+        I_Render3DSettingsKey(SDL_SCANCODE_LEFT,0);
+        if(panel.draft.performanceTraceTarget!=240)return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+        return !panel.open&&settings.performanceTrace&&settings.performanceTraceTarget==240;
+    }
+    if(step==2) {
+        if(!selectSetting("performance_trace"))return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        if(!settings.performanceTrace||panel.draft.performanceTrace)return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_F4,0);
+        return !panel.open&&!settings.performanceTrace;
+    }
+    if(step==3) {
+        if(!selectSetting("performance_trace_export")||selectedOption().kind!=OptionKind::Action)return 0;
+        I_Render3DSettingsKey(SDL_SCANCODE_RETURN,0);
+        I_Render3DSettingsKey(SDL_SCANCODE_F10,0);
+        return !panel.open&&!settings.performanceTrace;
+    }
+    return selectSetting("performance_trace_open")&&selectedOption().kind==OptionKind::Action;
+}
+
 // Drive the actual F4 apply/discard handlers against an isolated -graphics path.
 extern "C" int I_TestSettingsPersistence(int mode) {
     I_Render3DSettingsMenu();

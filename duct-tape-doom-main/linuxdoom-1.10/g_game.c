@@ -481,6 +481,7 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 extern  gamestate_t     wipegamestate;
 
 static int sessionDemoLoad=0;
+unsigned g_saveLoadLevelSerial;
 int G_DemoLoading(void) { return sessionDemoLoad; }
 void G_DoLoadLevel (void)
 {
@@ -1363,6 +1364,7 @@ void G_DoLoadGame (void)
 	R_ExecuteSetViewSize ();
 
     snprintf(lastRecoverySave,sizeof(lastRecoverySave),"%s",savename);
+    g_saveLoadLevelSerial=r_levelserial;
     // draw the pattern into the back screen
     R_FillBackScreen ();
 }

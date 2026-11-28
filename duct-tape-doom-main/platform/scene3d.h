@@ -40,6 +40,7 @@ bool platformReadMask(const char *path,int width,int height,std::vector<float> &
 int gpuMaxSamples();
 
 namespace doom3d {
+namespace performance { struct Frame; }
 constexpr float doomPi=3.14159265358979323846f;
 inline float units(int value) { return value/65536.0f; }
 struct Point { float x,y; };
@@ -262,6 +263,8 @@ struct Settings {
     int combatNotices=1;
     int deathLoadLastSave=0;
     int monsterHibernation=0,swarmDebug=0;
+    int performanceTrace=0,performanceTraceTarget=60,performanceTraceMode=2;
+    int performanceTraceDuration=500,performanceTraceDetail=1,performanceTraceAutoExport=1;
     int spriteFiltering=0;
     int ambushSightReuse=0;
     int fluidWeapons=1,fluidSounds=1,fluidMonsters=1;
@@ -454,7 +457,10 @@ const SkyDepthScene &skyDepthScene(const Image &sky);
 extern std::array<float,3> skyDepthOrigin;
 Image &lumpImage(int lump,bool flat);
 // Builds the camera, layout and (when the world is visible) all geometry and lights.
-FrameView prepareFrame(int width,int height);
+FrameView prepareFrame(int width,int height,performance::Frame *trace=nullptr);
+void applyPerformanceTraceSettings();
+void capturePerformanceView(performance::Frame &frame,const Uniforms &camera);
+void capturePerformanceLights(const performance::Frame &frame);
 // Level loading (loading.cpp): when loadPending, the backend calls
 // runLoading before drawing the frame. It does the frame's level building
 // and bakes while show draws the loading screen (level or other title, the

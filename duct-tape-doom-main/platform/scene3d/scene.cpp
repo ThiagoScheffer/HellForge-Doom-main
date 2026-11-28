@@ -11,6 +11,7 @@ extern "C" int Menu_BrandOpen(void);
 /* The scene's public state, its lifecycle and the per-frame entry points
    (prepareFrame), plus the backend-independent I_Render3D calls. */
 #include "internal.h"
+#include "../performance_trace.h"
 #include "sky_atmosphere.h"
 #include "../audio/ambience_spots.h"
 #include "../decoration_ambience_rules.h"
@@ -763,10 +764,16 @@ static void recordProfile() {
         for(unsigned i=0;i<flashes.count;++i) if(mask[i/32]&(1u<<(i%32))) {++frame.light[i].triangles;++frame.lightTriangles;}
     }
 }
-FrameView prepareFrame(int w,int h) {
+FrameView prepareFrame(int w,int h,performance::Frame *trace) {
     const bool spikes=M_CheckParm((char*)"-profilespikes")!=0;
-    uint64_t diag=spikes?SDL_GetTicksNS():0;double stages[6]={};
-    auto stamp=[&](int n){if(spikes){auto now=SDL_GetTicksNS();stages[n]=(now-diag)/1e6;diag=now;}};
+    uint64_t diag=spikes||trace?SDL_GetTicksNS():0;double stages[6]={};
+    auto stamp=[&](int n){
+        if(!diag)return;
+        const auto now=SDL_GetTicksNS();
+        stages[n]=(now-diag)/1e6;
+        if(trace)trace->preparation[n]=float(stages[n]);
+        diag=now;
+    };
     FrameView view={};Uniforms &camera=view.camera;
     uint64_t prepareStart=profileStart();
     static unsigned profileSerial;
@@ -843,10 +850,15 @@ FrameView prepareFrame(int w,int h) {
         previousLightingModel=model;
         if(loading)loadingLabel("Applying world lighting state");
         const uint64_t reconcileStart=loading?SDL_GetTicksNS():0;
+        const uint64_t traceRelightStart=trace?SDL_GetTicksNS():0;
         relightMovingSectors();
         if(loading)recordBakeReconcile(reconcileStart);
         stamp(0);
         if(settings.sun&&!sunBaked)bakeSun();
+        if(trace) {
+            diag=SDL_GetTicksNS();
+            trace->preparation[performance::Relight]=float((diag-traceRelightStart)/1e6);
+        }
         bool sun=settings.sun&&sunLevel>0;
         for(int c=0;c<3;++c)camera.sun[c]=sun?sunTint[c]:0;
         camera.sun[3]=sun?sunLevel:0;
@@ -963,12 +975,13 @@ FrameView prepareFrame(int w,int h) {
             if(gamemode==commercial)wallImage(skytexture);
         }
         const uint64_t bakeGeometryStart=loading?SDL_GetTicksNS():0;
-        geometry(camera,fraction);
+        geometry(camera,fraction,trace);
         if(loading)recordBakeGeometry(bakeGeometryStart);
         stamp(2);
         profileAdd(profile.frame.geometryMs,geometryStart);
         if(profile.enabled)skipProfiledLights();
         // Surface lights come from this frame's geometry; the bake applies from the next frame.
+        const uint64_t traceBakeStart=trace?SDL_GetTicksNS():0;
         bool rebuiltLights=settings.bakedLights&&lightBakeKey!=lightBakeInputs();
         if(rebuiltLights)bakeLights();
         if(settings.bakedLights&&settings.gridSpriteLight&&lightBakeKey==lightBakeInputs()&&staticSerial!=lightBakeSerial)bakeStaticGrid();
@@ -985,6 +998,10 @@ FrameView prepareFrame(int w,int h) {
         }
         bakedLightsActive=currentFrameLights;
         if(settings.lightFlow&&flowKey!=flowInputs())bakeFlow();
+        if(trace) {
+            diag=SDL_GetTicksNS();
+            trace->preparation[performance::Relight]+=float((diag-traceBakeStart)/1e6);
+        }
         camera.bake[1]=settings.bounce&&bounceKey>=0?bounceStrength:0;
         camera.bake[3]=camera.bake[1]>0?settings.bounceTint:0;
         bool ambient=ambientKey==bakeThingsKey;
@@ -1089,6 +1106,56 @@ FrameView prepareFrame(int w,int h) {
     view.worldX=worldX;view.worldY=worldY;view.worldW=worldW;view.worldH=worldH;
     view.chromaticDisplacement=chromaticDisplacement(fraction);
     return view;
+}
+void capturePerformanceView(performance::Frame &frame,const Uniforms &camera) {
+    if(!worldPending||gamestate!=GS_LEVEL||!players[displayplayer].mo)return;
+    frame.hasView=true;
+    frame.level=r_levelserial;frame.gameTic=gametic;frame.levelTic=leveltime;
+    if(gamemode==commercial)std::snprintf(frame.map,sizeof(frame.map),"MAP%02d",gamemap);
+    else std::snprintf(frame.map,sizeof(frame.map),"E%dM%d",gameepisode,gamemap);
+    const auto *player=players[displayplayer].mo;
+    frame.player[0]=units(player->x);frame.player[1]=units(player->y);frame.player[2]=units(player->z);
+    if(player->subsector)frame.playerSector=int(player->subsector->sector-sectors);
+    std::copy_n(camera.eye,3,frame.eye);
+    const float degrees=float(180/doomPi);
+    frame.yaw=std::atan2(camera.forward[1],camera.forward[0])*degrees;
+    if(frame.yaw<0)frame.yaw+=360;
+    frame.pitch=std::atan2(camera.forward[2],std::hypot(camera.forward[0],camera.forward[1]))*degrees;
+    frame.fovX=2*std::atan(1/camera.projection[0])*degrees;
+    frame.fovY=2*std::atan(1/camera.projection[1])*degrees;
+    auto fixed=[](float value){
+        return fixed_t(std::clamp(double(value)*FRACUNIT,double(INT32_MIN),double(INT32_MAX)));
+    };
+    const auto *leaf=R_PointInSubsector(fixed(camera.eye[0]),fixed(camera.eye[1]));
+    if(leaf&&leaf->sector) {
+        const auto *sector=leaf->sector;
+        frame.subsector=int(leaf-subsectors);
+        frame.cameraSector=int(sector-sectors);
+        std::memcpy(frame.floor,lumpinfo[firstflat+sector->floorpic].name,8);
+        std::memcpy(frame.ceiling,lumpinfo[firstflat+sector->ceilingpic].name,8);
+        frame.floorHeight=units(sector->floorheight);frame.ceilingHeight=units(sector->ceilingheight);
+    }
+    frame.featureFlags=unsigned(camera.flashlightTint[3]);
+    static_assert(I_RENDER3D_LIGHT_KINDS==performance::lightKinds&&maxLights==performance::maxTraceLights);
+    for(unsigned i=0;i<gpuFlashes.count;++i) {
+        ++frame.lights[lightKinds[i]];
+        frame.blockers+=gpuFlashes.lights[i].count;
+        frame.slicedBlockers+=lightSliceCost[i];
+    }
+    if(gpuFlashes.count)frame.slicedBlockers/=gpuFlashes.count;
+    frame.mistVertices=unsigned(mistVertices.size());
+    frame.particleVertices=unsigned(particleVertices.size());
+    frame.fogLights=fogLights.count;
+}
+void capturePerformanceLights(const performance::Frame &frame) {
+    if(!performance::wantsLights(frame))return;
+    std::array<performance::Light,maxLights> values;
+    for(unsigned i=0;i<gpuFlashes.count;++i) {
+        const auto &light=gpuFlashes.lights[i];
+        values[i]={unsigned(lightKinds[i]),light.position[0],light.position[1],light.position[2],light.position[3],
+            light.strength,light.baked,lightSliceCost[i],light.count,lightSources[i]?int(lightSources[i]->type):-1};
+    }
+    performance::lights(frame,values.data(),gpuFlashes.count);
 }
 std::vector<unsigned> hudPixels(const unsigned *pixels) {
     float podiumRect[4];

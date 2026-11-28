@@ -24,7 +24,7 @@ inline std::pair<const char*,const char*> settingLocation(const Option &o,const 
         if(settingIs(k,{"speedrun_hud","speedrun_only","speedrun_background_opacity","speedrun_layout","speedrun_x","speedrun_y","speedrun_anchor","speedrun_player_anchor","speedrun_player_x","speedrun_player_y"}))return {"HUD","Speedrun"};
         return {"HUD","Run stats"};
     }
-    if(settingIs(k,{"fps","swarm_debug"}))return {"Performance","Diagnostics"};
+    if(settingIs(k,{"fps","swarm_debug"})||!strncmp(k,"performance_trace",17))return {"Performance","Diagnostics"};
     if(settingIs(k,{"monster_hibernation","ambush_sight_reuse"}))return {"Performance","Monsters"};
     if(!strcmp(k,"sprite_frustum_filter"))return {"Performance","Visibility"};
     if(!strcmp(tab,"Performance"))return {"Performance","Lights"};

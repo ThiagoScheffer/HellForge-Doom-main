@@ -1,6 +1,7 @@
 #include "../monster_profile.h"
 #include <stdexcept>
 #include <string>
+#include <optional>
 extern "C" {extern int r_photoactive,r_photodof,r_photostyle;extern float r_photofocus;}
 extern "C" int Menu_BrandOpen(void);
 extern "C" float I_PhotoFlash(void);
@@ -9,10 +10,11 @@ extern "C" float I_PhotoFlash(void);
    bloom), then presented with the HUD and the settings panel. */
 #include "internal.h"
 #include "../hud_screen_position.h"
+#include "../performance_trace.h"
 extern "C" int Arcade_PodiumRect(float*);
 extern "C" int Arcade_MenuOpen(void);
 extern "C" int director_view_active;
-extern "C" {extern unsigned r_levelserial;}
+extern "C" {extern unsigned r_levelserial,g_saveLoadLevelSerial;extern boolean menuactive;}
 namespace doom3d {extern GpuTextureRef arcadeRankTexture;}
 
 namespace gpu3d {
@@ -445,42 +447,74 @@ void releaseReflection() {
 using namespace gpu3d;
 void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     MP_AUTO(MP_RENDER);
+    const bool hotspot=settings.accelerated&&settings.performanceTrace&&!profile.enabled;
+    std::optional<performance::Frame> sample;
+    static uint64_t lastHotspotEnd=0;
+    const uint64_t hotspotBegin=hotspot?SDL_GetTicksNS():0;
+    if(hotspot)sample.emplace();
+    else lastHotspotEnd=0;
+    auto elapsed=[](uint64_t start){return float((SDL_GetTicksNS()-start)/1e6);};
     const bool allFrames=M_CheckParm((char*)"-profileallframes")!=0;
     const bool trace=allFrames||M_CheckParm((char*)"-profilespikes")!=0;
     static uint64_t previousEnd=0;
     uint64_t begin=trace?SDL_GetTicksNS():0,mark=begin;
     double stages[5]={};
     auto stage=[&](int n){if(trace){auto now=SDL_GetTicksNS();stages[n]=(now-mark)/1e6;mark=now;}};
+    const auto previousSamples=sampleCount;
     applySampleCount();
+    if(sample&&previousSamples!=sampleCount) {
+        sample->state|=performance::Targets;
+        sample->targets=elapsed(hotspotBegin);
+    }
     // A new level's build and bakes run first, with the loading screen up.
     if(loadPending()) {
+        const uint64_t loadStart=hotspot?SDL_GetTicksNS():0;
         int w=width,h=height;
         if(!colorTexture) {
             int pw=1,ph=1;SDL_GetWindowSizeInPixels(gameWindow,&pw,&ph);
             w=std::max(1,pw*settings.scale/100);h=std::max(1,ph*settings.scale/100);
         }
         runLoading(w,h,showLoading);
+        if(sample) {
+            sample->loading=elapsed(loadStart);
+            sample->state|=performance::Loading;
+        }
     }
     SDL_GPUCommandBuffer *command=SDL_AcquireGPUCommandBuffer(device);
-    if(!command) {fprintf(stderr,"GPU command buffer: %s\n",SDL_GetError());return;}
+    if(!command) {
+        if(sample)performance::boundary(SDL_GetTicksNS(),"command_buffer_unavailable");
+        fprintf(stderr,"GPU command buffer: %s\n",SDL_GetError());return;
+    }
     SDL_GPUTexture *swapchain=nullptr;Uint32 drawableWidth=0,drawableHeight=0;
     // A hidden window (render checks) has no swapchain: the frame is drawn for capture() alone.
-    if(SDL_GetWindowFlags(gameWindow)&SDL_WINDOW_HIDDEN) {
+    const auto windowFlags=SDL_GetWindowFlags(gameWindow);
+    const uint64_t acquireStart=hotspot?SDL_GetTicksNS():0;
+    if(windowFlags&SDL_WINDOW_HIDDEN) {
         int pw=1,ph=1;SDL_GetWindowSizeInPixels(gameWindow,&pw,&ph);drawableWidth=(Uint32)pw;drawableHeight=(Uint32)ph;
     }
     else if(!SDL_WaitAndAcquireGPUSwapchainTexture(command,gameWindow,&swapchain,&drawableWidth,&drawableHeight)||!swapchain) {
-        flushUploads();SDL_SubmitGPUCommandBuffer(command);return;
+        flushUploads();SDL_SubmitGPUCommandBuffer(command);
+        if(sample){performance::boundary(SDL_GetTicksNS(),
+            (windowFlags&SDL_WINDOW_INPUT_FOCUS)?"swapchain_unavailable":"focus_or_swapchain_lost");lastHotspotEnd=0;}
+        return;
     }
     uint64_t frameStart=SDL_GetTicksNS();
     stage(0);
     int w=std::max(1,(int)drawableWidth*settings.scale/100),h=std::max(1,(int)drawableHeight*settings.scale/100);
+    float allocationMs=0;
     if(w!=width||h!=height||!colorTexture) {
+        const uint64_t allocationStart=hotspot?SDL_GetTicksNS():0;
         width=w;height=h;allocateTargets(w,h);
         fprintf(stderr,"GPU resolution: %dx%d (display %ux%u, %d%%).\n",w,h,drawableWidth,drawableHeight,settings.scale);
+        if(sample) {
+            allocationMs=elapsed(allocationStart);
+            sample->targets+=allocationMs;
+            sample->state|=performance::Targets;
+        }
     }
     if(!paletteLUT||((settings.palette||(settings.reflections&&settings.retroReflections))&&worldPending))updatePaletteLUT(palette);
     std::vector<unsigned> overlay=hudPixels(pixels);
-    FrameView view=prepareFrame(w,h);Uniforms &camera=view.camera;
+    FrameView view=prepareFrame(w,h,sample?&*sample:nullptr);Uniforms &camera=view.camera;
     stage(1);
     const bool drawMist=(!mistVertices.empty()||!shaftVertices.empty())&&
         !(profile.enabled&&(profile.skip&I_RENDER3D_SKIP_MIST_DRAW));
@@ -578,10 +612,18 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     // keeps the display's rate even without vsync.
     SDL_GPUCommandBuffer *render=profile.enabled?SDL_AcquireGPUCommandBuffer(device):command;
     if(!render) I_Error((char*)"GPU command buffer: %s",SDL_GetError());
+    const uint64_t uploadStart=hotspot?SDL_GetTicksNS():0;
     { MP_AUTO(MP_GPU_UPLOAD);
     uploadFrame(render,transient,sectorInfo(),palette,overlay,settingsImage);
     }
     stage(2);
+    const uint64_t encodeStart=hotspot?SDL_GetTicksNS():0;
+    if(sample) {
+        sample->acquire=float((frameStart-acquireStart)/1e6);
+        sample->prepare=float((uploadStart-frameStart)/1e6)-allocationMs;
+        sample->prepare=std::max(0.f,sample->prepare);
+        sample->upload=float((encodeStart-uploadStart)/1e6);
+    }
     { MP_AUTO(MP_GPU_ENCODE);
     drawReflection(render,view,camera);
     captureGlassProbes(render,camera);
@@ -590,13 +632,32 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
     drawMainView(render,view,camera,drawMist,msaa,weapons,hud,cross);
     if(camera.materials[1]>0)drawBloom(render,view,camera,weapons);
     }
+    if(sample) {
+        if(worldPending&&reflectionActive)sample->passes|=performance::LiquidReflection;
+        if(glassReflected)sample->passes|=performance::GlassReflection;
+        if(worldPending&&probeAtlas&&!glassCaptures.empty()) {
+            sample->passes|=performance::GlassProbes;
+            sample->probes=unsigned(glassCaptures.size());
+        }
+        if((drawMist||r_photoactive)&&msaa)sample->passes|=performance::MistDepth;
+        if(drawMist)sample->passes|=performance::Mist;
+        if(worldPending)sample->passes|=performance::MainView;
+        if(camera.materials[1]>0)sample->passes|=performance::Bloom;
+    }
     stage(3);
     { MP_AUTO(MP_GPU_SUBMIT);
     if(render!=command)submitProfiled(render,frameStart);
     if(swapchain)present(command,swapchain,view);
+    const uint64_t submitStart=hotspot?SDL_GetTicksNS():0;
     flushUploads();
-    if(screenshotPending||renderCheckDue()) {screenshotPending=false;capture(command,view,(int)drawableWidth,(int)drawableHeight);}
+    const bool captureFrame=screenshotPending||renderCheckDue();
+    if(captureFrame) {screenshotPending=false;capture(command,view,(int)drawableWidth,(int)drawableHeight);}
     else if(!SDL_SubmitGPUCommandBuffer(command)) I_Error((char*)"GPU rendering failed: %s",SDL_GetError());
+    if(sample) {
+        sample->encode=float((submitStart-encodeStart)/1e6);
+        sample->submit=elapsed(submitStart);
+        if(captureFrame)sample->state|=performance::Screenshot;
+    }
     }
     char renderer[64];snprintf(renderer,sizeof(renderer),"%s 3D",SDL_GetGPUDeviceDriver(device));
     if(renderer[0])renderer[0]=(char)toupper((unsigned char)renderer[0]);
@@ -611,6 +672,32 @@ void I_Render3DPresent(const unsigned *pixels,const unsigned *palette) {
         if(previousEnd&&(allFrames||elapsed+outside>16.67))
             fprintf(stderr,"Frame spike tic %d: total %.3f outside %.3f acquire %.3f prepare %.3f upload %.3f draw %.3f submit %.3f ms\n",gametic,elapsed+outside,outside,stages[0],stages[1],stages[2],stages[3],stages[4]);
         previousEnd=SDL_GetTicksNS();
+    }
+    if(sample) {
+        sample->time=SDL_GetTicksNS();
+        if(lastHotspotEnd) {
+            sample->interval=float((sample->time-lastHotspotEnd)/1e6);
+            sample->outside=float((hotspotBegin-lastHotspotEnd)/1e6);
+        }
+        lastHotspotEnd=sample->time;
+        sample->width=w;sample->height=h;
+        sample->outputWidth=int(drawableWidth);sample->outputHeight=int(drawableHeight);
+        sample->samples=1<<int(sampleCount);
+        if(I_Render3DSettingsOpen())sample->state|=performance::Panel;
+        if(menuactive)sample->state|=performance::Menu;
+        if(paused)sample->state|=performance::Paused;
+        bool focused=(windowFlags&SDL_WINDOW_INPUT_FOCUS)!=0;
+#ifdef DOOM_TEST_DRIVER
+        // The unattended integration test can run on a desktop with no
+        // keyboard focus. This does not change presentation or input state.
+        if(M_CheckParm((char*)"-test-performance-trace")&&M_CheckParm((char*)"-test-trace-no-focus"))focused=true;
+#endif
+        if(!focused)sample->state|=performance::Unfocused;
+        if(!swapchain)sample->state|=performance::NoSwapchain;
+        capturePerformanceView(*sample,camera);
+        if(!sample->hasView)sample->state|=performance::NoWorld;
+        performance::submit(*sample,sample->level==g_saveLoadLevelSerial);
+        capturePerformanceLights(*sample);
     }
 }
 

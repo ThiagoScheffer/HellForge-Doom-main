@@ -13,6 +13,7 @@ extern int netgame,demoplayback,demorecording;
 #include "settings_panel.h"
 #include "terror_immersion.h"
 #include "game_profile.h"
+#include "performance_trace.h"
 
 namespace doom3d {
 bool validPeekBinding(int code) {
@@ -101,6 +102,16 @@ void fitGame(Settings &s) {
 }
 
 std::vector<OptionTab> optionTabs(Settings &s) {
+    const auto accelerated=[](const Settings &d){return d.accelerated!=0;};
+    Option exportTrace{};
+    exportTrace.kind=OptionKind::Action;exportTrace.key="performance_trace_export";
+    exportTrace.title="Export Performance Report";exportTrace.action=exportPerformanceReport;
+    exportTrace.tip="Queue a local report of retained incidents and recent frames using the applied settings.";
+    exportTrace.enabled=accelerated;
+    Option openTrace{};
+    openTrace.kind=OptionKind::Action;openTrace.key="performance_trace_open";
+    openTrace.title="Open Diagnostics Folder";openTrace.action=openPerformanceFolder;
+    openTrace.tip="Open the local Diagnostics/Performance directory.";
     std::vector<OptionTab> tabs={
         {"Display",{
             {"Renderer",{
@@ -169,6 +180,20 @@ std::vector<OptionTab> optionTabs(Settings &s) {
             {"Monster performance (experimental)",{
                 check("monster_hibernation","Idle monster hibernation",&s.monsterHibernation,"Reuse unchanged negative idle searches while keeping full physics, collision and state timing. Classic geometry only; disabled in digging/solid modes, patched gameplay, respawn, demos, multiplayer and Arcade."),
                 check("swarm_debug","Swarm diagnostics",&s.swarmDebug,"Print an aggregate monster summary once per second: dormant, awake, reused idle searches, sound wakes and spawns.")}},
+            {"Performance tracer",{
+                check("performance_trace","Enable Performance Tracer",&s.performanceTrace,
+                    "Record frame pacing and location during accelerated gameplay. Changes apply when the panel closes.",accelerated),
+                choice("performance_trace_target","Target FPS",&s.performanceTraceTarget,
+                    {"30","60","90","120","144","240"},{30,60,90,120,144,240},"Frame budget to compare against.",accelerated),
+                choice("performance_trace_mode","Detection",&s.performanceTraceMode,
+                    {"Sustained slowdown","Frame spikes","Both"},{0,1,2},"Which frame-time incidents to capture.",accelerated),
+                choice("performance_trace_duration","Minimum slowdown duration",&s.performanceTraceDuration,
+                    {"250 ms","500 ms","1000 ms"},{250,500,1000},"Time below the sustained slowdown threshold.",accelerated),
+                choice("performance_trace_detail","Capture detail",&s.performanceTraceDetail,
+                    {"Basic","Detailed"},{0,1},"Detailed capture samples active lights during incidents.",accelerated),
+                check("performance_trace_auto_export","Automatic export",&s.performanceTraceAutoExport,
+                    "Queue completed incidents for local export in the background.",accelerated),
+                exportTrace,openTrace}},
             {"Save recovery",{
                 check("death_load_last_save","Load last save on death",&s.deathLoadLastSave,"After dying, press Use to load the last save successfully written or loaded this session. If no usable save is available, restart the map normally. Single player only; disabled in demos and Arcade.")}},
             {"Balance",{
@@ -1038,12 +1063,27 @@ void finishReading(Settings &s) {
     if(readOld[2]&&!readNew[2])s.bloodLevel=!oldBlood[0]?0:oldBlood[1]||oldBlood[2]?2:1;
     for(int g=0;g<3;++g)readOld[g]=readNew[g]=false;
 }
+template<class Write> static void formatOptions(Settings &s,Write write) {
+    eachOption(s,[&](Option &option) {
+        char line[128];
+        if(option.kind==OptionKind::Slider)std::snprintf(line,sizeof(line),
+            !strcmp(option.key,"encounter_random_seed")?"%s %.9g\n":"%s %g\n",option.key,*option.number);
+        else std::snprintf(line,sizeof(line),"%s %d\n",option.key,*option.flag);
+        write(line);
+    });
+}
 void writeOptions(FILE *file,Settings &s) {
     P_WeakpointWriteBalance(file);
-    eachOption(s,[&](Option &option) {
-        if(option.kind==OptionKind::Slider)fprintf(file,!strcmp(option.key,"encounter_random_seed")?"%s %.9g\n":"%s %g\n",option.key,*option.number);
-        else fprintf(file,"%s %d\n",option.key,*option.flag);
-    });
+    formatOptions(s,[&](const char *line){fputs(line,file);});
+}
+std::string serializeOptions(Settings &s) {
+    std::string text;
+    P_WeakpointVisitBalance([](const char *key,int value,void *output){
+        auto &options=*static_cast<std::string*>(output);
+        options+=key;options+=' ';options+=std::to_string(value);options+='\n';
+    },&text);
+    formatOptions(s,[&](const char *line){text+=line;});
+    return text;
 }
 }
 

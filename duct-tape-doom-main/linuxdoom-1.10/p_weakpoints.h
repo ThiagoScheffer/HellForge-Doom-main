@@ -165,6 +165,7 @@ size_t P_WeakpointSave(unsigned char*);
 size_t P_WeakpointLoad(const unsigned char*,size_t);
 int P_WeakpointReadBalance(const char*,double);
 void P_WeakpointWriteBalance(FILE*);
+void P_WeakpointVisitBalance(void (*visit)(const char*,int,void*),void *data);
 size_t P_WeakpointRuntimeCount(void);
 #ifdef __cplusplus
 }

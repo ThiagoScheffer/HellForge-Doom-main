@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<settings source="platform/settings_panel.cpp" source_sha256="1a93cee8b20236a89218ff6ab48f94fe73eab977612348a9d1dde70f3b9ba0f9">
+<settings source="platform/settings_panel.cpp" source_sha256="5e19cb8fc00d22501e17f5ee882b2e61cef3b4fb45fe3cd7f92363095e055038">
   <option key="fullscreen" title="Fullscreen (F11)" category="Display" kind="check" choices="0=Off|1=On" />
   <option key="accelerated" title="Renderer" category="Display" kind="choice" choices="1=Accelerated 3D|0=Classic software" />
   <option key="scale" title="Resolution" category="Display" kind="choice" choices="100=Native (100%)|75=75%|50=50%" />
@@ -32,6 +32,12 @@
   <option key="enhanced_automap" title="Enhanced Automap" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="monster_hibernation" title="Idle monster hibernation" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="swarm_debug" title="Swarm diagnostics" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="performance_trace" title="Enable Performance Tracer" category="Gameplay" kind="check" choices="0=Off|1=On" />
+  <option key="performance_trace_target" title="Target FPS" category="Gameplay" kind="choice" choices="30=30|60=60|90=90|120=120|144=144|240=240" />
+  <option key="performance_trace_mode" title="Detection" category="Gameplay" kind="choice" choices="0=Sustained slowdown|1=Frame spikes|2=Both" />
+  <option key="performance_trace_duration" title="Minimum slowdown duration" category="Gameplay" kind="choice" choices="250=250 ms|500=500 ms|1000=1000 ms" />
+  <option key="performance_trace_detail" title="Capture detail" category="Gameplay" kind="choice" choices="0=Basic|1=Detailed" />
+  <option key="performance_trace_auto_export" title="Automatic export" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="death_load_last_save" title="Load last save on death" category="Gameplay" kind="check" choices="0=Off|1=On" />
   <option key="monster_weapon_drops" title="Monster Weapon Drops" category="Gameplay" kind="choice" />
   <option key="medikit_overflow" title="Medical Supply Recovery" category="Gameplay" kind="choice" choices="0=Classic|1=Medikits only|2=Medikits and Stimpacks" />

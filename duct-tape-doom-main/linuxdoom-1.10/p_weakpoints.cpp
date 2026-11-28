@@ -693,7 +693,14 @@ BalanceKey keys[]={
 int P_WeakpointReadBalance(const char *key,double value) {
     for(auto &k:keys)if(!std::strcmp(key,k.name)){if(std::isfinite(value)&&value==std::floor(value)&&value>=k.low&&value<=k.high)*k.value=(int)value;return 1;}return 0;
 }
-void P_WeakpointWriteBalance(FILE *file){for(auto &k:keys)std::fprintf(file,"%s %d\n",k.name,*k.value);}
+void P_WeakpointVisitBalance(void (*visit)(const char*,int,void*),void *data) {
+    for(const auto &key:keys)visit(key.name,*key.value,data);
+}
+void P_WeakpointWriteBalance(FILE *file) {
+    P_WeakpointVisitBalance([](const char *key,int value,void *data){
+        std::fprintf(static_cast<FILE*>(data),"%s %d\n",key,value);
+    },file);
+}
 
 // Versioned trailer; actor IDs are thinker save order, never native pointers.
 namespace {
